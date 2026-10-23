@@ -55,7 +55,9 @@ fn main() -> Result<()> {
             "--list" => mode = "list",
             "--scrape" => mode = "scrape",
             id if mode == "scrape" && !id.starts_with('-') => only.push(id.to_string()),
-            "--config" => cfg_path = PathBuf::from(args.next().ok_or_else(|| anyhow::anyhow!("--config needs a path"))?),
+            "--config" => {
+                cfg_path = PathBuf::from(args.next().ok_or_else(|| anyhow::anyhow!("--config needs a path"))?)
+            }
             "-h" | "--help" => {
                 print!("{HELP}");
                 return Ok(());
@@ -148,7 +150,12 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, rx: &Receiver<PadEv
 }
 
 /// Hands the terminal to a command, then takes it back.
-fn run_in_terminal(terminal: &mut DefaultTerminal, app: &mut App, rx: &Receiver<PadEvent>, job: TerminalJob) -> Result<()> {
+fn run_in_terminal(
+    terminal: &mut DefaultTerminal,
+    app: &mut App,
+    rx: &Receiver<PadEvent>,
+    job: TerminalJob,
+) -> Result<()> {
     execute!(stdout(), DisableFocusChange, LeaveAlternateScreen)?;
     disable_raw_mode()?;
 
@@ -184,12 +191,11 @@ fn wait_for_any_input(rx: &Receiver<PadEvent>) {
     // Drop anything pressed while the command ran.
     while rx.try_recv().is_ok() {}
     loop {
-        if let Ok(true) = event::poll(Duration::from_millis(30)) {
-            if let Ok(Event::Key(k)) = event::read() {
-                if k.kind == KeyEventKind::Press {
-                    return;
-                }
-            }
+        if let Ok(true) = event::poll(Duration::from_millis(30))
+            && let Ok(Event::Key(k)) = event::read()
+            && k.kind == KeyEventKind::Press
+        {
+            return;
         }
         if let Ok(PadEvent::Action(PadAction::Confirm | PadAction::Back)) = rx.try_recv() {
             return;

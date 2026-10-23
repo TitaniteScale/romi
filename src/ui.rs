@@ -1,6 +1,6 @@
 //! Drawing. Only terminal palette colors and modifiers are used, so romi follows your theme.
 
-use crate::app::{App, Level, Pane, PadState, ViewKind};
+use crate::app::{App, Level, PadState, Pane, ViewKind};
 use crate::state::now;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
@@ -112,7 +112,9 @@ fn draw_header(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         PadState::Connected(name) => Span::styled(format!("● {name} "), Style::new().fg(theme.accent)),
         PadState::Searching => Span::styled("no controller ", Style::new().dim()),
         PadState::Disabled => Span::raw(""),
-        PadState::Unavailable(e) => Span::styled(format!("controller unavailable: {e} "), Style::new().fg(Color::Yellow)),
+        PadState::Unavailable(e) => {
+            Span::styled(format!("controller unavailable: {e} "), Style::new().fg(Color::Yellow))
+        }
     };
     f.render_widget(Paragraph::new(left), area);
     f.render_widget(Paragraph::new(Line::from(pad)).alignment(Alignment::Right), area);
@@ -220,7 +222,8 @@ fn draw_details(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         lines.push(Line::raw(""));
     }
     let m = &game.meta;
-    for (k, v) in [("Developer", &m.developer), ("Genre", &m.genre), ("Released", &m.released), ("Players", &m.players)] {
+    for (k, v) in [("Developer", &m.developer), ("Genre", &m.genre), ("Released", &m.released), ("Players", &m.players)]
+    {
         if let Some(v) = v {
             lines.push(Line::from(vec![label(k), Span::raw(v.clone())]));
         }
@@ -298,7 +301,12 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         f.render_widget(Paragraph::new(" controller and keys paused while playing").dim(), area);
         return;
     }
-    let hint = |k: &str, a: &str| vec![Span::styled(format!(" {k} "), Style::new().fg(theme.accent)), Span::styled(a.to_string(), Style::new().dim())];
+    let hint = |k: &str, a: &str| {
+        vec![
+            Span::styled(format!(" {k} "), Style::new().fg(theme.accent)),
+            Span::styled(a.to_string(), Style::new().dim()),
+        ]
+    };
     let mut spans = Vec::new();
     if matches!(app.pad, PadState::Connected(_)) {
         let (ok, back) = if app.cfg.controller.swap_confirm { ("B", "A") } else { ("A", "B") };
@@ -306,7 +314,9 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             spans.extend(hint(k, a));
         }
     } else {
-        for (k, a) in [("enter", "play"), ("tab", "system"), ("/", "search"), ("f", "fav"), ("r", "random"), ("q", "quit")] {
+        for (k, a) in
+            [("enter", "play"), ("tab", "system"), ("/", "search"), ("f", "fav"), ("r", "random"), ("q", "quit")]
+        {
             spans.extend(hint(k, a));
         }
     }

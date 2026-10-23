@@ -1,7 +1,7 @@
 //! Turning a command template into a running process.
 
-use crate::config::{expand_path, expand_tilde, LaunchMode};
-use anyhow::{bail, Context, Result};
+use crate::config::{LaunchMode, expand_path, expand_tilde};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -48,15 +48,13 @@ pub fn substitute(s: &str, vars: &HashMap<String, String>) -> Result<String> {
 
 impl Launch {
     pub fn prepare(&self) -> Result<Prepared> {
-        let words = shell_words::split(&self.command)
-            .with_context(|| format!("bad quoting in command: {}", self.command))?;
+        let words =
+            shell_words::split(&self.command).with_context(|| format!("bad quoting in command: {}", self.command))?;
         if words.is_empty() {
             bail!("empty command");
         }
-        let argv = words
-            .iter()
-            .map(|w| substitute(w, &self.vars).map(|s| expand_tilde(&s)))
-            .collect::<Result<Vec<_>>>()?;
+        let argv =
+            words.iter().map(|w| substitute(w, &self.vars).map(|s| expand_tilde(&s))).collect::<Result<Vec<_>>>()?;
         let cwd = match &self.cwd {
             Some(c) => Some(expand_path(&substitute(c, &self.vars)?)),
             None => None,
@@ -124,11 +122,7 @@ pub fn find_program(program: &str) -> Option<PathBuf> {
         let p = PathBuf::from(program);
         return p.is_file().then_some(p);
     }
-    std::env::var_os("PATH")?
-        .to_str()?
-        .split(':')
-        .map(|dir| Path::new(dir).join(program))
-        .find(|p| p.is_file())
+    std::env::var_os("PATH")?.to_str()?.split(':').map(|dir| Path::new(dir).join(program)).find(|p| p.is_file())
 }
 
 /// Sanity-checks a system's command without a real ROM: the program must exist, and so must any

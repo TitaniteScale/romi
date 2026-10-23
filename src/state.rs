@@ -27,10 +27,7 @@ impl State {
     }
 
     pub fn load() -> State {
-        std::fs::read_to_string(Self::path())
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        std::fs::read_to_string(Self::path()).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     }
 
     /// Best effort: losing a play-time update isn't worth interrupting anyone over.
@@ -41,10 +38,10 @@ impl State {
             return;
         }
         let tmp = path.with_extension("json.tmp");
-        if let Ok(json) = serde_json::to_string_pretty(self) {
-            if std::fs::write(&tmp, json).is_ok() {
-                let _ = std::fs::rename(&tmp, &path);
-            }
+        if let Ok(json) = serde_json::to_string_pretty(self)
+            && std::fs::write(&tmp, json).is_ok()
+        {
+            let _ = std::fs::rename(&tmp, &path);
         }
     }
 

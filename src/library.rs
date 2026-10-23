@@ -1,7 +1,7 @@
 //! Builds the game list from ROM folders, hand-added entries and Steam.
 
-use crate::config::{expand_path, glob_match, Config, SystemConfig};
-use crate::launch::{check_command, Launch};
+use crate::config::{Config, SystemConfig, expand_path, glob_match};
+use crate::launch::{Launch, check_command};
 use crate::steam;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -129,22 +129,22 @@ impl Library {
             lib.push_game(group, format!("game:{}", g.name), g.name.clone(), None, meta, launch, art);
         }
 
-        if cfg.steam.enabled {
-            if let Some(dir) = steam::find_steam_dir(cfg.steam.dir.as_deref()) {
-                let group = lib.group_for(&cfg.steam.name);
-                for app in steam::installed_apps(&dir, &cfg.steam.exclude) {
-                    let mut vars = cfg.vars.clone();
-                    vars.insert("appid".into(), app.appid.clone());
-                    let launch = Launch {
-                        command: cfg.steam.command.clone(),
-                        mode: cfg.steam.mode,
-                        cwd: None,
-                        env: HashMap::new(),
-                        vars,
-                    };
-                    let art = ArtRef { appid: Some(app.appid.clone()), ..ArtRef::default() };
-                    lib.push_game(group, format!("steam:{}", app.appid), app.name, None, Meta::default(), launch, art);
-                }
+        if cfg.steam.enabled
+            && let Some(dir) = steam::find_steam_dir(cfg.steam.dir.as_deref())
+        {
+            let group = lib.group_for(&cfg.steam.name);
+            for app in steam::installed_apps(&dir, &cfg.steam.exclude) {
+                let mut vars = cfg.vars.clone();
+                vars.insert("appid".into(), app.appid.clone());
+                let launch = Launch {
+                    command: cfg.steam.command.clone(),
+                    mode: cfg.steam.mode,
+                    cwd: None,
+                    env: HashMap::new(),
+                    vars,
+                };
+                let art = ArtRef { appid: Some(app.appid.clone()), ..ArtRef::default() };
+                lib.push_game(group, format!("steam:{}", app.appid), app.name, None, Meta::default(), launch, art);
             }
         }
 
@@ -157,7 +157,14 @@ impl Library {
         lib
     }
 
-    fn scan_system(&mut self, cfg: &Config, sys: &SystemConfig, roms_dir: &Path, gamelists: Option<&Path>, arcade: Option<&ArcadeDb>) {
+    fn scan_system(
+        &mut self,
+        cfg: &Config,
+        sys: &SystemConfig,
+        roms_dir: &Path,
+        gamelists: Option<&Path>,
+        arcade: Option<&ArcadeDb>,
+    ) {
         let arcade = arcade.filter(|_| sys.arcade);
         let dir_str = sys.dir.as_deref().unwrap_or(&sys.id);
         let dir = if dir_str.starts_with('/') || dir_str.starts_with('~') {
@@ -190,7 +197,8 @@ impl Library {
             let rel_str = rel.to_string_lossy().into_owned();
             let file_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
             let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-            if !exts.contains(&ext) || sys.exclude.iter().any(|p| glob_match(p, &file_name) || glob_match(p, &rel_str)) {
+            if !exts.contains(&ext) || sys.exclude.iter().any(|p| glob_match(p, &file_name) || glob_match(p, &rel_str))
+            {
                 continue;
             }
             let ov = sys.overrides.get(&rel_str).or_else(|| sys.overrides.get(&file_name)).cloned().unwrap_or_default();
@@ -234,7 +242,16 @@ impl Library {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn push_game(&mut self, system: usize, key: String, name: String, path: Option<PathBuf>, meta: Meta, launch: Launch, art: ArtRef) {
+    fn push_game(
+        &mut self,
+        system: usize,
+        key: String,
+        name: String,
+        path: Option<PathBuf>,
+        meta: Meta,
+        launch: Launch,
+        art: ArtRef,
+    ) {
         self.games.push(Game {
             key,
             sort_key: sort_key(&name),

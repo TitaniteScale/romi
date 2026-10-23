@@ -72,10 +72,7 @@ struct Held {
 }
 
 pub fn spawn(tx: Sender<PadEvent>, swap_confirm: bool) {
-    std::thread::Builder::new()
-        .name("gamepad".into())
-        .spawn(move || run(tx, swap_confirm))
-        .ok();
+    std::thread::Builder::new().name("gamepad".into()).spawn(move || run(tx, swap_confirm)).ok();
 }
 
 fn run(tx: Sender<PadEvent>, swap_confirm: bool) {

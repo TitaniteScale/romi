@@ -171,14 +171,24 @@ impl App {
         let mut views = Vec::new();
         let favs = resolve(&self.state.favorites);
         if !favs.is_empty() {
-            views.push(View { kind: ViewKind::Favorites, id: "@favorites".into(), name: "Favorites".into(), games: favs });
+            views.push(View {
+                kind: ViewKind::Favorites,
+                id: "@favorites".into(),
+                name: "Favorites".into(),
+                games: favs,
+            });
         }
         let recent = resolve(&self.state.recent);
         if !recent.is_empty() {
             views.push(View { kind: ViewKind::Recent, id: "@recent".into(), name: "Recent".into(), games: recent });
         }
         for (i, s) in self.lib.systems.iter().enumerate() {
-            views.push(View { kind: ViewKind::System(i), id: s.id.clone(), name: s.name.clone(), games: s.games.clone() });
+            views.push(View {
+                kind: ViewKind::System(i),
+                id: s.id.clone(),
+                name: s.name.clone(),
+                games: s.games.clone(),
+            });
         }
         self.views = views;
     }
@@ -261,7 +271,9 @@ impl App {
     }
 
     pub fn visible_status(&self) -> Option<&Status> {
-        self.status.as_ref().filter(|s| s.at.elapsed() < STATUS_TTL || (s.level == Level::Error && s.at.elapsed() < STATUS_TTL * 2))
+        self.status
+            .as_ref()
+            .filter(|s| s.at.elapsed() < STATUS_TTL || (s.level == Level::Error && s.at.elapsed() < STATUS_TTL * 2))
     }
 
     // ---- input ----
@@ -274,10 +286,8 @@ impl App {
         match ev {
             Event::FocusGained => self.term_focused = true,
             Event::FocusLost => self.term_focused = false,
-            Event::Key(k) if k.kind != KeyEventKind::Release => {
-                if !self.input_blocked() {
-                    self.on_key(k);
-                }
+            Event::Key(k) if k.kind != KeyEventKind::Release && !self.input_blocked() => {
+                self.on_key(k);
             }
             _ => {}
         }
@@ -425,7 +435,10 @@ impl App {
                     let added = self.state.toggle_favorite(&key);
                     self.state.save();
                     let name = self.lib.games[g].name.clone();
-                    self.set_status(Level::Info, if added { format!("★ {name}") } else { format!("Unfavorited {name}") });
+                    self.set_status(
+                        Level::Info,
+                        if added { format!("★ {name}") } else { format!("Unfavorited {name}") },
+                    );
                     if self.search.is_none() {
                         self.rebuild_keeping_selection();
                     }
@@ -456,7 +469,12 @@ impl App {
     fn end_search(&mut self) {
         if self.search.take().is_some() {
             let len = self.list().len();
-            self.game = self.positions.get(&self.views.get(self.view).map(|v| v.id.clone()).unwrap_or_default()).copied().unwrap_or(0).min(len.saturating_sub(1));
+            self.game = self
+                .positions
+                .get(&self.views.get(self.view).map(|v| v.id.clone()).unwrap_or_default())
+                .copied()
+                .unwrap_or(0)
+                .min(len.saturating_sub(1));
             self.games_list = ListState::default();
         }
     }
@@ -480,7 +498,9 @@ impl App {
                     self.matcher.fuzzy_match(&hay, q).map(|sc| (sc, i))
                 })
                 .collect();
-            scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| self.lib.games[a.1].sort_key.cmp(&self.lib.games[b.1].sort_key)));
+            scored.sort_by(|a, b| {
+                b.0.cmp(&a.0).then_with(|| self.lib.games[a.1].sort_key.cmp(&self.lib.games[b.1].sort_key))
+            });
             scored.into_iter().map(|(_, i)| i).collect()
         };
         if let Some(s) = &mut self.search {
@@ -546,8 +566,12 @@ impl App {
         self.term_focused = true;
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);
         match code {
-            Some(Some(0)) => self.set_status(Level::Info, format!("Played {name} for {}", crate::ui::fmt_duration(played.as_secs()))),
-            Some(Some(c)) => self.set_status(Level::Error, format!("{name} exited with code {c} (log: {})", tilde(&log_path()))),
+            Some(Some(0)) => {
+                self.set_status(Level::Info, format!("Played {name} for {}", crate::ui::fmt_duration(played.as_secs())))
+            }
+            Some(Some(c)) => {
+                self.set_status(Level::Error, format!("{name} exited with code {c} (log: {})", tilde(&log_path())))
+            }
             Some(None) => self.set_status(Level::Warn, format!("{name} was killed by a signal")),
             None => self.set_status(Level::Error, format!("Lost track of {name}")),
         }
@@ -584,7 +608,8 @@ pub fn tilde(p: &std::path::Path) -> String {
 
 fn random_below(n: usize) -> usize {
     // No need for a crate: the clock's nanoseconds, scrambled a little, are plenty random here.
-    let mut x = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
+    let mut x =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(1, |d| d.as_nanos() as u64) | 1;
     x ^= x << 13;
     x ^= x >> 7;
     x ^= x << 17;

@@ -8,7 +8,7 @@
 //! No-Intro/Redump/MAME titles) and Steam's CDN. Art is fetched on the user's machine and cached
 //! under `~/.cache/romi/art`; none of it ships with romi.
 
-use crate::config::{self, expand_path, Config};
+use crate::config::{self, Config, expand_path};
 use crate::library::{Game, Library, System};
 use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
@@ -26,7 +26,9 @@ const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "webp"];
 /// libretro thumbnail sets for ES-DE system ids, best first.
 pub fn default_libretro(id: &str) -> Vec<String> {
     let sets: &[&str] = match id {
-        "arcade" | "mame" | "fbneo" => &["MAME", "FBNeo - Arcade Games", "Sega - Naomi", "Sega - Naomi 2", "Atomiswave"],
+        "arcade" | "mame" | "fbneo" => {
+            &["MAME", "FBNeo - Arcade Games", "Sega - Naomi", "Sega - Naomi 2", "Atomiswave"]
+        }
         "neogeo" => &["SNK - Neo Geo", "FBNeo - Arcade Games", "MAME"],
         "naomi" | "naomi2" | "atomiswave" => &["Sega - Naomi", "Sega - Naomi 2", "Atomiswave", "MAME"],
         "gb" => &["Nintendo - Game Boy"],
@@ -194,7 +196,8 @@ fn strip_tags(s: &str) -> String {
 fn words(title: &str) -> Vec<String> {
     let t = strip_tags(title).to_lowercase().replace('&', " and ").replace(['\'', '’'], "");
     let t: String = t.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { ' ' }).collect();
-    let mut out: Vec<String> = t.split_whitespace().filter(|w| !matches!(*w, "the" | "and")).map(String::from).collect();
+    let mut out: Vec<String> =
+        t.split_whitespace().filter(|w| !matches!(*w, "the" | "and")).map(String::from).collect();
     if matches!(out.first().map(String::as_str), Some("a" | "an")) {
         out.remove(0);
     }
@@ -203,7 +206,8 @@ fn words(title: &str) -> Vec<String> {
 
 /// Lower is better: real releases before demos/bootlegs, then by region, then the plainest name.
 fn rank(entry: &str) -> (bool, usize, usize) {
-    const BAD: &[&str] = &["(Demo", "(Beta", "(Proto", "(Sample", "(Kiosk", "(Hack", "(Pirate", "bootleg", "prototype", "Korean"];
+    const BAD: &[&str] =
+        &["(Demo", "(Beta", "(Proto", "(Sample", "(Kiosk", "(Hack", "(Pirate", "bootleg", "prototype", "Korean"];
     const REGIONS: &[&str] = &["(USA", "(World", "(Europe", "(Japan"];
     let bad = BAD.iter().any(|b| entry.contains(b));
     let region = REGIONS.iter().position(|r| entry.contains(r)).unwrap_or(REGIONS.len());
@@ -244,16 +248,17 @@ fn best_match<'a>(title: &str, listings: &[&'a Listing]) -> Option<(&'a Listing,
     let undashed = |w: &[String]| w.iter().filter(|x| *x != "-").cloned().collect::<Vec<_>>();
     let want_undashed = undashed(&want);
     type Tier<'t> = &'t dyn Fn(&[String]) -> bool;
-    let tiers: [Tier; 3] = [
-        &|w| w == want.as_slice(),
-        &|w| w.len() > want.len() && w.starts_with(&want) && w[want.len()] == "-",
-        &|w| undashed(w) == want_undashed,
-    ];
+    let tiers: [Tier; 3] =
+        [&|w| w == want.as_slice(), &|w| w.len() > want.len() && w.starts_with(&want) && w[want.len()] == "-", &|w| {
+            undashed(w) == want_undashed
+        }];
     for tier in tiers {
         let best = listings
             .iter()
             .copied()
-            .flat_map(|l| l.words.iter().enumerate().filter(|(_, w)| tier(w)).map(move |(i, _)| (l, l.names[i].as_str())))
+            .flat_map(|l| {
+                l.words.iter().enumerate().filter(|(_, w)| tier(w)).map(move |(i, _)| (l, l.names[i].as_str()))
+            })
             .min_by_key(|(_, name)| rank(name));
         if best.is_some() {
             return best;
@@ -304,7 +309,9 @@ fn agent() -> ureq::Agent {
 
 /// GET with one retry for dropped connections. `None` means the server has no such file.
 fn get(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Option<Vec<u8>>> {
-    let attempt = || -> Result<Vec<u8>, ureq::Error> { agent.get(url).call()?.body_mut().with_config().limit(limit).read_to_vec() };
+    let attempt = || -> Result<Vec<u8>, ureq::Error> {
+        agent.get(url).call()?.body_mut().with_config().limit(limit).read_to_vec()
+    };
     let mut result = attempt();
     if matches!(&result, Err(e) if !matches!(e, ureq::Error::StatusCode(_))) {
         std::thread::sleep(Duration::from_secs(2));
@@ -403,7 +410,10 @@ pub fn scrape(cfg: &Config, lib: &Library, only: &[String]) -> Result<()> {
             } else if !cfg.art.online {
                 unmatched.push(g);
             } else if let Some(appid) = &game.art.appid {
-                jobs.push((g, Job { url: format!("{STEAM_CDN}/{appid}/library_600x900.jpg"), dest_stem: cache_stem(sys, game) }));
+                jobs.push((
+                    g,
+                    Job { url: format!("{STEAM_CDN}/{appid}/library_600x900.jpg"), dest_stem: cache_stem(sys, game) },
+                ));
             } else {
                 unmatched.push(g);
             }
@@ -483,25 +493,27 @@ fn run_jobs(agent: &ureq::Agent, jobs: &[(usize, Job)], label: &str) -> (Vec<usi
     let failed = Mutex::new(Vec::new());
     std::thread::scope(|s| {
         for _ in 0..WORKERS.min(jobs.len()) {
-            s.spawn(|| loop {
-                let i = {
-                    let mut n = next.lock().unwrap();
-                    if *n >= jobs.len() {
-                        return;
+            s.spawn(|| {
+                loop {
+                    let i = {
+                        let mut n = next.lock().unwrap();
+                        if *n >= jobs.len() {
+                            return;
+                        }
+                        *n += 1;
+                        *n - 1
+                    };
+                    let (g, job) = &jobs[i];
+                    match download(agent, job) {
+                        Ok(true) => {}
+                        Ok(false) => not_found.lock().unwrap().push(*g),
+                        Err(_) => failed.lock().unwrap().push(*g),
                     }
-                    *n += 1;
-                    *n - 1
-                };
-                let (g, job) = &jobs[i];
-                match download(agent, job) {
-                    Ok(true) => {}
-                    Ok(false) => not_found.lock().unwrap().push(*g),
-                    Err(_) => failed.lock().unwrap().push(*g),
-                }
-                let mut d = done.lock().unwrap();
-                *d += 1;
-                if progress {
-                    eprint!("\r  {label:<24} downloading {}/{}\x1b[K", *d, jobs.len());
+                    let mut d = done.lock().unwrap();
+                    *d += 1;
+                    if progress {
+                        eprint!("\r  {label:<24} downloading {}/{}\x1b[K", *d, jobs.len());
+                    }
                 }
             });
         }
@@ -522,24 +534,41 @@ mod tests {
     fn exact_and_sanitized() {
         assert_eq!(matched("Ape Escape (USA)", &["Ape Escape (USA)"]).as_deref(), Some("Ape Escape (USA)"));
         assert_eq!(
-            matched("Dungeons & Dragons: Shadow over Mystara (USA 960619)", &["Dungeons _ Dragons_ Shadow over Mystara (USA 960619)"])
-                .as_deref(),
+            matched(
+                "Dungeons & Dragons: Shadow over Mystara (USA 960619)",
+                &["Dungeons _ Dragons_ Shadow over Mystara (USA 960619)"]
+            )
+            .as_deref(),
             Some("Dungeons _ Dragons_ Shadow over Mystara (USA 960619)")
         );
     }
 
     #[test]
     fn fuzzy_tiers() {
-        let names = ["Puzzle Link (Europe)", "Puzzle Link 2 (USA, Europe)", "Baseball Stars Color - Pocket Sports Series (World) (En,Ja)"];
+        let names = [
+            "Puzzle Link (Europe)",
+            "Puzzle Link 2 (USA, Europe)",
+            "Baseball Stars Color - Pocket Sports Series (World) (En,Ja)",
+        ];
         assert_eq!(matched("Puzzle Link", &names).as_deref(), Some("Puzzle Link (Europe)"));
         assert_eq!(matched("Baseball Stars Color", &names).as_deref(), Some(names[2]));
         assert_eq!(
-            matched("Legend of Zelda, The - The Wind Waker (USA, Canada)", &["Legend of Zelda, The - The Wind Waker (USA)"]).as_deref(),
+            matched(
+                "Legend of Zelda, The - The Wind Waker (USA, Canada)",
+                &["Legend of Zelda, The - The Wind Waker (USA)"]
+            )
+            .as_deref(),
             Some("Legend of Zelda, The - The Wind Waker (USA)")
         );
         assert_eq!(
-            matched("Sonic the Hedgehog Pocket Adventure", &["Sonic The Hedgehog - Pocket Adventure (World) (Demo)", "Sonic The Hedgehog - Pocket Adventure (World)"])
-                .as_deref(),
+            matched(
+                "Sonic the Hedgehog Pocket Adventure",
+                &[
+                    "Sonic The Hedgehog - Pocket Adventure (World) (Demo)",
+                    "Sonic The Hedgehog - Pocket Adventure (World)"
+                ]
+            )
+            .as_deref(),
             Some("Sonic The Hedgehog - Pocket Adventure (World)")
         );
         assert_eq!(matched("Nige-Ron-Pa", &["Nigeronpa (Japan)"]), None);

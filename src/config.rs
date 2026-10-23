@@ -232,8 +232,7 @@ pub fn load(path: &Path) -> Result<Config> {
         std::fs::write(path, DEFAULT_CONFIG)
             .with_context(|| format!("writing default config to {}", path.display()))?;
     }
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("reading {}", path.display()))?;
+    let raw = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     parse(&raw).with_context(|| format!("parsing {}", path.display()))
 }
 

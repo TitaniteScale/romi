@@ -11,13 +11,7 @@ pub struct SteamApp {
 
 /// Tools Steam installs alongside games; never worth showing.
 fn is_tool(name: &str) -> bool {
-    const PREFIXES: &[&str] = &[
-        "Proton",
-        "Steam Linux Runtime",
-        "Steamworks Common",
-        "SteamVR",
-        "Steam Audio",
-    ];
+    const PREFIXES: &[&str] = &["Proton", "Steam Linux Runtime", "Steamworks Common", "SteamVR", "Steam Audio"];
     PREFIXES.iter().any(|p| name.starts_with(p))
 }
 
