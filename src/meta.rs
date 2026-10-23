@@ -74,7 +74,7 @@ pub fn genres(raw: &str) -> Vec<String> {
         (&["platform", "plataform"], "Platformer"),
         (&["race", "racing", "driving", "kart"], "Racing"),
         (&["gun", "shooter", "shooting", "fps"], "Shooter"),
-        (&["puzzle", "breakout", "tetris"], "Puzzle"),
+        (&["puzzle", "breakout", "tetris", "thinking"], "Puzzle"),
         (&["board", "chess", "shogi", "mahjong", "card", "hanafuda"], "Board & cards"),
         (&["casino", "gambling", "pachinko", "poker", "slot"], "Casino"),
         (&["pinball"], "Pinball"),
@@ -361,15 +361,30 @@ pub fn skyscraper_ids(dir: &Path) -> HashMap<String, String> {
 
 // ---- MAME categories ----
 
-/// A catver.ini-style file: `shortname=Category / Subcategory` under section headers.
+/// A catver.ini-style file: `shortname=Category / Subcategory` lines in a `[Category]` section.
+/// Other sections reuse the same keys for other things (`[VerAdded]` maps them to MAME versions),
+/// so only `[Category]` counts.
 fn arcade_categories(path: &Path) -> HashMap<String, String> {
-    std::fs::read_to_string(path)
-        .unwrap_or_default()
-        .lines()
-        .filter_map(|l| l.split_once('='))
-        .map(|(k, v)| (k.trim().to_string(), v.replace("* Mature *", "").trim().to_string()))
-        .filter(|(k, v)| !k.is_empty() && !k.starts_with('[') && !k.starts_with(';') && !v.is_empty())
-        .collect()
+    parse_categories(&std::fs::read_to_string(path).unwrap_or_default())
+}
+
+fn parse_categories(text: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    let mut in_category = false;
+    for line in text.lines().map(str::trim) {
+        if let Some(section) = line.strip_prefix('[') {
+            in_category = section.trim_end_matches(']').eq_ignore_ascii_case("category");
+        } else if in_category
+            && !line.starts_with(';')
+            && let Some((k, v)) = line.split_once('=')
+        {
+            let v = v.replace("* Mature *", "");
+            if !k.trim().is_empty() && !v.trim().is_empty() {
+                out.insert(k.trim().to_string(), v.trim().to_string());
+            }
+        }
+    }
+    out
 }
 
 // ---- checksums ----
@@ -581,6 +596,16 @@ mod tests {
         assert_eq!(genres("Shooter / Flying Vertical"), ["Shoot 'em up"]);
         assert_eq!(genres("Platform / Shooter Scrolling"), ["Platformer", "Shooter"]);
         assert!(genres("").is_empty());
+    }
+
+    #[test]
+    fn categories_only_from_category_section() {
+        let ini = "[FOLDER_SETTINGS]\nRootFolderIcon mame\n\n;; catver.ini ;;\n[Category]\nsfa3u=Fighter / Versus\n\
+                   mk2=Fighter / Versus * Mature *\n\n[VerAdded]\nsfa3u=0.37b16\n";
+        let cats = parse_categories(ini);
+        assert_eq!(cats.get("sfa3u").map(String::as_str), Some("Fighter / Versus"));
+        assert_eq!(cats.get("mk2").map(String::as_str), Some("Fighter / Versus"));
+        assert_eq!(cats.len(), 2);
     }
 
     #[test]
