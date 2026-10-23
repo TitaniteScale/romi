@@ -1,0 +1,154 @@
+// romi config. Comments are allowed. Press ctrl-r in romi to reload after editing.
+//
+// Command placeholders (expanded per argument, so spaces in paths are safe):
+//   {rom}   full path to the ROM        {file}  file name, e.g. "Sonic CD (USA).chd"
+//   {name}  file name without extension {dir}   folder containing the ROM
+//   {appid} Steam app id (Steam only)   plus anything you define in "vars".
+//
+// Launch modes:
+//   "wait"     (default) romi shows a "now playing" screen until the game exits; output goes to
+//              ~/.local/state/romi/last.log
+//   "terminal" romi steps aside and the command gets the terminal (scripts, TUI games)
+//   "detach"   start it and carry on (anything that returns immediately, like Steam)
+{
+  "roms_dir": "~/ROMs",
+
+  // Optional: reuse names/descriptions scraped by ES-DE. Remove if you don't use ES-DE.
+  "gamelists_dir": "~/ES-DE/gamelists",
+
+  // MAME name lists shipped with ES-DE. Systems with "arcade": true use them to show real titles
+  // instead of short names (sfa3u -> Street Fighter Alpha 3) and to hide BIOS/device zips.
+  "arcade_db": "/usr/share/es-de/resources/MAME",
+
+  "vars": {
+    "cores": "~/.config/retroarch/cores"
+  },
+
+  "theme": {
+    // Terminal palette names keep romi in sync with your terminal theme:
+    // black red green yellow blue magenta cyan white, the bright_* variants, or "default".
+    "accent": "blue",
+    "borders": "rounded",
+    "show_details": true
+  },
+
+  "controller": {
+    "enabled": true,
+    "swap_confirm": false,
+    "require_focus": true
+  },
+
+  "systems": [
+    {
+      "id": "arcade", "arcade": true, "name": "Arcade",
+      "extensions": ["zip", "7z"],
+      "exclude": ["naomi*.zip", "mie.zip", "segadimm.zip", "jvs13551.zip", "neogeo.zip"],
+      "command": "retroarch -L {cores}/mame_libretro.so {rom}"
+    },
+    {
+      "id": "neogeo", "arcade": true, "name": "Neo Geo",
+      "extensions": ["zip", "7z", "neo"],
+      "exclude": ["neogeo.zip"],
+      "command": "retroarch -L {cores}/fbneo_libretro.so {rom}"
+    },
+    {
+      "id": "naomi", "arcade": true, "name": "NAOMI",
+      "extensions": ["zip", "7z", "lst", "dat", "bin", "elf"],
+      "exclude": ["naomi*.zip", "mie.zip", "segadimm.zip", "jvs13551.zip"],
+      "command": "retroarch -L {cores}/flycast_libretro.so {rom}"
+    },
+    {
+      "id": "gb", "name": "Game Boy",
+      "extensions": ["gb", "zip", "7z"],
+      "command": "retroarch -L {cores}/mgba_libretro.so {rom}"
+    },
+    {
+      "id": "gbc", "name": "Game Boy Color",
+      "extensions": ["gbc", "gb", "zip", "7z"],
+      "command": "retroarch -L {cores}/mgba_libretro.so {rom}"
+    },
+    {
+      "id": "gba", "name": "Game Boy Advance",
+      "extensions": ["gba", "zip", "7z"],
+      "command": "retroarch -L {cores}/mgba_libretro.so {rom}"
+    },
+    {
+      "id": "nds", "name": "Nintendo DS",
+      "extensions": ["nds", "dsi", "zip", "7z"],
+      "command": "melonDS -f {rom}"
+    },
+    {
+      "id": "snes", "name": "Super Nintendo",
+      "extensions": ["sfc", "smc", "zip", "7z"],
+      "command": "retroarch -L {cores}/bsnes_hd_beta_libretro.so {rom}"
+    },
+    {
+      "id": "n64", "name": "Nintendo 64",
+      "extensions": ["z64", "n64", "v64", "zip", "7z"],
+      "command": "retroarch -L {cores}/mupen64plus_next_libretro.so {rom}"
+    },
+    {
+      "id": "gc", "name": "GameCube",
+      "extensions": ["rvz", "iso", "gcm", "gcz", "ciso", "wbfs", "wia", "m3u"],
+      "command": "dolphin-emu -b -e {rom}"
+    },
+    {
+      "id": "megadrive", "name": "Mega Drive",
+      "extensions": ["md", "gen", "smd", "bin", "32x", "sms", "gg", "zip", "7z"],
+      "command": "retroarch -L {cores}/genesis_plus_gx_libretro.so {rom}"
+    },
+    {
+      "id": "scd", "name": "Sega CD",
+      "extensions": ["chd", "cue", "m3u", "iso"],
+      "command": "retroarch -L {cores}/genesis_plus_gx_libretro.so {rom}"
+    },
+    {
+      "id": "saturn", "name": "Saturn",
+      "extensions": ["chd", "cue", "m3u", "iso", "zip", "7z"],
+      "command": "retroarch -L {cores}/mednafen_saturn_libretro.so {rom}"
+    },
+    {
+      "id": "dreamcast", "name": "Dreamcast",
+      "extensions": ["chd", "cdi", "gdi", "cue", "m3u", "iso", "zip", "7z"],
+      "exclude": ["naomi*.zip"],
+      "command": "retroarch -L {cores}/flycast_libretro.so {rom}"
+    },
+    {
+      "id": "pcengine", "name": "PC Engine",
+      "extensions": ["pce", "sgx", "chd", "cue", "m3u", "zip", "7z"],
+      "command": "retroarch -L {cores}/mednafen_pce_fast_libretro.so {rom}"
+    },
+    {
+      "id": "ngpc", "name": "Neo Geo Pocket Color",
+      "extensions": ["ngp", "ngc", "ngpc", "zip", "7z"],
+      "recursive": true,
+      "command": "retroarch -L {cores}/mednafen_ngp_libretro.so {rom}"
+    },
+    {
+      "id": "psx", "name": "PlayStation",
+      "extensions": ["chd", "cue", "m3u", "pbp", "iso", "img", "ccd", "zip", "7z"],
+      "command": "retroarch -L {cores}/mednafen_psx_hw_libretro.so {rom}"
+    },
+    {
+      "id": "ps2", "name": "PlayStation 2",
+      "extensions": ["iso", "chd", "cso", "zso", "gz", "m3u"],
+      "command": "pcsx2-qt -batch {rom}"
+    },
+    {
+      "id": "shell", "name": "Scripts",
+      "extensions": ["sh"],
+      "command": "bash {rom}",
+      "cwd": "{dir}",
+      "mode": "terminal"
+    }
+  ],
+
+  // Anything else: native ports, scripts, flatpaks...
+  //   { "name": "My Game", "command": "./run.sh", "cwd": "~/Games/my-game", "system": "PC" }
+  "games": [],
+
+  "steam": {
+    "enabled": true,
+    "exclude": []
+  }
+}
