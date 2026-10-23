@@ -1,12 +1,14 @@
 //! Drawing. Only terminal palette colors and modifiers are used, so romi follows your theme.
 
 use crate::app::{App, Level, PadState, Pane, ViewKind};
+use crate::cover::Cover;
 use crate::state::now;
 use ratatui::Frame;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect, Size};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
+use ratatui_image::Image;
 
 const DETAILS_MIN_WIDTH: u16 = 110;
 
@@ -204,12 +206,38 @@ fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     f.render_stateful_widget(list, area, &mut app.games_list);
 }
 
-fn draw_details(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+/// Draws a game's cover centered in `area`. Returns the rows to leave for it: the whole area while
+/// it has art (loading or not), so the text below stays put while scrolling; 0 if it has none.
+fn draw_cover(f: &mut Frame, app: &mut App, game: usize, area: Rect) -> u16 {
+    let Some(covers) = app.covers.as_mut() else { return 0 };
+    match covers.get(&app.lib, game, Size::new(area.width, area.height)) {
+        Cover::Ready(proto) => {
+            let s = proto.size();
+            let (w, h) = (s.width.min(area.width), s.height.min(area.height));
+            let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
+            f.render_widget(Image::new(proto), rect);
+            area.height
+        }
+        Cover::Loading => area.height,
+        Cover::None => 0,
+    }
+}
+
+fn draw_details(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let block = theme.block(" Details ", false).padding(Padding::horizontal(1));
-    let Some(g) = app.selected_game() else {
-        f.render_widget(block, area);
-        return;
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let Some(g) = app.selected_game() else { return };
+
+    // Box art is roughly square; terminal cells are about twice as tall as wide.
+    let art_h = (inner.height * 11 / 20).min(inner.width * 3 / 5);
+    let used = if art_h >= 4 { draw_cover(f, app, g, Rect { height: art_h, ..inner }) } else { 0 };
+    let text_area = if used > 0 {
+        Rect { y: inner.y + used + 1, height: inner.height.saturating_sub(used + 1), ..inner }
+    } else {
+        inner
     };
+
     let game = &app.lib.games[g];
     let label = |k: &str| Span::styled(format!("{k:<10}"), Style::new().dim());
     let mut lines = vec![
@@ -242,12 +270,13 @@ fn draw_details(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         lines.push(Line::raw(""));
         lines.extend(desc.lines().map(|l| Line::raw(l.to_string())));
     }
-    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }).block(block), area);
+    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), text_area);
 }
 
-fn draw_playing(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+fn draw_playing(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let Some(run) = &app.running else { return };
-    let game = &app.lib.games[run.game];
+    let g = run.game;
+    let game = &app.lib.games[g];
     let lines = vec![
         Line::from(Span::styled("▶ Now playing", Style::new().fg(theme.accent).bold())),
         Line::raw(""),
@@ -258,12 +287,20 @@ fn draw_playing(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Line::raw(""),
         Line::from(Span::styled("romi will be back when the game closes", Style::new().dim())),
     ];
-    let h = lines.len() as u16 + 2;
+    let has_art = app.covers.as_mut().is_some_and(|c| c.path(&app.lib, g).is_some());
+    let text_h = lines.len() as u16;
+    let art_h = if has_art { (area.height.saturating_sub(text_h + 4) * 3 / 5).min(16) } else { 0 };
+    let h = text_h + 2 + if art_h >= 4 { art_h + 1 } else { 0 };
     let w = (game.name.chars().count() as u16 + 8).clamp(44, area.width);
     let [_, mid, _] = Layout::vertical([Constraint::Fill(1), Constraint::Length(h), Constraint::Fill(1)]).areas(area);
     let [_, rect, _] = Layout::horizontal([Constraint::Fill(1), Constraint::Length(w), Constraint::Fill(1)]).areas(mid);
+    let block = theme.block("", true);
+    let inner = block.inner(rect);
     f.render_widget(Clear, rect);
-    f.render_widget(Paragraph::new(lines).alignment(Alignment::Center).block(theme.block("", true)), rect);
+    f.render_widget(block, rect);
+    let used = if art_h >= 4 { draw_cover(f, app, g, Rect { height: art_h, ..inner }) } else { 0 };
+    let text_area = Rect { y: inner.y + used + u16::from(used > 0), height: text_h, ..inner };
+    f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), text_area);
 }
 
 fn draw_empty(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {

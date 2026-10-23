@@ -164,6 +164,8 @@ pub struct ArtConfig {
     pub skyscraper_cache: Option<String>,
     /// Let `romi --scrape` download from libretro thumbnails and Steam's CDN.
     pub online: bool,
+    /// Show covers in the details pane (Kitty/Sixel/iTerm2 graphics, or half-blocks elsewhere).
+    pub show: bool,
 }
 
 impl Default for ArtConfig {
@@ -172,6 +174,7 @@ impl Default for ArtConfig {
             esde_media_dir: Some("~/ES-DE/downloaded_media".into()),
             skyscraper_cache: Some("~/.skyscraper/cache".into()),
             online: true,
+            show: true,
         }
     }
 }

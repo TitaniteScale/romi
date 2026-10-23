@@ -109,6 +109,11 @@ Online sources need no accounts or keys:
   `"libretro": ["Set Name", ...]` on the system.
 - **Steam's CDN** for installed Steam games.
 
+Covers show at the top of the details pane (and on the "now playing" screen). romi asks the
+terminal what it supports at startup: Kitty graphics in Ghostty/kitty, Sixel or iTerm2 elsewhere,
+colored half-blocks as a last resort. Images are decoded on a background thread, so holding the
+d-pad through a long list never stutters. Turn covers off with `"art": { "show": false }`.
+
 Set `"art": { "online": false }` to only use what's already on disk. The art belongs to its
 publishers: romi fetches and caches it on your machine and never ships any.
 
@@ -125,11 +130,11 @@ publishers: romi fetches and caches it on your machine and never ships any.
 | `src/ui.rs`       | ratatui drawing                                                  |
 | `src/state.rs`    | favorites, history, play time                                    |
 | `src/art.rs`      | box art lookup and `--scrape` (libretro thumbnails, Steam CDN)   |
+| `src/cover.rs`    | showing covers: background decode/resize, small render cache     |
 | `src/main.rs`     | CLI, event loop, handing the terminal to `terminal`-mode commands |
 
 ## Ideas for later
 
-- Show box art in the TUI via the kitty graphics protocol (Ghostty supports it; `ratatui-image`)
 - Match ROMs by CRC against RetroArch's `.rdb` databases for titles that names can't match
 - SteamGridDB (API key) for PC entries and Steam games with hashed CDN paths
 - Collections / custom lists, hiding games from inside the UI

@@ -160,6 +160,9 @@
   "art": {
     "esde_media_dir": "~/ES-DE/downloaded_media",
     "skyscraper_cache": "~/.skyscraper/cache",
-    "online": true
+    "online": true,
+    // Covers in the details pane. Uses Kitty/Sixel/iTerm2 graphics when the terminal has them
+    // (Ghostty, kitty, WezTerm, foot...), colored half-blocks otherwise.
+    "show": true
   }
 }

@@ -1,6 +1,7 @@
 //! App state and input handling. Keyboard and controller both funnel into the same `Op`s.
 
 use crate::config::{self, Config, LaunchMode};
+use crate::cover::Covers;
 use crate::gamepad::{PadAction, PadEvent};
 use crate::launch::Prepared;
 use crate::library::Library;
@@ -110,6 +111,8 @@ pub struct App {
     pub pad: PadState,
     pub show_details: bool,
     pub terminal_job: Option<TerminalJob>,
+    /// Box art, when enabled and the terminal could be queried.
+    pub covers: Option<Covers>,
     pub quit: bool,
     pub systems_list: ListState,
     pub games_list: ListState,
@@ -146,6 +149,7 @@ impl App {
             running: None,
             pad,
             terminal_job: None,
+            covers: None,
             quit: false,
             systems_list: ListState::default(),
             games_list: ListState::default(),
@@ -544,8 +548,11 @@ impl App {
         }
     }
 
-    /// Called every loop iteration: notices when a waited-on game exits.
+    /// Called every loop iteration: picks up decoded covers and notices when a game exits.
     pub fn tick(&mut self) {
+        if let Some(c) = &mut self.covers {
+            c.poll();
+        }
         let Some(run) = &mut self.running else { return };
         let status = match run.child.try_wait() {
             Ok(None) => return,
@@ -582,6 +589,9 @@ impl App {
         match config::load(&self.cfg_path) {
             Ok(cfg) => {
                 self.lib = Library::load(&cfg);
+                if let Some(c) = &mut self.covers {
+                    c.reset(&cfg);
+                }
                 self.cfg = cfg;
                 self.end_search();
                 self.rebuild_keeping_selection();

@@ -1,6 +1,7 @@
 mod app;
 mod art;
 mod config;
+mod cover;
 mod gamepad;
 mod launch;
 mod library;
@@ -14,7 +15,9 @@ use gamepad::{PadAction, PadEvent};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, DisableFocusChange, EnableFocusChange, Event, KeyEventKind};
 use ratatui::crossterm::execute;
-use ratatui::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
+use ratatui::crossterm::terminal::{
+    Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use std::io::{Write, stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -122,6 +125,15 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     }
     let mut app = App::new(cfg, cfg_path);
     let mut terminal = ratatui::init();
+    // Ask the terminal what image protocol it speaks; this has to happen before reading events.
+    if app.cfg.art.show
+        && let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio()
+    {
+        app.covers = Some(cover::Covers::new(picker, &app.cfg));
+    }
+    // Terminals that don't understand the query may have echoed part of it. Nothing is drawn yet,
+    // so wiping the screen keeps it in sync with ratatui's (empty) buffer.
+    execute!(stdout(), Clear(ClearType::All))?;
     execute!(stdout(), EnableFocusChange)?;
     let result = event_loop(&mut terminal, &mut app, &rx);
     let _ = execute!(stdout(), DisableFocusChange);
@@ -183,6 +195,9 @@ fn run_in_terminal(
 
     execute!(stdout(), EnterAlternateScreen, EnableFocusChange)?;
     terminal.clear()?;
+    if let Some(c) = &mut app.covers {
+        c.forget_rendered();
+    }
     app.finish(job.game, played, code);
     Ok(())
 }
