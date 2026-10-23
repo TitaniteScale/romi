@@ -20,6 +20,10 @@
   // instead of short names (sfa3u -> Street Fighter Alpha 3) and to hide BIOS/device zips.
   "arcade_db": "/usr/share/es-de/resources/MAME",
 
+  // Where "bios" files listed on systems are looked for (each system's ROM folder is checked too).
+  // `romi --check` and the TUI flag systems whose BIOS is missing.
+  "bios_dirs": ["~/.config/retroarch/system"],
+
   "vars": {
     "cores": "~/.config/retroarch/cores"
   },
@@ -48,12 +52,14 @@
     {
       "id": "neogeo", "arcade": true, "name": "Neo Geo",
       "extensions": ["zip", "7z", "neo"],
+      "bios": ["neogeo.zip"],
       "exclude": ["neogeo.zip"],
       "command": "retroarch -L {cores}/fbneo_libretro.so {rom}"
     },
     {
       "id": "naomi", "arcade": true, "name": "NAOMI",
       "extensions": ["zip", "7z", "lst", "dat", "bin", "elf"],
+      "bios": [["naomi.zip", "dc/naomi.zip"]],
       "exclude": ["naomi*.zip", "mie.zip", "segadimm.zip", "jvs13551.zip"],
       "command": "retroarch -L {cores}/flycast_libretro.so {rom}"
     },
@@ -100,11 +106,14 @@
     {
       "id": "scd", "name": "Sega CD",
       "extensions": ["chd", "cue", "m3u", "iso"],
+      // US, Europe, Japan: games need the one for their region.
+      "bios": [["bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"]],
       "command": "retroarch -L {cores}/genesis_plus_gx_libretro.so {rom}"
     },
     {
       "id": "saturn", "name": "Saturn",
       "extensions": ["chd", "cue", "m3u", "iso", "zip", "7z"],
+      "bios": [["sega_101.bin", "mpr-17933.bin"]],
       "command": "retroarch -L {cores}/mednafen_saturn_libretro.so {rom}"
     },
     {
@@ -127,11 +136,13 @@
     {
       "id": "psx", "name": "PlayStation",
       "extensions": ["chd", "cue", "m3u", "pbp", "iso", "img", "ccd", "zip", "7z"],
+      "bios": [["scph5501.bin", "scph5500.bin", "scph5502.bin"]],
       "command": "retroarch -L {cores}/mednafen_psx_hw_libretro.so {rom}"
     },
     {
       "id": "ps2", "name": "PlayStation 2",
       "extensions": ["iso", "chd", "cso", "zso", "gz", "m3u"],
+      "bios": ["~/.config/PCSX2/bios/*.bin"],
       "command": "pcsx2-qt -batch {rom}"
     },
     {

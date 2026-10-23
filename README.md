@@ -57,6 +57,7 @@ run; see [`default-config.jsonc`](default-config.jsonc) for every option.
       "extensions": ["chd", "cue", "m3u"],
       "exclude": ["scph*"],
       "command": "retroarch -L {cores}/mednafen_psx_hw_libretro.so {rom}",
+      "bios": [["scph5501.bin", "scph5500.bin", "scph5502.bin"]],  // any one of these
       "overrides": {
         "Some Game (USA).chd": { "command": "duckstation-qt -batch {rom}" },
         "Demo Disc (USA).chd": { "hidden": true }
@@ -71,6 +72,11 @@ run; see [`default-config.jsonc`](default-config.jsonc) for every option.
   "steam": { "enabled": true, "exclude": ["Tabletop Simulator"] }
 }
 ```
+
+**BIOS checks**: list a system's required files under `"bios"`, either one file or a list where any
+one will do. Relative names are looked up in `bios_dirs` (default `~/.config/retroarch/system`) and
+in the system's ROM folder. Absolute paths and `*` wildcards also work, e.g.
+`"~/.config/PCSX2/bios/*.bin"`. Missing ones show as `!` in `romi --check` and in the TUI.
 
 **Placeholders**: `{rom}` `{file}` `{name}` `{dir}` for ROMs, `{appid}` for Steam, plus anything in
 `vars`. Commands are split like a shell would (quotes work) and placeholders are filled in per

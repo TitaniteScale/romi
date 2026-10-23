@@ -17,6 +17,8 @@ pub struct Config {
     /// Folder with ES-DE's mamenames.xml / mamebioses.xml / mamedevices.xml, used by systems
     /// marked `"arcade": true` to turn short names like `sfa3u` into titles and hide BIOS sets.
     pub arcade_db: Option<String>,
+    /// Where relative `bios` files are looked for, in order.
+    pub bios_dirs: Vec<String>,
     /// Extra `{placeholders}` usable in any command, cwd or env value.
     pub vars: HashMap<String, String>,
     pub theme: Theme,
@@ -33,6 +35,7 @@ impl Default for Config {
             roms_dir: "~/ROMs".into(),
             gamelists_dir: None,
             arcade_db: None,
+            bios_dirs: vec!["~/.config/retroarch/system".into()],
             vars: HashMap::new(),
             theme: Theme::default(),
             controller: ControllerConfig::default(),
@@ -86,9 +89,55 @@ pub struct SystemConfig {
     pub libretro: Option<Vec<String>>,
     /// Skyscraper cache platform folder, when it differs from `id` (e.g. `segacd`).
     pub skyscraper: Option<String>,
+    /// Files the emulator needs, relative to a `bios_dirs` entry or absolute. Each entry is a file,
+    /// or a list where any one will do. File names may use `*` and `?`.
+    #[serde(default)]
+    pub bios: Vec<BiosFile>,
     /// Per-file tweaks, keyed by path relative to the system dir (usually just the file name).
     #[serde(default)]
     pub overrides: HashMap<String, Override>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum BiosFile {
+    One(String),
+    AnyOf(Vec<String>),
+}
+
+impl BiosFile {
+    pub fn options(&self) -> &[String] {
+        match self {
+            BiosFile::One(f) => std::slice::from_ref(f),
+            BiosFile::AnyOf(fs) => fs,
+        }
+    }
+}
+
+/// Returns the BIOS requirements that none of `dirs` satisfy, as "a or b" descriptions.
+pub fn missing_bios(required: &[BiosFile], dirs: &[String]) -> Vec<String> {
+    let dirs: Vec<PathBuf> = dirs.iter().map(|d| expand_path(d)).collect();
+    required
+        .iter()
+        .filter(|req| !req.options().iter().any(|f| bios_exists(f, &dirs)))
+        .map(|req| req.options().join(" or "))
+        .collect()
+}
+
+fn bios_exists(file: &str, dirs: &[PathBuf]) -> bool {
+    let candidates: Vec<PathBuf> = if file.starts_with('/') || file.starts_with('~') {
+        vec![expand_path(file)]
+    } else {
+        dirs.iter().map(|d| d.join(file)).collect()
+    };
+    candidates.iter().any(|p| {
+        let name = p.file_name().unwrap_or_default().to_string_lossy();
+        if !name.contains(['*', '?']) {
+            return p.is_file();
+        }
+        let Some(Ok(entries)) = p.parent().map(std::fs::read_dir) else { return false };
+        entries.flatten().any(|e| e.path().is_file() && glob_match(&name, &e.file_name().to_string_lossy()))
+    })
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -300,6 +349,21 @@ mod tests {
     fn default_config_parses() {
         let cfg = parse(DEFAULT_CONFIG).unwrap();
         assert!(!cfg.systems.is_empty());
+    }
+
+    #[test]
+    fn bios_lookup() {
+        let dir = std::env::temp_dir().join(format!("romi-bios-test-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("dc")).unwrap();
+        std::fs::write(dir.join("mpr-17933.bin"), b"x").unwrap();
+        std::fs::write(dir.join("dc/dc_boot.bin"), b"x").unwrap();
+        let dirs = vec![dir.to_string_lossy().into_owned()];
+        let req: Vec<BiosFile> = serde_json::from_str(
+            r#"[["sega_101.bin", "mpr-17933.bin"], "dc/dc_boot.bin", "*.bin", "bios_CD_U.bin", ["x.rom", "y.rom"]]"#,
+        )
+        .unwrap();
+        assert_eq!(missing_bios(&req, &dirs), ["bios_CD_U.bin", "x.rom or y.rom"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

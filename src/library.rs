@@ -1,6 +1,6 @@
 //! Builds the game list from ROM folders, hand-added entries and Steam.
 
-use crate::config::{Config, SystemConfig, expand_path, glob_match};
+use crate::config::{Config, SystemConfig, expand_path, glob_match, missing_bios};
 use crate::launch::{Launch, check_command};
 use crate::steam;
 use std::collections::{HashMap, HashSet};
@@ -186,7 +186,13 @@ impl Library {
             id: sys.id.clone(),
             name: sys.name.clone(),
             games: Vec::new(),
-            problem: check_command(&sys.command, &cfg.vars, ROM_KEYS),
+            problem: check_command(&sys.command, &cfg.vars, ROM_KEYS).or_else(|| {
+                // Some cores also accept BIOS files next to the games (neogeo.zip, naomi.zip).
+                let mut dirs = cfg.bios_dirs.clone();
+                dirs.push(dir.to_string_lossy().into_owned());
+                let missing = missing_bios(&sys.bios, &dirs);
+                (!missing.is_empty()).then(|| format!("missing BIOS: {}", missing.join(", ")))
+            }),
             libretro: sys.libretro.clone().unwrap_or_else(|| crate::art::default_libretro(&sys.id)),
             esde: sys.id.clone(),
             skyscraper: sys.skyscraper.clone().unwrap_or_else(|| crate::art::default_skyscraper(&sys.id)),
