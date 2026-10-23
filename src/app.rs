@@ -16,6 +16,18 @@ use std::process::Child;
 use std::time::{Duration, Instant};
 
 const STATUS_TTL: Duration = Duration::from_secs(6);
+/// How long the big letter stays up after a letter jump.
+const FLASH_TTL: Duration = Duration::from_millis(700);
+
+/// The controller menu (Start). Everything that would otherwise need a keyboard lives here.
+pub const MENU: &[&str] = &["Search", "Random game", "Details pane", "Reload config", "Quit romi"];
+
+/// On-screen keyboard for searching with a controller.
+pub const OSK: [[&str; 13]; 3] = [
+    ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M"],
+    ["N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"],
+    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "␣", "⌫", "✓"],
+];
 /// After a game exits, ignore input briefly so the button used to quit doesn't launch something.
 const INPUT_COOLDOWN: Duration = Duration::from_millis(600);
 
@@ -91,9 +103,13 @@ enum Op {
     Back,
     NextSystem,
     PrevSystem,
+    NextLetter,
+    PrevLetter,
     Favorite,
     Random,
     ToggleDetails,
+    Menu,
+    Search,
 }
 
 pub struct App {
@@ -113,6 +129,12 @@ pub struct App {
     pub terminal_job: Option<TerminalJob>,
     /// Box art, when enabled and the terminal could be queried.
     pub covers: Option<Covers>,
+    /// Selected item while the controller menu is open.
+    pub menu: Option<usize>,
+    /// Cursor (row, column) while the on-screen keyboard is open.
+    pub osk: Option<(usize, usize)>,
+    /// Letter shown briefly after a letter jump.
+    flash: Option<(char, Instant)>,
     pub quit: bool,
     pub systems_list: ListState,
     pub games_list: ListState,
@@ -150,6 +172,9 @@ impl App {
             pad,
             terminal_job: None,
             covers: None,
+            menu: None,
+            osk: None,
+            flash: None,
             quit: false,
             systems_list: ListState::default(),
             games_list: ListState::default(),
@@ -268,6 +293,43 @@ impl App {
         }
     }
 
+    /// The letter a game is filed under: first letter ignoring "The", or `#` for anything else.
+    fn letter(&self, g: usize) -> char {
+        match self.lib.games[g].sort_key.chars().find(|c| c.is_alphanumeric()) {
+            Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
+            _ => '#',
+        }
+    }
+
+    /// Moves to the first game of the next letter, or back to the start of this one (then the
+    /// previous letter), like a phone's contact list.
+    fn jump_letter(&mut self, forward: bool) {
+        let list = self.list().to_vec();
+        if list.is_empty() {
+            return;
+        }
+        self.focus = Pane::Games;
+        let here = self.letter(list[self.game]);
+        let group_start = |end: usize, l: char| (0..=end).rev().take_while(|&i| self.letter(list[i]) == l).last();
+        let target = if forward {
+            (self.game + 1..list.len()).find(|&i| self.letter(list[i]) != here)
+        } else {
+            match group_start(self.game, here) {
+                Some(start) if start < self.game => Some(start),
+                Some(start) if start > 0 => group_start(start - 1, self.letter(list[start - 1])),
+                _ => None,
+            }
+        };
+        if let Some(t) = target {
+            self.game = t;
+        }
+        self.flash = Some((self.letter(list[self.game]), Instant::now()));
+    }
+
+    pub fn flash(&self) -> Option<char> {
+        self.flash.filter(|(_, at)| at.elapsed() < FLASH_TTL).map(|(c, _)| c)
+    }
+
     // ---- status ----
 
     pub fn set_status(&mut self, level: Level, text: impl Into<String>) {
@@ -305,6 +367,17 @@ impl App {
         }
         if ctrl && k.code == KeyCode::Char('r') {
             self.reload();
+            return;
+        }
+        if self.menu.is_some() {
+            let op = match k.code {
+                KeyCode::Up | KeyCode::Char('k') => Op::Up,
+                KeyCode::Down | KeyCode::Char('j') => Op::Down,
+                KeyCode::Enter => Op::Confirm,
+                KeyCode::Esc | KeyCode::Char('q' | 'm') => Op::Back,
+                _ => return,
+            };
+            self.apply(op);
             return;
         }
 
@@ -366,6 +439,7 @@ impl App {
             KeyCode::Char('f') => Op::Favorite,
             KeyCode::Char('r') => Op::Random,
             KeyCode::Char('d') => Op::ToggleDetails,
+            KeyCode::Char('m') => Op::Menu,
             _ => return,
         };
         self.apply(op);
@@ -391,15 +465,22 @@ impl App {
                     PadAction::Random => Op::Random,
                     PadAction::PrevSystem => Op::PrevSystem,
                     PadAction::NextSystem => Op::NextSystem,
-                    PadAction::PageUp => Op::PageUp,
-                    PadAction::PageDown => Op::PageDown,
-                    PadAction::ToggleDetails => Op::ToggleDetails,
+                    PadAction::PrevLetter => Op::PrevLetter,
+                    PadAction::NextLetter => Op::NextLetter,
+                    PadAction::Menu => Op::Menu,
+                    PadAction::Search => Op::Search,
                 });
             }
         }
     }
 
     fn apply(&mut self, op: Op) {
+        if self.menu.is_some() {
+            return self.menu_op(op);
+        }
+        if self.osk.is_some() {
+            return self.osk_op(op);
+        }
         let page = self.page.max(1) as isize;
         match op {
             Op::Up => self.move_cursor(-1),
@@ -456,6 +537,79 @@ impl App {
                 }
             }
             Op::ToggleDetails => self.show_details = !self.show_details,
+            Op::NextLetter => self.jump_letter(true),
+            Op::PrevLetter => self.jump_letter(false),
+            Op::Menu => self.menu = Some(0),
+            Op::Search => {
+                if self.search.is_none() {
+                    self.start_search();
+                }
+                self.osk = Some((0, 0));
+            }
+        }
+    }
+
+    fn menu_op(&mut self, op: Op) {
+        let Some(i) = self.menu else { return };
+        match op {
+            Op::Up => self.menu = Some((i + MENU.len() - 1) % MENU.len()),
+            Op::Down => self.menu = Some((i + 1) % MENU.len()),
+            Op::Back | Op::Menu => self.menu = None,
+            Op::Confirm => {
+                self.menu = None;
+                match MENU[i] {
+                    "Search" => self.apply(Op::Search),
+                    "Random game" => self.apply(Op::Random),
+                    "Details pane" => self.apply(Op::ToggleDetails),
+                    "Reload config" => self.reload(),
+                    "Quit romi" => self.quit = true,
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// The on-screen keyboard: d-pad moves, A types, X deletes, Y adds a space, B or ✓ closes it
+    /// (the results stay, ready to browse).
+    fn osk_op(&mut self, op: Op) {
+        let Some((row, col)) = self.osk else { return };
+        let (rows, cols) = (OSK.len(), OSK[0].len());
+        match op {
+            Op::Up => self.osk = Some(((row + rows - 1) % rows, col)),
+            Op::Down => self.osk = Some(((row + 1) % rows, col)),
+            Op::Left => self.osk = Some((row, (col + cols - 1) % cols)),
+            Op::Right => self.osk = Some((row, (col + 1) % cols)),
+            Op::Random => self.edit_query(None),
+            Op::Favorite => self.edit_query(Some(' ')),
+            Op::Back | Op::Menu | Op::Search => self.close_osk(),
+            Op::Confirm => match OSK[row][col] {
+                "␣" => self.edit_query(Some(' ')),
+                "⌫" => self.edit_query(None),
+                "✓" => self.close_osk(),
+                key => self.edit_query(key.chars().next().map(|c| c.to_ascii_lowercase())),
+            },
+            _ => {}
+        }
+    }
+
+    /// Types a character into the search, or deletes one with `None`.
+    fn edit_query(&mut self, c: Option<char>) {
+        let Some(s) = &mut self.search else { return };
+        match c {
+            Some(c) => s.query.push(c),
+            None => {
+                s.query.pop();
+            }
+        }
+        self.update_search();
+    }
+
+    fn close_osk(&mut self) {
+        self.osk = None;
+        // Closing with nothing typed means there's nothing to browse.
+        if self.search.as_ref().is_some_and(|s| s.query.trim().is_empty()) {
+            self.end_search();
         }
     }
 

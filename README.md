@@ -19,20 +19,26 @@ cargo install --path . --root ~/.local
 
 ## Controls
 
-| Keyboard          | Controller      | Does                                  |
-|-------------------|-----------------|---------------------------------------|
-| `j`/`k`, arrows   | d-pad, stick    | move                                  |
-| `h`/`l`           | d-pad ←/→       | switch between systems and games      |
-| `enter`           | A / Start       | play (or open a system)               |
-| `esc`             | B               | back                                  |
-| `tab`, `[` `]`    | LB / RB         | next / previous system                |
-| `ctrl-u`/`ctrl-d` | LT / RT         | page up / down                        |
-| `f`               | Y               | favorite                              |
-| `r`               | X               | random game                           |
-| `d`               | Select          | toggle details pane                   |
-| `/`               |                 | fuzzy search everything               |
-| `ctrl-r`          |                 | reload config                         |
-| `q`               |                 | quit                                  |
+| Keyboard          | Controller      | Does                                            |
+|-------------------|-----------------|-------------------------------------------------|
+| `j`/`k`, arrows   | d-pad, stick    | move (hold: speeds up after a second and a half) |
+| `h`/`l`           | d-pad ←/→       | switch between systems and games                |
+| `enter`           | A               | play (or open a system)                         |
+| `esc`             | B               | back                                            |
+| `tab`, `[` `]`    | LB / RB         | next / previous system                          |
+| `ctrl-u`/`ctrl-d` |                 | page up / down                                  |
+|                   | LT / RT         | previous / next letter                          |
+| `f`               | Y               | favorite                                        |
+| `r`               | X               | random game                                     |
+| `d`               |                 | toggle details pane                             |
+| `/`               | Select          | fuzzy search everything                         |
+| `m`               | Start / Guide   | menu: search, random, details, reload, quit     |
+| `ctrl-r`          |                 | reload config                                   |
+| `q`               |                 | quit                                            |
+
+Searching with a controller brings up an on-screen keyboard: the d-pad picks a key, A types, X
+deletes, Y adds a space, and B (or ✓) closes it, leaving the results to browse. B again leaves the
+search.
 
 The controller is read directly (via `gilrs`), since terminals never see gamepad input. romi
 ignores it while a game is running and while the terminal window isn't focused, so playing a

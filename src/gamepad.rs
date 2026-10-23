@@ -8,6 +8,9 @@ use std::time::{Duration, Instant};
 
 const REPEAT_DELAY: Duration = Duration::from_millis(320);
 const REPEAT_EVERY: Duration = Duration::from_millis(55);
+/// Holding a direction this long speeds the repeat up, for crossing long lists.
+const REPEAT_FAST_AFTER: Duration = Duration::from_millis(1500);
+const REPEAT_FAST: Duration = Duration::from_millis(22);
 const STICK_ON: f32 = 0.6;
 const STICK_OFF: f32 = 0.3;
 
@@ -23,9 +26,10 @@ pub enum PadAction {
     Random,
     PrevSystem,
     NextSystem,
-    PageUp,
-    PageDown,
-    ToggleDetails,
+    PrevLetter,
+    NextLetter,
+    Menu,
+    Search,
 }
 
 #[derive(Debug)]
@@ -38,7 +42,7 @@ pub enum PadEvent {
 
 impl PadAction {
     fn repeats(self) -> bool {
-        matches!(self, Self::Up | Self::Down | Self::PageUp | Self::PageDown)
+        matches!(self, Self::Up | Self::Down | Self::PrevLetter | Self::NextLetter)
     }
 }
 
@@ -51,15 +55,16 @@ fn map_button(b: Button, swap_confirm: bool) -> Option<PadAction> {
         Button::DPadRight => Right,
         Button::South if swap_confirm => Back,
         Button::East if swap_confirm => Confirm,
-        Button::South | Button::Start => Confirm,
+        Button::South => Confirm,
+        Button::Start | Button::Mode => Menu,
         Button::East => Back,
         Button::North => Favorite,
         Button::West => Random,
         Button::LeftTrigger => PrevSystem,
         Button::RightTrigger => NextSystem,
-        Button::LeftTrigger2 => PageUp,
-        Button::RightTrigger2 => PageDown,
-        Button::Select => ToggleDetails,
+        Button::LeftTrigger2 => PrevLetter,
+        Button::RightTrigger2 => NextLetter,
+        Button::Select => Search,
         _ => return None,
     })
 }
@@ -92,7 +97,7 @@ fn run(tx: Sender<PadEvent>, swap_confirm: bool) {
     let mut stick_x: Option<PadAction> = None;
 
     loop {
-        let timeout = if held.is_some() { REPEAT_EVERY / 2 } else { Duration::from_millis(500) };
+        let timeout = if held.is_some() { REPEAT_FAST / 2 } else { Duration::from_millis(500) };
         let mut out = Vec::new();
 
         if let Some(ev) = gilrs.next_event_blocking(Some(timeout)) {
@@ -146,7 +151,9 @@ fn run(tx: Sender<PadEvent>, swap_confirm: bool) {
 
         if let Some(h) = &mut held {
             let now = Instant::now();
-            if now.duration_since(h.since) >= REPEAT_DELAY && now.duration_since(h.last) >= REPEAT_EVERY {
+            let held_for = now.duration_since(h.since);
+            let every = if held_for >= REPEAT_FAST_AFTER { REPEAT_FAST } else { REPEAT_EVERY };
+            if held_for >= REPEAT_DELAY && now.duration_since(h.last) >= every {
                 h.last = now;
                 out.push(h.action);
             }

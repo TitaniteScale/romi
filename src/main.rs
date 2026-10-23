@@ -39,12 +39,13 @@ options:
 keys:
   j/k ↑/↓   move           h/l ←/→   switch pane      tab/[ ]   next/prev system
   enter     play           /         search           f         favorite
-  r         random         d         details pane     ctrl-r    reload config
-  q         quit
+  r         random         d         details pane     m         menu
+  ctrl-r    reload config  q         quit
 
 controller:
-  d-pad/stick move   A play   B back   Y favorite   X random
-  LB/RB system       LT/RT page        Select details
+  d-pad/stick move (hold to speed up)   A play   B back   Y favorite   X random
+  LB/RB system   LT/RT previous/next letter   Select search   Start menu (incl. quit)
+  searching: d-pad picks a key, A types, X deletes, Y space, B done
 ";
 
 fn main() -> Result<()> {
@@ -212,7 +213,7 @@ fn wait_for_any_input(rx: &Receiver<PadEvent>) {
         {
             return;
         }
-        if let Ok(PadEvent::Action(PadAction::Confirm | PadAction::Back)) = rx.try_recv() {
+        if let Ok(PadEvent::Action(PadAction::Confirm | PadAction::Back | PadAction::Menu)) = rx.try_recv() {
             return;
         }
     }

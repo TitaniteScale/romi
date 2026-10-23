@@ -1,6 +1,6 @@
 //! Drawing. Only terminal palette colors and modifiers are used, so romi follows your theme.
 
-use crate::app::{App, Level, PadState, Pane, ViewKind};
+use crate::app::{App, Level, MENU, OSK, PadState, Pane, ViewKind};
 use crate::cover::Cover;
 use crate::state::now;
 use ratatui::Frame;
@@ -101,8 +101,77 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         if details {
             draw_details(f, app, &theme, areas[2]);
         }
+        if app.osk.is_some() {
+            draw_osk(f, app, &theme, areas[1]);
+        }
+        if let Some(letter) = app.flash() {
+            draw_flash(f, &theme, areas[1], letter);
+        }
+    }
+    if app.menu.is_some() {
+        draw_menu(f, app, &theme, body);
     }
     draw_footer(f, app, &theme, footer);
+}
+
+/// A centered rect of the given size, clipped to `area`.
+fn centered(area: Rect, w: u16, h: u16) -> Rect {
+    let (w, h) = (w.min(area.width), h.min(area.height));
+    Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h)
+}
+
+fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let Some(sel) = app.menu else { return };
+    let items: Vec<Line> = MENU
+        .iter()
+        .enumerate()
+        .map(|(i, &item)| {
+            let label = match item {
+                "Details pane" if app.show_details => "Hide details",
+                "Details pane" => "Show details",
+                other => other,
+            };
+            let style = if i == sel { theme.selected(true) } else { Style::new() };
+            Line::from(Span::styled(format!("  {label:<20}"), style))
+        })
+        .collect();
+    let rect = centered(area, 28, items.len() as u16 + 4);
+    f.render_widget(Clear, rect);
+    let block = theme.block(" romi ", true).padding(Padding::vertical(1));
+    f.render_widget(Paragraph::new(items).block(block), rect);
+}
+
+/// The on-screen keyboard, docked at the bottom of the games pane so results stay visible above.
+fn draw_osk(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let Some((row, col)) = app.osk else { return };
+    let query = app.search.as_ref().map(|s| s.query.as_str()).unwrap_or_default();
+    let mut lines = vec![
+        Line::from(vec![
+            Span::styled(" / ", Style::new().fg(theme.accent).bold()),
+            Span::raw(query.to_string()),
+            Span::styled("█", Style::new().fg(theme.accent)),
+        ]),
+        Line::raw(""),
+    ];
+    for (r, keys) in OSK.iter().enumerate() {
+        let spans = keys.iter().enumerate().map(|(c, k)| {
+            let style = if (r, c) == (row, col) { theme.selected(true) } else { Style::new() };
+            Span::styled(format!(" {k} "), style)
+        });
+        lines.push(Line::from(spans.collect::<Vec<_>>()).centered());
+    }
+    let h = lines.len() as u16 + 2;
+    let w = (OSK[0].len() as u16 * 3 + 4).min(area.width);
+    let rect = Rect::new(area.x + (area.width - w) / 2, (area.y + area.height).saturating_sub(h + 1).max(area.y), w, h);
+    f.render_widget(Clear, rect);
+    f.render_widget(Paragraph::new(lines).block(theme.block(" Search ", true)), rect);
+}
+
+fn draw_flash(f: &mut Frame, theme: &Theme, area: Rect, letter: char) {
+    let rect = centered(area, 9, 5);
+    f.render_widget(Clear, rect);
+    let text = Line::from(Span::styled(letter.to_string(), Style::new().fg(theme.accent).bold())).centered();
+    f.render_widget(Paragraph::new(text).block(theme.block("", true).padding(Padding::vertical(1))), rect);
 }
 
 fn draw_header(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -315,14 +384,42 @@ fn draw_empty(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 }
 
 fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let hint = |k: &str, a: &str| {
+        vec![
+            Span::styled(format!(" {k} "), Style::new().fg(theme.accent)),
+            Span::styled(a.to_string(), Style::new().dim()),
+        ]
+    };
+    let hints = |pairs: &[(&str, &str)]| Line::from(pairs.iter().flat_map(|(k, a)| hint(k, a)).collect::<Vec<_>>());
+    let pad = matches!(app.pad, PadState::Connected(_));
+    let (ok, back) = if app.cfg.controller.swap_confirm { ("B", "A") } else { ("A", "B") };
+
+    if app.menu.is_some() {
+        let line = if pad {
+            hints(&[(ok, "select"), (back, "close")])
+        } else {
+            hints(&[("enter", "select"), ("esc", "close")])
+        };
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
+    if app.osk.is_some() {
+        f.render_widget(Paragraph::new(hints(&[(ok, "type"), ("X", "delete"), ("Y", "space"), (back, "done")])), area);
+        return;
+    }
     if let Some(s) = &app.search {
-        let line = Line::from(vec![
+        let mut spans = vec![
             Span::styled(" / ", Style::new().fg(theme.accent).bold()),
             Span::raw(s.query.clone()),
-            Span::styled("█", Style::new().fg(theme.accent)),
-            Span::styled("   enter play · esc cancel", Style::new().dim()),
-        ]);
-        f.render_widget(Paragraph::new(line), area);
+            Span::styled("█  ", Style::new().fg(theme.accent)),
+        ];
+        let more = if pad {
+            hints(&[(ok, "play"), (back, "exit search"), ("Select", "edit")])
+        } else {
+            hints(&[("enter", "play"), ("esc", "cancel")])
+        };
+        spans.extend(more.spans);
+        f.render_widget(Paragraph::new(Line::from(spans)), area);
         return;
     }
     if let Some(st) = app.visible_status() {
@@ -338,26 +435,29 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         f.render_widget(Paragraph::new(" controller and keys paused while playing").dim(), area);
         return;
     }
-    let hint = |k: &str, a: &str| {
-        vec![
-            Span::styled(format!(" {k} "), Style::new().fg(theme.accent)),
-            Span::styled(a.to_string(), Style::new().dim()),
-        ]
-    };
-    let mut spans = Vec::new();
-    if matches!(app.pad, PadState::Connected(_)) {
-        let (ok, back) = if app.cfg.controller.swap_confirm { ("B", "A") } else { ("A", "B") };
-        for (k, a) in [(ok, "play"), (back, "back"), ("Y", "fav"), ("X", "random"), ("LB/RB", "system")] {
-            spans.extend(hint(k, a));
-        }
+    let line = if pad {
+        hints(&[
+            (ok, "play"),
+            (back, "back"),
+            ("Y", "fav"),
+            ("X", "random"),
+            ("LB/RB", "system"),
+            ("LT/RT", "A–Z"),
+            ("Select", "search"),
+            ("Start", "menu"),
+        ])
     } else {
-        for (k, a) in
-            [("enter", "play"), ("tab", "system"), ("/", "search"), ("f", "fav"), ("r", "random"), ("q", "quit")]
-        {
-            spans.extend(hint(k, a));
-        }
-    }
-    f.render_widget(Paragraph::new(Line::from(spans)), area);
+        hints(&[
+            ("enter", "play"),
+            ("tab", "system"),
+            ("/", "search"),
+            ("f", "fav"),
+            ("r", "random"),
+            ("m", "menu"),
+            ("q", "quit"),
+        ])
+    };
+    f.render_widget(Paragraph::new(line), area);
 }
 
 fn truncate(s: &str, max: usize) -> String {
