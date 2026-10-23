@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../default-config.jsonc");
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
     /// Base directory that relative system `dir`s are resolved against.
@@ -27,6 +27,7 @@ pub struct Config {
     pub games: Vec<GameConfig>,
     pub steam: SteamConfig,
     pub art: ArtConfig,
+    pub metadata: MetadataConfig,
 }
 
 impl Default for Config {
@@ -43,6 +44,7 @@ impl Default for Config {
             games: Vec::new(),
             steam: SteamConfig::default(),
             art: ArtConfig::default(),
+            metadata: MetadataConfig::default(),
         }
     }
 }
@@ -153,6 +155,10 @@ pub struct Override {
     pub hidden: bool,
     /// Image to use instead of scraped art.
     pub art: Option<String>,
+    /// Metadata that beats anything scraped, e.g. for filters: "Fighting", "Shoot 'em up / Puzzle".
+    pub genre: Option<String>,
+    pub players: Option<u8>,
+    pub year: Option<u16>,
 }
 
 /// A hand-added entry: anything that can be started with a command.
@@ -172,6 +178,9 @@ pub struct GameConfig {
     pub description: Option<String>,
     /// Image to show for this entry.
     pub art: Option<String>,
+    pub genre: Option<String>,
+    pub players: Option<u8>,
+    pub year: Option<u16>,
 }
 
 fn default_group() -> String {
@@ -201,6 +210,24 @@ impl Default for SteamConfig {
             mode: LaunchMode::Detach,
             exclude: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct MetadataConfig {
+    /// RetroArch's game databases (`*.rdb`), named like the libretro thumbnail sets.
+    pub rdb_dir: Option<String>,
+    /// Identify cartridge ROMs by CRC32 (read once, then cached) for exact database matches.
+    pub checksums: bool,
+    /// MAME category list (catver.ini or AdvanceMAME's category.ini) for arcade genres, which
+    /// RetroArch's MAME database doesn't have.
+    pub arcade_categories: Option<String>,
+}
+
+impl Default for MetadataConfig {
+    fn default() -> Self {
+        Self { rdb_dir: Some("~/.config/retroarch/database/rdb".into()), checksums: true, arcade_categories: None }
     }
 }
 

@@ -30,6 +30,7 @@ pub enum PadAction {
     NextLetter,
     Menu,
     Search,
+    Filter,
 }
 
 #[derive(Debug)]
@@ -65,6 +66,7 @@ fn map_button(b: Button, swap_confirm: bool) -> Option<PadAction> {
         Button::LeftTrigger2 => PrevLetter,
         Button::RightTrigger2 => NextLetter,
         Button::Select => Search,
+        Button::RightThumb => Filter,
         _ => return None,
     })
 }

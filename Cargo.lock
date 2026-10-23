@@ -1625,6 +1625,7 @@ name = "romi"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "crc32fast",
  "dirs",
  "fuzzy-matcher",
  "gilrs",

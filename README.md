@@ -32,7 +32,8 @@ cargo install --path . --root ~/.local
 | `r`               | X               | random game                                     |
 | `d`               |                 | toggle details pane                             |
 | `/`               | Select          | fuzzy search everything                         |
-| `m`               | Start / Guide   | menu: search, random, details, reload, quit     |
+| `F`               | R3              | filter by genre, players, decade, played        |
+| `m`               | Start / Guide   | menu: search, filter, random, details, reload, quit |
 | `ctrl-r`          |                 | reload config                                   |
 | `q`               |                 | quit                                            |
 
@@ -100,6 +101,24 @@ systems), then the ES-DE gamelist name, then the file name with region tags stri
 
 State (favorites, recents, play time, last selection) lives in `~/.local/state/romi/state.json`.
 
+## Game info and filters
+
+The details pane shows genre, developer, publisher, year, players and a description, merged from
+(best first): your config (`"genre"`, `"players"`, `"year"` on a game or override), ES-DE's
+gamelists, Skyscraper's cache, and RetroArch's game databases (`~/.config/retroarch/database/rdb`).
+RetroArch's databases are matched by ROM checksum where possible (zips are read from their
+headers; other cartridges are hashed once and cached in `~/.cache/romi/crc.tsv`), then by file
+name, then by title. An exact match also gives box art lookups the precise name to search for.
+Arcade genres come from a MAME category list (`metadata.arcade_categories`, e.g. a `catver.ini`
+from [progettosnaps](https://www.progettosnaps.net/catver/)). Genres from all these sources are
+folded into one short list ("Shoot'em Up / Horizontal" and "Shmup" both become "Shoot 'em up").
+The TUI starts instantly and fills database info in a moment later; `romi --check` reports coverage.
+
+The filter (Start → Filter, `F`, or R3) narrows every view at once by genre, minimum players,
+decade, and played/not yet. Systems with no matches hide while it's on, so "Fighting + 2+ players"
+becomes one cross-system list. Up/down picks a row, left/right changes it, and the list updates
+as you go.
+
 ## Box art
 
 `romi --scrape` reports which games have art and downloads what it can. It's safe to rerun: only new
@@ -143,6 +162,9 @@ publishers: romi fetches and caches it on your machine and never ships any.
 | `src/state.rs`    | favorites, history, play time                                    |
 | `src/art.rs`      | box art lookup and `--scrape` (libretro thumbnails, Steam CDN)   |
 | `src/cover.rs`    | showing covers: background decode/resize, small render cache     |
+| `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
+| `src/filter.rs`   | filtering by genre, players, decade, played                      |
+| `src/titles.rs`   | matching titles against database names (art and metadata share it) |
 | `src/main.rs`     | CLI, event loop, handing the terminal to `terminal`-mode commands |
 
 ## Ideas for later

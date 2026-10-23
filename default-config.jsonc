@@ -168,6 +168,15 @@
   // ~/.cache/romi/art. Set "art": "/path/to/image.png" on any game or override to pick your own.
   // Systems search libretro thumbnail sets based on their id; set "libretro": ["Set Name", ...] on
   // a system to change that.
+  // Where game info comes from besides ES-DE: RetroArch's databases (genre, year, players,
+  // descriptions) matched by ROM checksum, plus an optional MAME category list (catver.ini) for
+  // arcade genres. Get catver.ini from https://www.progettosnaps.net/catver/
+  "metadata": {
+    "rdb_dir": "~/.config/retroarch/database/rdb",
+    "checksums": true,
+    "arcade_categories": null
+  },
+
   "art": {
     "esde_media_dir": "~/ES-DE/downloaded_media",
     "skyscraper_cache": "~/.skyscraper/cache",

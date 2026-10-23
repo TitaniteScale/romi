@@ -2,6 +2,7 @@
 
 use crate::config::{self, Config, LaunchMode};
 use crate::cover::Covers;
+use crate::filter::{self, Filter};
 use crate::gamepad::{PadAction, PadEvent};
 use crate::launch::Prepared;
 use crate::library::Library;
@@ -13,6 +14,7 @@ use ratatui::widgets::ListState;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Child;
+use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
 const STATUS_TTL: Duration = Duration::from_secs(6);
@@ -20,7 +22,7 @@ const STATUS_TTL: Duration = Duration::from_secs(6);
 const FLASH_TTL: Duration = Duration::from_millis(700);
 
 /// The controller menu (Start). Everything that would otherwise need a keyboard lives here.
-pub const MENU: &[&str] = &["Search", "Random game", "Details pane", "Reload config", "Quit romi"];
+pub const MENU: &[&str] = &["Search", "Filter", "Random game", "Details pane", "Reload config", "Quit romi"];
 
 /// On-screen keyboard for searching with a controller.
 pub const OSK: [[&str; 13]; 3] = [
@@ -110,6 +112,7 @@ enum Op {
     ToggleDetails,
     Menu,
     Search,
+    Filter,
 }
 
 pub struct App {
@@ -135,6 +138,12 @@ pub struct App {
     pub osk: Option<(usize, usize)>,
     /// Letter shown briefly after a letter jump.
     flash: Option<(char, Instant)>,
+    pub filter: Filter,
+    pub filter_options: filter::Options,
+    /// Selected row while the filter panel is open.
+    pub filter_panel: Option<usize>,
+    /// Database metadata being looked up in the background.
+    metadata: Option<Receiver<Vec<crate::meta::Found>>>,
     pub quit: bool,
     pub systems_list: ListState,
     pub games_list: ListState,
@@ -175,6 +184,10 @@ impl App {
             menu: None,
             osk: None,
             flash: None,
+            metadata: None,
+            filter: Filter::default(),
+            filter_options: filter::Options::default(),
+            filter_panel: None,
             quit: false,
             systems_list: ListState::default(),
             games_list: ListState::default(),
@@ -184,6 +197,8 @@ impl App {
             positions: HashMap::new(),
             matcher: SkimMatcherV2::default(),
         };
+        app.load_metadata();
+        app.filter_options = filter::Options::from(&app.lib);
         app.rebuild_views();
         let (sys, game) = (app.state.selected_system.clone(), app.state.selected_game.clone());
         app.select(sys.as_deref(), game.as_deref());
@@ -193,10 +208,26 @@ impl App {
         app
     }
 
+    /// Starts looking up database metadata off the UI thread; `tick` applies it when it's ready.
+    /// Replacing the receiver (on reload) makes any lookup still running for the old library
+    /// send into the void.
+    fn load_metadata(&mut self) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (cfg, lib) = (self.cfg.clone(), self.lib.clone());
+        std::thread::Builder::new()
+            .name("metadata".into())
+            .spawn(move || {
+                let _ = tx.send(crate::meta::lookup_all(&cfg, &lib));
+            })
+            .ok();
+        self.metadata = Some(rx);
+    }
+
     // ---- views & selection ----
 
     fn rebuild_views(&mut self) {
-        let resolve = |keys: &[String]| keys.iter().filter_map(|k| self.lib.find(k)).collect::<Vec<_>>();
+        let keep = |g: &usize| self.filter.matches(&self.lib.games[*g], &self.state);
+        let resolve = |keys: &[String]| keys.iter().filter_map(|k| self.lib.find(k)).filter(keep).collect::<Vec<_>>();
         let mut views = Vec::new();
         let favs = resolve(&self.state.favorites);
         if !favs.is_empty() {
@@ -212,12 +243,11 @@ impl App {
             views.push(View { kind: ViewKind::Recent, id: "@recent".into(), name: "Recent".into(), games: recent });
         }
         for (i, s) in self.lib.systems.iter().enumerate() {
-            views.push(View {
-                kind: ViewKind::System(i),
-                id: s.id.clone(),
-                name: s.name.clone(),
-                games: s.games.clone(),
-            });
+            let games: Vec<usize> = s.games.iter().copied().filter(keep).collect();
+            // While filtering, systems with nothing left would just be noise.
+            if !games.is_empty() || !self.filter.is_active() {
+                views.push(View { kind: ViewKind::System(i), id: s.id.clone(), name: s.name.clone(), games });
+            }
         }
         self.views = views;
     }
@@ -369,6 +399,19 @@ impl App {
             self.reload();
             return;
         }
+        if self.filter_panel.is_some() {
+            let op = match k.code {
+                KeyCode::Up | KeyCode::Char('k') => Op::Up,
+                KeyCode::Down | KeyCode::Char('j') => Op::Down,
+                KeyCode::Left | KeyCode::Char('h') => Op::Left,
+                KeyCode::Right | KeyCode::Char('l') => Op::Right,
+                KeyCode::Enter => Op::Confirm,
+                KeyCode::Esc | KeyCode::Char('q' | 'F') => Op::Back,
+                _ => return,
+            };
+            self.apply(op);
+            return;
+        }
         if self.menu.is_some() {
             let op = match k.code {
                 KeyCode::Up | KeyCode::Char('k') => Op::Up,
@@ -440,6 +483,7 @@ impl App {
             KeyCode::Char('r') => Op::Random,
             KeyCode::Char('d') => Op::ToggleDetails,
             KeyCode::Char('m') => Op::Menu,
+            KeyCode::Char('F') => Op::Filter,
             _ => return,
         };
         self.apply(op);
@@ -469,12 +513,16 @@ impl App {
                     PadAction::NextLetter => Op::NextLetter,
                     PadAction::Menu => Op::Menu,
                     PadAction::Search => Op::Search,
+                    PadAction::Filter => Op::Filter,
                 });
             }
         }
     }
 
     fn apply(&mut self, op: Op) {
+        if self.filter_panel.is_some() {
+            return self.filter_op(op);
+        }
         if self.menu.is_some() {
             return self.menu_op(op);
         }
@@ -540,6 +588,7 @@ impl App {
             Op::NextLetter => self.jump_letter(true),
             Op::PrevLetter => self.jump_letter(false),
             Op::Menu => self.menu = Some(0),
+            Op::Filter => self.filter_panel = Some(0),
             Op::Search => {
                 if self.search.is_none() {
                     self.start_search();
@@ -559,6 +608,7 @@ impl App {
                 self.menu = None;
                 match MENU[i] {
                     "Search" => self.apply(Op::Search),
+                    "Filter" => self.apply(Op::Filter),
                     "Random game" => self.apply(Op::Random),
                     "Details pane" => self.apply(Op::ToggleDetails),
                     "Reload config" => self.reload(),
@@ -568,6 +618,32 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// The filter panel: up/down picks a row, left/right (or A) changes it, and the list updates
+    /// behind the panel as you go.
+    fn filter_op(&mut self, op: Op) {
+        let Some(row) = self.filter_panel else { return };
+        let rows = filter::ROWS.len();
+        let before = self.filter.clone();
+        match op {
+            Op::Up => self.filter_panel = Some((row + rows - 1) % rows),
+            Op::Down => self.filter_panel = Some((row + 1) % rows),
+            Op::Back | Op::Menu | Op::Filter => self.filter_panel = None,
+            Op::Confirm if filter::ROWS[row] == "Clear all" => self.filter = Filter::default(),
+            Op::Left => self.filter.cycle(row, false, &self.filter_options),
+            Op::Right | Op::Confirm => self.filter.cycle(row, true, &self.filter_options),
+            _ => {}
+        }
+        if self.filter != before {
+            self.rebuild_keeping_selection();
+            self.update_search();
+        }
+    }
+
+    /// Games matching the filter, out of all of them.
+    pub fn filtered_count(&self) -> usize {
+        self.lib.games.iter().filter(|g| self.filter.matches(g, &self.state)).count()
     }
 
     /// The on-screen keyboard: d-pad moves, A types, X deletes, Y adds a space, B or ✓ closes it
@@ -641,7 +717,7 @@ impl App {
     fn update_search(&mut self) {
         let Some(s) = &self.search else { return };
         let q = s.query.trim();
-        let results = if q.is_empty() {
+        let mut results = if q.is_empty() {
             let mut all: Vec<usize> = (0..self.lib.games.len()).collect();
             all.sort_by(|&a, &b| self.lib.games[a].sort_key.cmp(&self.lib.games[b].sort_key));
             all
@@ -661,6 +737,7 @@ impl App {
             });
             scored.into_iter().map(|(_, i)| i).collect()
         };
+        results.retain(|&g| self.filter.matches(&self.lib.games[g], &self.state));
         if let Some(s) = &mut self.search {
             s.results = results;
         }
@@ -707,6 +784,12 @@ impl App {
         if let Some(c) = &mut self.covers {
             c.poll();
         }
+        if let Some(found) = self.metadata.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.metadata = None;
+            crate::meta::apply(&mut self.lib, found);
+            self.filter_options = filter::Options::from(&self.lib);
+            self.rebuild_keeping_selection();
+        }
         let Some(run) = &mut self.running else { return };
         let status = match run.child.try_wait() {
             Ok(None) => return,
@@ -747,6 +830,8 @@ impl App {
                     c.reset(&cfg);
                 }
                 self.cfg = cfg;
+                self.load_metadata();
+                self.filter_options = filter::Options::from(&self.lib);
                 self.end_search();
                 self.rebuild_keeping_selection();
                 self.set_status(Level::Info, format!("Reloaded: {} games", self.lib.games.len()));

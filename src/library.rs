@@ -8,13 +8,11 @@ use std::path::{Path, PathBuf};
 
 const ROM_KEYS: &[&str] = &["rom", "file", "name", "dir"];
 
-#[derive(Debug, Clone, Default)]
-pub struct Meta {
-    pub description: Option<String>,
-    pub developer: Option<String>,
-    pub genre: Option<String>,
-    pub released: Option<String>,
-    pub players: Option<String>,
+pub use crate::meta::Meta;
+
+/// Metadata given in the config, which beats anything scraped.
+fn configured_meta(description: Option<String>, genre: Option<&str>, players: Option<u8>, year: Option<u16>) -> Meta {
+    Meta { description, genres: genre.map(crate::meta::genres).unwrap_or_default(), players, year, ..Meta::default() }
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +52,8 @@ pub struct System {
     pub libretro: Vec<String>,
     /// Folder name under ES-DE's media dir and Skyscraper's cache.
     pub esde: String,
+    /// ROMs are MAME sets (named by short name, not by title).
+    pub arcade: bool,
     pub skyscraper: String,
 }
 
@@ -93,7 +93,7 @@ fn unescape(s: &str) -> String {
     s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Library {
     pub games: Vec<Game>,
     pub systems: Vec<System>,
@@ -101,6 +101,15 @@ pub struct Library {
 }
 
 impl Library {
+    /// The library plus database metadata, for command-line use. The TUI loads metadata in the
+    /// background instead (see `App::load_metadata`).
+    pub fn load_complete(cfg: &Config) -> Library {
+        let mut lib = Library::load(cfg);
+        let found = crate::meta::lookup_all(cfg, &lib);
+        crate::meta::apply(&mut lib, found);
+        lib
+    }
+
     pub fn load(cfg: &Config) -> Library {
         let mut lib = Library::default();
         let roms_dir = expand_path(&cfg.roms_dir);
@@ -124,7 +133,7 @@ impl Library {
                 env: g.env.clone(),
                 vars: cfg.vars.clone(),
             };
-            let meta = Meta { description: g.description.clone(), ..Meta::default() };
+            let meta = configured_meta(g.description.clone(), g.genre.as_deref(), g.players, g.year);
             let art = ArtRef { manual: g.art.as_deref().map(expand_path), ..ArtRef::default() };
             lib.push_game(group, format!("game:{}", g.name), g.name.clone(), None, meta, launch, art);
         }
@@ -195,6 +204,7 @@ impl Library {
             }),
             libretro: sys.libretro.clone().unwrap_or_else(|| crate::art::default_libretro(&sys.id)),
             esde: sys.id.clone(),
+            arcade: sys.arcade,
             skyscraper: sys.skyscraper.clone().unwrap_or_else(|| crate::art::default_skyscraper(&sys.id)),
         });
 
@@ -215,7 +225,9 @@ impl Library {
             if arcade.is_some_and(|db| db.not_games.contains(&stem)) {
                 continue;
             }
-            let (es_name, meta) = meta.get(&rel_str).cloned().unwrap_or_default();
+            let (es_name, es_meta) = meta.get(&rel_str).cloned().unwrap_or_default();
+            let mut meta = configured_meta(None, ov.genre.as_deref(), ov.players, ov.year);
+            meta.fill(&es_meta);
             let mame_title = arcade.and_then(|db| db.names.get(&stem)).cloned();
             // MAME appends alternate titles ("Art of Fighting / Ryuuko no Ken"); show only the first.
             // For arcade sets MAME's own title beats a scraped one (scrapers often mix up sequels).
@@ -281,6 +293,7 @@ impl Library {
         self.systems.push(System {
             esde: id.clone(),
             skyscraper: id.clone(),
+            arcade: false,
             id,
             name: label.to_string(),
             games: Vec::new(),
@@ -332,9 +345,11 @@ fn read_gamelist(path: &Path) -> HashMap<String, (Option<String>, Meta)> {
         let meta = Meta {
             description: field("desc"),
             developer: field("developer"),
-            genre: field("genre"),
-            released: field("releasedate").map(|d| d.chars().take(4).collect()),
-            players: field("players"),
+            publisher: field("publisher"),
+            genres: field("genre").map(|g| crate::meta::genres(&g)).unwrap_or_default(),
+            year: field("releasedate").and_then(|d| crate::meta::year(&d)),
+            players: field("players").and_then(|p| crate::meta::players(&p)),
+            franchise: None,
         };
         map.insert(rel, (field("name"), meta));
     }

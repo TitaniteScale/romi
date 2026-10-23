@@ -2,11 +2,14 @@ mod app;
 mod art;
 mod config;
 mod cover;
+mod filter;
 mod gamepad;
 mod launch;
 mod library;
+mod meta;
 mod state;
 mod steam;
+mod titles;
 mod ui;
 
 use anyhow::Result;
@@ -40,11 +43,12 @@ keys:
   j/k ↑/↓   move           h/l ←/→   switch pane      tab/[ ]   next/prev system
   enter     play           /         search           f         favorite
   r         random         d         details pane     m         menu
-  ctrl-r    reload config  q         quit
+  F         filter         ctrl-r    reload config    q         quit
 
 controller:
   d-pad/stick move (hold to speed up)   A play   B back   Y favorite   X random
   LB/RB system   LT/RT previous/next letter   Select search   Start menu (incl. quit)
+  R3 (click right stick) filter by genre, players, decade, played
   searching: d-pad picks a key, A types, X deletes, Y space, B done
 ";
 
@@ -77,9 +81,9 @@ fn main() -> Result<()> {
     let cfg = config::load(&cfg_path)?;
     match mode {
         "check" => check(&cfg, &cfg_path),
-        "scrape" => art::scrape(&cfg, &library::Library::load(&cfg), &only),
+        "scrape" => art::scrape(&cfg, &library::Library::load_complete(&cfg), &only),
         "list" => {
-            let lib = library::Library::load(&cfg);
+            let lib = library::Library::load_complete(&cfg);
             let mut out = stdout().lock();
             for g in &lib.games {
                 writeln!(out, "{}\t{}\t{}", g.system, g.name, g.key)?;
@@ -91,7 +95,7 @@ fn main() -> Result<()> {
 }
 
 fn check(cfg: &config::Config, cfg_path: &std::path::Path) -> Result<()> {
-    let lib = library::Library::load(cfg);
+    let lib = library::Library::load_complete(cfg);
     println!("config  {}", app::tilde(cfg_path));
     println!("roms    {}\n", cfg.roms_dir);
     let roms = config::expand_path(&cfg.roms_dir);
@@ -115,6 +119,14 @@ fn check(cfg: &config::Config, cfg_path: &std::path::Path) -> Result<()> {
     if cfg.steam.enabled && steam::find_steam_dir(cfg.steam.dir.as_deref()).is_none() {
         println!("\n  steam is enabled but no Steam install was found");
     }
+    let count = |f: &dyn Fn(&library::Game) -> bool| lib.games.iter().filter(|g| f(g)).count();
+    println!(
+        "\nmetadata  {} genre · {} year · {} players · {} description",
+        count(&|g| !g.meta.genres.is_empty()),
+        count(&|g| g.meta.year.is_some()),
+        count(&|g| g.meta.players.is_some()),
+        count(&|g| g.meta.description.is_some()),
+    );
     println!("\n{} games total", lib.games.len());
     Ok(())
 }

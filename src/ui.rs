@@ -2,6 +2,7 @@
 
 use crate::app::{App, Level, MENU, OSK, PadState, Pane, ViewKind};
 use crate::cover::Cover;
+use crate::filter::ROWS as FILTER_ROWS;
 use crate::state::now;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect, Size};
@@ -111,6 +112,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.menu.is_some() {
         draw_menu(f, app, &theme, body);
     }
+    if app.filter_panel.is_some() {
+        draw_filter(f, app, &theme, body);
+    }
     draw_footer(f, app, &theme, footer);
 }
 
@@ -118,6 +122,31 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let (w, h) = (w.min(area.width), h.min(area.height));
     Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h)
+}
+
+fn draw_filter(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let Some(sel) = app.filter_panel else { return };
+    let lines: Vec<Line> = FILTER_ROWS
+        .iter()
+        .enumerate()
+        .map(|(i, &row)| {
+            let style = if i == sel { theme.selected(true) } else { Style::new() };
+            if row == "Clear all" {
+                let dim = if app.filter.is_active() { Style::new() } else { Style::new().dim() };
+                return Line::from(Span::styled(format!("  {row:<34}"), style.patch(dim)));
+            }
+            let value = app.filter.value(i, &app.filter_options);
+            Line::from(vec![
+                Span::styled(format!("  {row:<9}"), style.patch(Style::new().dim())),
+                Span::styled(format!("‹ {value:<20} ›   "), style),
+            ])
+        })
+        .collect();
+    let rect = centered(area, 42, lines.len() as u16 + 4);
+    f.render_widget(Clear, rect);
+    let count = Line::from(Span::styled(format!(" {} games ", app.filtered_count()), Style::new().dim()));
+    let block = theme.block(" Filter ", true).title_bottom(count.right_aligned()).padding(Padding::vertical(1));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -177,7 +206,14 @@ fn draw_flash(f: &mut Frame, theme: &Theme, area: Rect, letter: char) {
 fn draw_header(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let left = Line::from(vec![
         Span::styled(" romi", Style::new().fg(theme.accent).bold()),
-        Span::styled(format!("  {} games", app.lib.games.len()), Style::new().dim()),
+        Span::styled(
+            if app.filter.is_active() {
+                format!("  {} of {} games", app.filtered_count(), app.lib.games.len())
+            } else {
+                format!("  {} games", app.lib.games.len())
+            },
+            Style::new().dim(),
+        ),
     ]);
     let pad = match &app.pad {
         PadState::Connected(name) => Span::styled(format!("● {name} "), Style::new().fg(theme.accent)),
@@ -223,11 +259,15 @@ fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     // Pseudo views and search mix systems, so label each row with its system.
     let mixed = app.search.is_some() || !matches!(app.current_view().map(|v| &v.kind), Some(ViewKind::System(_)));
     let ids = app.list().to_vec();
-    let title = match (&app.search, app.current_view()) {
-        (Some(s), _) => format!(" Search · {} ", s.results.len()),
-        (None, Some(v)) => format!(" {} ", v.name),
+    let mut title = match (&app.search, app.current_view()) {
+        (Some(s), _) => format!(" Search · {}", s.results.len()),
+        (None, Some(v)) => format!(" {}", v.name),
         (None, None) => String::new(),
     };
+    for label in app.filter.labels() {
+        title.push_str(&format!(" · {label}"));
+    }
+    title.push(' ');
     let position = if ids.is_empty() { String::new() } else { format!(" {}/{} ", app.game + 1, ids.len()) };
     let block = theme
         .block(title, focused)
@@ -319,10 +359,20 @@ fn draw_details(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         lines.push(Line::raw(""));
     }
     let m = &game.meta;
-    for (k, v) in [("Developer", &m.developer), ("Genre", &m.genre), ("Released", &m.released), ("Players", &m.players)]
-    {
+    let genre = (!m.genres.is_empty()).then(|| m.genres.join(", "));
+    // Don't repeat the publisher when it's the same company.
+    let publisher = m.publisher.clone().filter(|p| Some(p) != m.developer.as_ref());
+    let players = m.players.map(|n| if n > 1 { format!("1–{n}") } else { "1".into() });
+    for (k, v) in [
+        ("Genre", genre),
+        ("Developer", m.developer.clone()),
+        ("Publisher", publisher),
+        ("Released", m.year.map(|y| y.to_string())),
+        ("Players", players),
+        ("Series", m.franchise.clone()),
+    ] {
         if let Some(v) = v {
-            lines.push(Line::from(vec![label(k), Span::raw(v.clone())]));
+            lines.push(Line::from(vec![label(k), Span::raw(v)]));
         }
     }
     if let Some(&secs) = app.state.playtime.get(&game.key).filter(|&&s| s > 0) {
@@ -373,6 +423,15 @@ fn draw_playing(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
 }
 
 fn draw_empty(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    if app.filter.is_active() {
+        let lines = vec![
+            Line::from(Span::styled("Nothing matches the filter", Style::new().fg(theme.accent).bold())),
+            Line::raw(""),
+            Line::raw("Open the filter (Start → Filter, or F) and loosen it."),
+        ];
+        f.render_widget(Paragraph::new(lines).alignment(Alignment::Center).block(theme.block("", true)), area);
+        return;
+    }
     let lines = vec![
         Line::from(Span::styled("No games found", Style::new().fg(theme.accent).bold())),
         Line::raw(""),
@@ -394,6 +453,15 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let pad = matches!(app.pad, PadState::Connected(_));
     let (ok, back) = if app.cfg.controller.swap_confirm { ("B", "A") } else { ("A", "B") };
 
+    if app.filter_panel.is_some() {
+        let line = if pad {
+            hints(&[("←/→", "change"), ("↑/↓", "row"), (back, "done")])
+        } else {
+            hints(&[("←/→", "change"), ("↑/↓", "row"), ("esc", "done")])
+        };
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
     if app.menu.is_some() {
         let line = if pad {
             hints(&[(ok, "select"), (back, "close")])

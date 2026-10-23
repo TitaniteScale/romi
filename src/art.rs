@@ -10,8 +10,9 @@
 
 use crate::config::{self, Config, expand_path};
 use crate::library::{Game, Library, System};
+use crate::titles::{TitleIndex, best_across};
 use anyhow::{Context, Result};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -170,63 +171,17 @@ fn cache_stem(sys: &System, game: &Game) -> PathBuf {
     config::cache_dir().join("art").join(&sys.id).join(rest.replace('/', "__"))
 }
 
-// ---- matching against libretro's file names ----
+// ---- libretro thumbnail sets ----
 
-/// libretro replaces these characters with `_` in thumbnail file names.
-fn libretro_safe(title: &str) -> String {
-    title.chars().map(|c| if "&*/:`<>?\\|\"".contains(c) { '_' } else { c }).collect()
-}
-
-fn strip_tags(s: &str) -> String {
-    let mut out = String::new();
-    let mut depth = 0usize;
-    for c in s.chars() {
-        match c {
-            '(' | '[' => depth += 1,
-            ')' | ']' => depth = depth.saturating_sub(1),
-            _ if depth == 0 => out.push(c),
-            _ => {}
-        }
-    }
-    out
-}
-
-/// A title reduced to comparable words: no tags, articles, "and", or punctuation. A lone "-"
-/// marks where a subtitle starts.
-fn words(title: &str) -> Vec<String> {
-    let t = strip_tags(title).to_lowercase().replace('&', " and ").replace(['\'', '’'], "");
-    let t: String = t.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { ' ' }).collect();
-    let mut out: Vec<String> =
-        t.split_whitespace().filter(|w| !matches!(*w, "the" | "and")).map(String::from).collect();
-    if matches!(out.first().map(String::as_str), Some("a" | "an")) {
-        out.remove(0);
-    }
-    out
-}
-
-/// Lower is better: real releases before demos/bootlegs, then by region, then the plainest name.
-fn rank(entry: &str) -> (bool, usize, usize) {
-    const BAD: &[&str] =
-        &["(Demo", "(Beta", "(Proto", "(Sample", "(Kiosk", "(Hack", "(Pirate", "bootleg", "prototype", "Korean"];
-    const REGIONS: &[&str] = &["(USA", "(World", "(Europe", "(Japan"];
-    let bad = BAD.iter().any(|b| entry.contains(b));
-    let region = REGIONS.iter().position(|r| entry.contains(r)).unwrap_or(REGIONS.len());
-    (bad, region, entry.len())
-}
-
-/// One libretro thumbnail set's file names, pre-split for matching.
+/// One libretro thumbnail set's file names (without `.png`).
 struct Listing {
     set: String,
-    names: Vec<String>,
-    exact: HashSet<String>,
-    words: Vec<Vec<String>>,
+    titles: TitleIndex,
 }
 
 impl Listing {
     fn new(set: String, names: Vec<String>) -> Listing {
-        let words = names.iter().map(|n| words(n)).collect();
-        let exact = names.iter().cloned().collect();
-        Listing { set, names, exact, words }
+        Listing { set, titles: TitleIndex::new(names) }
     }
 
     fn url(&self, name: &str) -> String {
@@ -234,37 +189,11 @@ impl Listing {
     }
 }
 
-/// Finds the best thumbnail for `title` across sets, trying stricter matches first:
-/// the exact file name, the same words, the same words plus a subtitle, then ignoring dashes.
+/// The best thumbnail for `title` across sets, as (set, file name).
 fn best_match<'a>(title: &str, listings: &[&'a Listing]) -> Option<(&'a Listing, &'a str)> {
-    let safe = libretro_safe(title);
-    if let Some(l) = listings.iter().find(|l| l.exact.contains(&safe)) {
-        return Some((l, l.names.iter().find(|n| **n == safe)?.as_str()));
-    }
-    let want = words(title);
-    if want.is_empty() {
-        return None;
-    }
-    let undashed = |w: &[String]| w.iter().filter(|x| *x != "-").cloned().collect::<Vec<_>>();
-    let want_undashed = undashed(&want);
-    type Tier<'t> = &'t dyn Fn(&[String]) -> bool;
-    let tiers: [Tier; 3] =
-        [&|w| w == want.as_slice(), &|w| w.len() > want.len() && w.starts_with(&want) && w[want.len()] == "-", &|w| {
-            undashed(w) == want_undashed
-        }];
-    for tier in tiers {
-        let best = listings
-            .iter()
-            .copied()
-            .flat_map(|l| {
-                l.words.iter().enumerate().filter(|(_, w)| tier(w)).map(move |(i, _)| (l, l.names[i].as_str()))
-            })
-            .min_by_key(|(_, name)| rank(name));
-        if best.is_some() {
-            return best;
-        }
-    }
-    None
+    let indexes: Vec<&TitleIndex> = listings.iter().map(|l| &l.titles).collect();
+    let (n, i) = best_across(title, &indexes)?;
+    Some((listings[n], listings[n].titles.names[i].as_str()))
 }
 
 /// Percent-encodes a URL path segment.
@@ -524,61 +453,6 @@ fn run_jobs(agent: &ureq::Agent, jobs: &[(usize, Job)], label: &str) -> (Vec<usi
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn matched(title: &str, names: &[&str]) -> Option<String> {
-        let l = Listing::new("Test".into(), names.iter().map(|s| s.to_string()).collect());
-        best_match(title, &[&l]).map(|(_, n)| n.to_string())
-    }
-
-    #[test]
-    fn exact_and_sanitized() {
-        assert_eq!(matched("Ape Escape (USA)", &["Ape Escape (USA)"]).as_deref(), Some("Ape Escape (USA)"));
-        assert_eq!(
-            matched(
-                "Dungeons & Dragons: Shadow over Mystara (USA 960619)",
-                &["Dungeons _ Dragons_ Shadow over Mystara (USA 960619)"]
-            )
-            .as_deref(),
-            Some("Dungeons _ Dragons_ Shadow over Mystara (USA 960619)")
-        );
-    }
-
-    #[test]
-    fn fuzzy_tiers() {
-        let names = [
-            "Puzzle Link (Europe)",
-            "Puzzle Link 2 (USA, Europe)",
-            "Baseball Stars Color - Pocket Sports Series (World) (En,Ja)",
-        ];
-        assert_eq!(matched("Puzzle Link", &names).as_deref(), Some("Puzzle Link (Europe)"));
-        assert_eq!(matched("Baseball Stars Color", &names).as_deref(), Some(names[2]));
-        assert_eq!(
-            matched(
-                "Legend of Zelda, The - The Wind Waker (USA, Canada)",
-                &["Legend of Zelda, The - The Wind Waker (USA)"]
-            )
-            .as_deref(),
-            Some("Legend of Zelda, The - The Wind Waker (USA)")
-        );
-        assert_eq!(
-            matched(
-                "Sonic the Hedgehog Pocket Adventure",
-                &[
-                    "Sonic The Hedgehog - Pocket Adventure (World) (Demo)",
-                    "Sonic The Hedgehog - Pocket Adventure (World)"
-                ]
-            )
-            .as_deref(),
-            Some("Sonic The Hedgehog - Pocket Adventure (World)")
-        );
-        assert_eq!(matched("Nige-Ron-Pa", &["Nigeronpa (Japan)"]), None);
-    }
-
-    #[test]
-    fn prefers_usa_and_real_releases() {
-        let names = ["Chibi-Robo! (Europe) (En,Fr,De,Es,It)", "Chibi-Robo! (USA) (Demo)", "Chibi-Robo! (Japan)"];
-        assert_eq!(matched("Chibi-Robo! (USA)", &names).as_deref(), Some("Chibi-Robo! (Europe) (En,Fr,De,Es,It)"));
-    }
 
     #[test]
     fn url_encoding_round_trips() {
