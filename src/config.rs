@@ -24,6 +24,7 @@ pub struct Config {
     pub systems: Vec<SystemConfig>,
     pub games: Vec<GameConfig>,
     pub steam: SteamConfig,
+    pub art: ArtConfig,
 }
 
 impl Default for Config {
@@ -38,6 +39,7 @@ impl Default for Config {
             systems: Vec::new(),
             games: Vec::new(),
             steam: SteamConfig::default(),
+            art: ArtConfig::default(),
         }
     }
 }
@@ -80,6 +82,10 @@ pub struct SystemConfig {
     /// ROMs use MAME short names; look up titles and hide BIOS/device sets via `arcade_db`.
     #[serde(default)]
     pub arcade: bool,
+    /// libretro thumbnail sets to search for art, in order. Known system ids have defaults.
+    pub libretro: Option<Vec<String>>,
+    /// Skyscraper cache platform folder, when it differs from `id` (e.g. `segacd`).
+    pub skyscraper: Option<String>,
     /// Per-file tweaks, keyed by path relative to the system dir (usually just the file name).
     #[serde(default)]
     pub overrides: HashMap<String, Override>,
@@ -96,6 +102,8 @@ pub struct Override {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub hidden: bool,
+    /// Image to use instead of scraped art.
+    pub art: Option<String>,
 }
 
 /// A hand-added entry: anything that can be started with a command.
@@ -113,6 +121,8 @@ pub struct GameConfig {
     #[serde(default)]
     pub env: HashMap<String, String>,
     pub description: Option<String>,
+    /// Image to show for this entry.
+    pub art: Option<String>,
 }
 
 fn default_group() -> String {
@@ -141,6 +151,27 @@ impl Default for SteamConfig {
             command: "steam steam://rungameid/{appid}".into(),
             mode: LaunchMode::Detach,
             exclude: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ArtConfig {
+    /// ES-DE's downloaded_media folder; its covers are used as-is.
+    pub esde_media_dir: Option<String>,
+    /// Skyscraper's cache folder; its covers are used as-is.
+    pub skyscraper_cache: Option<String>,
+    /// Let `romi --scrape` download from libretro thumbnails and Steam's CDN.
+    pub online: bool,
+}
+
+impl Default for ArtConfig {
+    fn default() -> Self {
+        Self {
+            esde_media_dir: Some("~/ES-DE/downloaded_media".into()),
+            skyscraper_cache: Some("~/.skyscraper/cache".into()),
+            online: true,
         }
     }
 }
@@ -182,6 +213,10 @@ pub fn config_path() -> PathBuf {
         return PathBuf::from(p);
     }
     dirs::config_dir().unwrap_or_else(|| home().join(".config")).join("romi/config.json")
+}
+
+pub fn cache_dir() -> PathBuf {
+    dirs::cache_dir().unwrap_or_else(|| home().join(".cache")).join("romi")
 }
 
 pub fn state_dir() -> PathBuf {

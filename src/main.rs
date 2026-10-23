@@ -1,4 +1,5 @@
 mod app;
+mod art;
 mod config;
 mod gamepad;
 mod launch;
@@ -27,6 +28,7 @@ usage: romi [options]
 options:
   --check          show what romi finds and anything that looks broken
   --list           print every game as tab-separated system, name, key
+  --scrape [id..]  find box art on disk and download the rest (all systems, or just these ids)
   --config <path>  use a different config file (or set ROMI_CONFIG)
   -h, --help       show this help
   -V, --version    show the version
@@ -46,10 +48,13 @@ fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let mut cfg_path = config::config_path();
     let mut mode = "tui";
+    let mut only = Vec::new();
     while let Some(a) = args.next() {
         match a.as_str() {
             "--check" => mode = "check",
             "--list" => mode = "list",
+            "--scrape" => mode = "scrape",
+            id if mode == "scrape" && !id.starts_with('-') => only.push(id.to_string()),
             "--config" => cfg_path = PathBuf::from(args.next().ok_or_else(|| anyhow::anyhow!("--config needs a path"))?),
             "-h" | "--help" => {
                 print!("{HELP}");
@@ -66,6 +71,7 @@ fn main() -> Result<()> {
     let cfg = config::load(&cfg_path)?;
     match mode {
         "check" => check(&cfg, &cfg_path),
+        "scrape" => art::scrape(&cfg, &library::Library::load(&cfg), &only),
         "list" => {
             let lib = library::Library::load(&cfg);
             let mut out = stdout().lock();

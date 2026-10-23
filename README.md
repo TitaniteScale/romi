@@ -8,6 +8,7 @@ terminal's palette, so it matches whatever theme you're running.
 romi            # open the launcher
 romi --check    # what got found, and what looks broken (missing emulators/cores)
 romi --list     # every game as TSV: system, name, key (handy for rofi/fzf scripts)
+romi --scrape   # find box art on disk, download the rest (or: romi --scrape psx gba)
 ```
 
 ## Install
@@ -87,6 +88,30 @@ systems), then the ES-DE gamelist name, then the file name with region tags stri
 
 State (favorites, recents, play time, last selection) lives in `~/.local/state/romi/state.json`.
 
+## Box art
+
+`romi --scrape` reports which games have art and downloads what it can. It's safe to rerun: only new
+matches are fetched. romi looks in this order, using local files where they are:
+
+1. `"art": "/path/to/image.png"` on a game entry or a system override
+2. romi's cache, `~/.cache/romi/art/<system>/`
+3. ES-DE's `downloaded_media` (covers, then 3D boxes); set `art.esde_media_dir`
+4. Skyscraper's cache (`art.skyscraper_cache`), matched by ROM file name
+5. Steam's library cache
+
+Online sources need no accounts or keys:
+
+- **[libretro thumbnails](https://thumbnails.libretro.com)**, RetroArch's box art. romi downloads
+  each set's file list once a week (cached in `~/.cache/romi/libretro/`) and matches titles
+  locally. It tries the exact name first, then the same words ignoring region tags, then the title
+  plus a subtitle, then ignoring dashes. US/World releases win over others, and demos/bootlegs come
+  last. Arcade systems match on the MAME title. A system's sets come from its id; override with
+  `"libretro": ["Set Name", ...]` on the system.
+- **Steam's CDN** for installed Steam games.
+
+Set `"art": { "online": false }` to only use what's already on disk. The art belongs to its
+publishers: romi fetches and caches it on your machine and never ships any.
+
 ## Code map
 
 | File              | What's in it                                                     |
@@ -99,11 +124,14 @@ State (favorites, recents, play time, last selection) lives in `~/.local/state/r
 | `src/app.rs`      | app state; keyboard and controller both become the same `Op`s    |
 | `src/ui.rs`       | ratatui drawing                                                  |
 | `src/state.rs`    | favorites, history, play time                                    |
+| `src/art.rs`      | box art lookup and `--scrape` (libretro thumbnails, Steam CDN)   |
 | `src/main.rs`     | CLI, event loop, handing the terminal to `terminal`-mode commands |
 
 ## Ideas for later
 
-- Box art via the kitty graphics protocol (Ghostty supports it; `ratatui-image` crate)
+- Show box art in the TUI via the kitty graphics protocol (Ghostty supports it; `ratatui-image`)
+- Match ROMs by CRC against RetroArch's `.rdb` databases for titles that names can't match
+- SteamGridDB (API key) for PC entries and Steam games with hashed CDN paths
 - Collections / custom lists, hiding games from inside the UI
 - Multiple commands per system to pick from (alternate emulators)
 - Per-game play-time sorting, "continue playing" on start

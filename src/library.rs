@@ -29,6 +29,17 @@ pub struct Game {
     pub path: Option<PathBuf>,
     pub meta: Meta,
     pub launch: Launch,
+    pub art: ArtRef,
+}
+
+/// What box art lookups need to know about a game.
+#[derive(Debug, Clone, Default)]
+pub struct ArtRef {
+    /// Title to search thumbnail sets for: the ROM's file stem, or the MAME title for arcade sets.
+    pub title: Option<String>,
+    pub appid: Option<String>,
+    /// Image set by hand in the config.
+    pub manual: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -39,6 +50,11 @@ pub struct System {
     pub games: Vec<usize>,
     /// Why this system probably can't launch anything (missing emulator or core).
     pub problem: Option<String>,
+    /// libretro thumbnail sets to search, in order.
+    pub libretro: Vec<String>,
+    /// Folder name under ES-DE's media dir and Skyscraper's cache.
+    pub esde: String,
+    pub skyscraper: String,
 }
 
 /// MAME short name lookups, from the lists ES-DE ships.
@@ -109,7 +125,8 @@ impl Library {
                 vars: cfg.vars.clone(),
             };
             let meta = Meta { description: g.description.clone(), ..Meta::default() };
-            lib.push_game(group, format!("game:{}", g.name), g.name.clone(), None, meta, launch);
+            let art = ArtRef { manual: g.art.as_deref().map(expand_path), ..ArtRef::default() };
+            lib.push_game(group, format!("game:{}", g.name), g.name.clone(), None, meta, launch, art);
         }
 
         if cfg.steam.enabled {
@@ -125,7 +142,8 @@ impl Library {
                         env: HashMap::new(),
                         vars,
                     };
-                    lib.push_game(group, format!("steam:{}", app.appid), app.name, None, Meta::default(), launch);
+                    let art = ArtRef { appid: Some(app.appid.clone()), ..ArtRef::default() };
+                    lib.push_game(group, format!("steam:{}", app.appid), app.name, None, Meta::default(), launch, art);
                 }
             }
         }
@@ -162,6 +180,9 @@ impl Library {
             name: sys.name.clone(),
             games: Vec::new(),
             problem: check_command(&sys.command, &cfg.vars, ROM_KEYS),
+            libretro: sys.libretro.clone().unwrap_or_else(|| crate::art::default_libretro(&sys.id)),
+            esde: sys.id.clone(),
+            skyscraper: sys.skyscraper.clone().unwrap_or_else(|| crate::art::default_skyscraper(&sys.id)),
         });
 
         for rel in files {
@@ -181,10 +202,17 @@ impl Library {
                 continue;
             }
             let (es_name, meta) = meta.get(&rel_str).cloned().unwrap_or_default();
-            // MAME appends alternate titles: "Art of Fighting / Ryuuko no Ken".
-            let mame_name = arcade.and_then(|db| db.names.get(&stem)).map(|n| clean_name(n.split(" / ").next().unwrap_or(n)));
+            let mame_title = arcade.and_then(|db| db.names.get(&stem)).cloned();
+            // MAME appends alternate titles ("Art of Fighting / Ryuuko no Ken"); show only the first.
             // For arcade sets MAME's own title beats a scraped one (scrapers often mix up sequels).
+            let mame_name = mame_title.as_deref().map(|t| clean_name(t.split(" / ").next().unwrap_or(t)));
             let name = ov.name.or(mame_name).or(es_name).unwrap_or_else(|| clean_name(&stem));
+            let art = ArtRef {
+                // Thumbnail sets use the full title, alternates and all.
+                title: Some(mame_title.unwrap_or_else(|| stem.clone())),
+                appid: None,
+                manual: ov.art.as_deref().map(expand_path),
+            };
 
             let mut vars = cfg.vars.clone();
             vars.insert("rom".into(), path.to_string_lossy().into_owned());
@@ -201,11 +229,12 @@ impl Library {
                 vars,
             };
             let key = format!("{}:{}", sys.id, rel_str);
-            self.push_game(idx, key, name, Some(path), meta, launch);
+            self.push_game(idx, key, name, Some(path), meta, launch, art);
         }
     }
 
-    fn push_game(&mut self, system: usize, key: String, name: String, path: Option<PathBuf>, meta: Meta, launch: Launch) {
+    #[allow(clippy::too_many_arguments)]
+    fn push_game(&mut self, system: usize, key: String, name: String, path: Option<PathBuf>, meta: Meta, launch: Launch, art: ArtRef) {
         self.games.push(Game {
             key,
             sort_key: sort_key(&name),
@@ -215,6 +244,7 @@ impl Library {
             path,
             meta,
             launch,
+            art,
         });
         self.systems[system].games.push(self.games.len() - 1);
     }
@@ -224,7 +254,16 @@ impl Library {
         if let Some(i) = self.systems.iter().position(|s| s.id == label || s.name == label) {
             return i;
         }
-        self.systems.push(System { id: label.to_lowercase(), name: label.to_string(), games: Vec::new(), problem: None });
+        let id = label.to_lowercase();
+        self.systems.push(System {
+            esde: id.clone(),
+            skyscraper: id.clone(),
+            id,
+            name: label.to_string(),
+            games: Vec::new(),
+            problem: None,
+            libretro: Vec::new(),
+        });
         self.systems.len() - 1
     }
 
