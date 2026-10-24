@@ -95,16 +95,18 @@ impl Prepared {
         cmd.spawn().map_err(|e| spawn_error(&self.argv[0], e))
     }
 
+    /// Fails if the program isn't installed. Spawning reports that too, but a detached game is
+    /// spawned by a background romi whose errors nobody sees, so check first.
+    pub fn check_program(&self) -> Result<()> {
+        match find_program(&self.argv[0]) {
+            Some(_) => Ok(()),
+            None => bail!("{}: not found (not installed or not on PATH?)", self.argv[0]),
+        }
+    }
+
     /// Starts a game with the terminal attached. The caller must have released the terminal.
     pub fn spawn_attached(&self) -> Result<Child> {
         self.command().spawn().map_err(|e| spawn_error(&self.argv[0], e))
-    }
-
-    /// Fire and forget. A thread reaps the child so it doesn't linger as a zombie.
-    pub fn spawn_detached(&self, log: &Path) -> Result<()> {
-        let mut child = self.spawn_logged(log, true)?;
-        std::thread::spawn(move || child.wait());
-        Ok(())
     }
 }
 

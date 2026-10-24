@@ -773,15 +773,19 @@ impl App {
         };
         let result = match game.launch.mode {
             LaunchMode::Wait => prepared.spawn_logged(&log_path(), true).map(|child| {
-                let (session, state) = Session::begin(&game.key);
+                let (session, state) = Session::begin(&self.lib, g, child.id());
                 self.state = state;
                 self.running = Some(Running { game: g, child, started: Instant::now(), session });
             }),
-            LaunchMode::Detach => prepared.spawn_detached(&log_path()).map(|()| {
-                let key = self.lib.games[g].key.clone();
-                self.state = State::update(|s| s.record_launch(&key));
-                self.set_status(Level::Info, format!("Started {name}"));
-            }),
+            // A copy of romi plays it in the background and records the session, so play time
+            // counts even if this one quits first.
+            LaunchMode::Detach => prepared
+                .check_program()
+                .and_then(|()| crate::session::play_in_background(&self.cfg_path, &game.key))
+                .map(|mut watcher| {
+                    std::thread::spawn(move || watcher.wait());
+                    self.set_status(Level::Info, format!("Started {name}"));
+                }),
             // The main loop releases the terminal, then starts it (see `run_in_terminal`).
             LaunchMode::Terminal => {
                 self.terminal_job = Some(TerminalJob { game: g, prepared });

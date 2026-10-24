@@ -2,15 +2,17 @@
 
 use crate::config::{self, Config, LaunchMode};
 use crate::filter::Filter;
-use crate::launch::{Prepared, find_program};
+use crate::launch::Prepared;
 use crate::library::{Game, Library, Resolve};
 use crate::meta::Meta;
-use crate::session::Session;
+use crate::session::{self, Session};
 use crate::state::{State, now};
 use crate::{app, art, steam};
 use anyhow::Result;
 use clap::{Args, CommandFactory, Parser, Subcommand};
+use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use serde::Serialize;
+use std::ffi::OsStr;
 use std::io::{Write, stdout};
 use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
@@ -102,9 +104,10 @@ pub enum Command {
     /// Show everything romi knows about one game
     Info {
         /// A game key (from `romi list`), an exact name, or words from the name
+        #[arg(add = ArgValueCompleter::new(complete_games))]
         game: String,
         /// Only look in this system (id or name)
-        #[arg(long, value_name = "ID")]
+        #[arg(long, value_name = "ID", add = ArgValueCompleter::new(complete_systems))]
         system: Option<String>,
         /// Print JSON instead
         #[arg(long)]
@@ -113,9 +116,10 @@ pub enum Command {
     /// Start a game. Exits with the game's own exit code
     Play {
         /// A game key (from `romi list`), an exact name, or words from the name
+        #[arg(add = ArgValueCompleter::new(complete_games))]
         game: String,
         /// Only look in this system (id or name)
-        #[arg(long, value_name = "ID")]
+        #[arg(long, value_name = "ID", add = ArgValueCompleter::new(complete_systems))]
         system: Option<String>,
         /// Run it this way instead of how the config says: wait (output goes to a log), terminal
         /// (output comes here), or detach (start it and return)
@@ -128,10 +132,16 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Show the games running right now, started from the TUI or `romi play`
+    Status {
+        /// Print a JSON array instead
+        #[arg(long)]
+        json: bool,
+    },
     /// Find box art on disk and download the rest
     Scrape {
         /// Only these systems (ids from the config); all of them if none are given
-        #[arg(value_name = "ID")]
+        #[arg(value_name = "ID", add = ArgValueCompleter::new(complete_systems))]
         systems: Vec<String>,
     },
 }
@@ -140,10 +150,10 @@ pub enum Command {
 #[derive(Args)]
 pub struct Filters {
     /// Only this system (id or name); repeat for more
-    #[arg(long, value_name = "ID")]
+    #[arg(long, value_name = "ID", add = ArgValueCompleter::new(complete_systems))]
     system: Vec<String>,
     /// Only this genre (an unknown one lists them all)
-    #[arg(long)]
+    #[arg(long, add = ArgValueCompleter::new(complete_genres))]
     genre: Option<String>,
     /// At least this many players
     #[arg(long, value_name = "N")]
@@ -177,6 +187,54 @@ fn parse_decade(s: &str) -> Result<u16, String> {
     Ok(year)
 }
 
+/// Answers the shell when it asks for completions (it runs romi with `COMPLETE=<shell>` set), then
+/// exits. Does nothing on a normal run. Must come before anything is printed.
+pub fn complete() {
+    clap_complete::CompleteEnv::with_factory(Cli::command).complete();
+}
+
+/// The library for completions. Reads the config only if it exists: completing must never write
+/// the default one. (`--config` on the command line being completed isn't seen here.)
+fn completion_library(with_metadata: bool) -> Option<Library> {
+    let path = config::config_path();
+    let cfg = path.exists().then(|| config::load(&path).ok()).flatten()?;
+    Some(if with_metadata { Library::load_complete(&cfg) } else { Library::load(&cfg) })
+}
+
+/// Values that start with what's typed so far, ignoring case.
+fn candidates<'a>(current: &OsStr, values: impl Iterator<Item = (&'a str, &'a str)>) -> Vec<CompletionCandidate> {
+    let typed = current.to_string_lossy().to_lowercase();
+    values
+        .filter(|(value, _)| value.to_lowercase().starts_with(&typed))
+        .map(|(value, help)| CompletionCandidate::new(value).help(Some(help.to_string().into())))
+        .collect()
+}
+
+/// Game names, which read better than keys. A name two games share completes to their keys.
+fn complete_games(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(lib) = completion_library(false) else { return Vec::new() };
+    let mut seen = std::collections::HashMap::new();
+    for g in &lib.games {
+        *seen.entry(g.name.as_str()).or_insert(0) += 1;
+    }
+    let values = lib.games.iter().map(|g| (if seen[g.name.as_str()] > 1 { &g.key } else { &g.name }, &g.system));
+    candidates(current, values.map(|(v, s)| (v.as_str(), s.as_str())))
+}
+
+fn complete_systems(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(lib) = completion_library(false) else { return Vec::new() };
+    candidates(current, lib.systems.iter().map(|s| (s.id.as_str(), s.name.as_str())))
+}
+
+fn complete_genres(current: &OsStr) -> Vec<CompletionCandidate> {
+    let Some(lib) = completion_library(true) else { return Vec::new() };
+    let genres: Vec<(String, String)> = crate::meta::genre_counts(&lib)
+        .into_iter()
+        .map(|(g, n)| (g, format!("{n} game{}", if n == 1 { "" } else { "s" })))
+        .collect();
+    candidates(current, genres.iter().map(|(g, n)| (g.as_str(), n.as_str())))
+}
+
 /// Parses the arguments, exiting on bad ones. Returns the command (None opens the TUI) and the
 /// config path.
 pub fn parse() -> (Option<Command>, PathBuf) {
@@ -208,7 +266,10 @@ pub fn run(command: Command, cfg: &Config, cfg_path: &std::path::Path) -> Result
         Command::Check => check(cfg, cfg_path),
         Command::List { filters, json } => list(cfg, &filters, json),
         Command::Info { game, system, json } => info(cfg, &game, system.as_deref(), json),
-        Command::Play { game, system, mode, dry_run, json } => play(cfg, &game, system.as_deref(), mode, dry_run, json),
+        Command::Play { game, system, mode, dry_run, json } => {
+            play(cfg, cfg_path, &game, system.as_deref(), mode, dry_run, json)
+        }
+        Command::Status { json } => status(json),
         Command::Scrape { systems } => art::scrape(cfg, &Library::load_complete(cfg), &systems),
     }
 }
@@ -399,6 +460,7 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
 
 fn play(
     cfg: &Config,
+    cfg_path: &std::path::Path,
     query: &str,
     system: Option<&str>,
     mode: Option<LaunchMode>,
@@ -407,7 +469,8 @@ fn play(
 ) -> Result<()> {
     // No metadata needed, so this skips the database lookups `list` and `info` do.
     let lib = Library::load(cfg);
-    let game = &lib.games[resolve(&lib, query, system)?];
+    let g = resolve(&lib, query, system)?;
+    let game = &lib.games[g];
     let mode = mode.unwrap_or(game.launch.mode);
     let prepared = match game.launch.prepare() {
         Ok(p) => p,
@@ -416,14 +479,13 @@ fn play(
     if dry_run {
         return print_command(game, &prepared, mode, json);
     }
-    if find_program(&prepared.argv[0]).is_none() {
-        let msg = format!("{}: {} not found (not installed or not on PATH?)", game.name, prepared.argv[0]);
-        return fail(exit::UNAVAILABLE, msg);
+    if let Err(e) = prepared.check_program() {
+        return fail(exit::UNAVAILABLE, format!("{}: {e:#}", game.name));
     }
     let log = app::log_path();
     if mode == LaunchMode::Detach {
-        prepared.spawn_detached(&log)?;
-        State::update(|s| s.record_launch(&game.key));
+        // A copy of romi in wait mode plays it in the background and records the session.
+        session::play_in_background(cfg_path, &game.key)?;
         if json {
             println!("{}", serde_json::json!({ "key": game.key, "name": game.name, "mode": mode }));
         }
@@ -434,7 +496,7 @@ fn play(
         LaunchMode::Terminal => prepared.spawn_attached()?,
         _ => prepared.spawn_logged(&log, false)?,
     };
-    let (session, _) = Session::begin(&game.key);
+    let (session, _) = Session::begin(&lib, g, child.id());
     let status = wait_for_game(&mut child)?;
     let (played, _) = session.end();
     // Like a shell: 128 plus the signal number when the game was killed.
@@ -529,6 +591,37 @@ fn wait_for_game(child: &mut Child) -> std::io::Result<ExitStatus> {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+// ---- status ----
+
+fn status(json: bool) -> Result<()> {
+    let running = session::running();
+    if json {
+        let games: Vec<_> = running
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "key": r.key,
+                    "name": r.name,
+                    "system": r.system,
+                    "system_name": r.system_name,
+                    "pid": r.pid,
+                    "started": r.started,
+                    "elapsed_secs": now().saturating_sub(r.started),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&games)?);
+    } else if running.is_empty() {
+        println!("nothing running");
+    } else {
+        for r in &running {
+            let elapsed = crate::ui::fmt_duration(now().saturating_sub(r.started));
+            println!("{}  ({}, {elapsed})", r.name, r.system_name);
+        }
+    }
+    Ok(())
 }
 
 // ---- check ----

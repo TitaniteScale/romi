@@ -30,6 +30,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
 fn main() {
+    cli::complete();
     let (command, cfg_path) = cli::parse();
     let result = load_config(&cfg_path).and_then(|cfg| match command {
         Some(command) => cli::run(command, &cfg, &cfg_path),
@@ -139,7 +140,7 @@ fn run_in_terminal(
     let mut played = Duration::ZERO;
     let code = match job.prepared.spawn_attached() {
         Ok(mut child) => {
-            let (session, state) = Session::begin(&app.lib.games[job.game].key);
+            let (session, state) = Session::begin(&app.lib, job.game, child.id());
             app.state = state;
             let status = child.wait();
             let (time, state) = session.end();

@@ -27,7 +27,7 @@ Small things that make everything after them easier to build and check. All done
 - ✓ **Startup quirk:** if a terminal never answered the image-support query, romi lost the first
   keypress. romi now checks that the terminal answers before asking.
 
-## 1. A real CLI
+## 1. A real CLI ✓
 
 romi already has `--check`, `--list` and `--scrape`. The goal is a CLI other programs can drive without
 scraping text: rofi scripts, a waybar module, other launchers, coding agents.
@@ -52,9 +52,10 @@ Built in this order, one commit each:
      which games rarely use: 64, 65 and 66 as above, 69 for a missing emulator and 78 for a config
      error.
    - ^C or a script's `timeout` stops the game as well as romi, and the session is still recorded.
-5. **`romi status --json`, tracked detached games, and shell completions.** A detached game leaves a
-   small romi process behind to record its play time. Every running game is listed in the state
-   directory, which is what `romi status` reads. Completions cover game keys and system ids.
+5. ✓ **`romi status --json`, tracked detached games, and shell completions.** A detached game is
+   played by a background copy of romi that records its play time. Every running game is listed in
+   the state directory, which is what `romi status` reads. Completions cover commands, flags, game
+   names, system ids and genres.
 
 ## 2. `romi init`
 

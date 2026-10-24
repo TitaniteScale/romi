@@ -13,12 +13,13 @@ romi check     # what got found, and what looks broken (missing emulators/cores)
 romi list      # every game as TSV: system, name, key (handy for rofi/fzf scripts)
 romi info chrono trigger   # everything romi knows about one game
 romi play super metroid    # start it, from a script, a keybind, or another launcher
+romi status    # what's running right now, and for how long
 romi scrape    # find box art on disk, download the rest (or: romi scrape psx gba)
 ```
 
 ## Command line
 
-`romi list`, `romi info` and `romi play` are meant for scripts as much as for people. Add `--json`
+`romi list`, `info`, `play` and `status` are meant for scripts as much as for people. Add `--json`
 for machine-readable output.
 
 ```
@@ -37,6 +38,24 @@ configured one: `wait` sends the game's output to `last.log`, `terminal` lets it
 script, stops both; romi waits for the game to exit and records the session before it does. A
 signal sent to romi alone is passed on to the game. `--json` prints the outcome: `exit_code`,
 `played_secs` and the `log` path.
+
+**Detached games** (from `--mode detach`, or a game configured that way) are played by a copy of
+romi running in the background, so their play time is recorded even after the TUI or the command
+that started them has gone. A launcher that hands off and returns right away, like Steam, still
+counts as a few seconds.
+
+**Status**: `romi status` lists the games running right now, however they were started.
+`romi status --json` gives `key`, `name`, `system`, `system_name`, `pid` (the game's process),
+`started` (Unix time) and `elapsed_secs` for each, which is all a waybar module needs.
+
+**Completions** cover commands, flags, game names, system ids and genres, read from your library as
+you type. Set them up once:
+
+```
+echo 'COMPLETE=fish romi | source' > ~/.config/fish/completions/romi.fish   # fish
+echo 'source <(COMPLETE=bash romi)' >> ~/.bashrc                            # bash
+echo 'source <(COMPLETE=zsh romi)' >> ~/.zshrc                              # zsh
+```
 
 **Naming a game**: `info` and `play` take a key from `romi list` (`snes:Chrono Trigger (USA).sfc`), an exact
 name in any case, or words that all appear in the name (`romi info fusion metroid`). It stops at the
@@ -232,8 +251,8 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
-| `src/cli.rs`      | the command line: arguments, `check`, `list`, `info`, `play`, exit codes |
-| `src/session.rs`  | recording a game's start and end, for the TUI and `romi play`   |
+| `src/cli.rs`      | the command line: arguments, commands, completions, exit codes   |
+| `src/session.rs`  | recording a game's start and end, running games, background play |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
 | `e2e/test_*.py`   | end-to-end tests of the TUI and the CLI                          |
