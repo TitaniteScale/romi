@@ -67,3 +67,70 @@ def test_details_pane(start, sandbox):
     with_ra(sandbox, rom_md5=EMPTY_MD5)
     romi = start(cols=140)  # wide enough for the details pane
     romi.wait_for("3/92 achievements · 800 points")
+
+
+def with_screen_data(sandbox):
+    with_ra(sandbox, rom_md5=EMPTY_MD5)
+    ra = sandbox.home / ".cache/romi/ra"
+    (ra / "list-3.json").write_text(json.dumps(
+        [{"Title": "Super Metroid", "ID": 236, "NumAchievements": 69, "Points": 700, "Hashes": []}]))
+    (ra / "progress.json").write_text(json.dumps([
+        {"GameID": 506, "NumAwarded": 3, "NumAwardedHardcore": 2, "HighestAwardKind": None},
+        {"GameID": 236, "NumAwarded": 69, "NumAwardedHardcore": 69, "HighestAwardKind": "mastered"}]))
+    (ra / "game-506.json").write_text(json.dumps([
+        {"title": "First Strike", "description": "Win the first battle", "points": 5, "kind": "progression",
+         "earned": "2026-10-20 18:02:11", "earned_hardcore": None, "rarity": 0.8},
+        {"title": "Perfect Campaign", "description": "S-rank every mission", "points": 50, "kind": None,
+         "earned": None, "earned_hardcore": None, "rarity": 0.02}]))
+
+
+def list_rows(romi):
+    return [line for line in romi.lines() if "pts" in line]
+
+
+def test_screen_filters_and_opens_a_game(start, sandbox):
+    with_screen_data(sandbox)
+    romi = start()
+    romi.keys("A")
+    romi.wait_for("‹ all systems ›   showing all")
+    assert len(list_rows(romi)) == 2
+    romi.keys("\t\t\t")  # in progress → not started → finished
+    romi.wait_for("showing finished")
+    assert len(list_rows(romi)) == 1 and "mastered" in list_rows(romi)[0]
+    romi.keys("\t\t")  # need another dump → all
+    romi.keys("l")
+    romi.wait_for("‹ Game Boy Advance ›")
+    assert len(list_rows(romi)) == 1
+    romi.keys("\r")
+    romi.wait_for("✓ First Strike")
+    assert "earned 2026-10-20" in romi.text() and "· Perfect Campaign  50 points · 2% of players" in romi.text()
+    romi.keys("\x1b")
+    romi.wait_for("‹ Game Boy Advance ›")
+    romi.keys("\x1b")
+    romi.wait_for(lambda: "Achievements" not in romi.text())
+
+
+def test_search_by_name(start, sandbox):
+    with_screen_data(sandbox)
+    romi = start()
+    romi.keys("A")
+    romi.wait_for("showing all")
+    romi.keys("/metroid\r")
+    romi.wait_for("1 game")
+    assert "Super Metroid" in list_rows(romi)[0]
+
+
+def test_from_the_game_menu(start, sandbox):
+    with_screen_data(sandbox)
+    romi = start()
+    romi.keys("o")
+    romi.wait_for("Achievements…")
+    for _ in range(6):
+        if "Achievements…" in romi.selected():
+            break
+        romi.keys("j")
+    romi.keys("\r")
+    romi.wait_for("✓ First Strike")
+    # Opened on one game, going back closes the screen.
+    romi.keys("\x1b")
+    romi.wait_for(lambda: "First Strike" not in romi.text() and "Systems" in romi.text())

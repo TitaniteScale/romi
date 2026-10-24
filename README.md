@@ -182,11 +182,12 @@ Hooks fit in here too: `"on_launch": "playerctl pause"` stops the music while yo
 | `d`               |                 | toggle details pane                             |
 | `v`               | L3              | cover grid / list                               |
 | `S`               | (menu)          | stats                                           |
+| `A`               | (menu)          | achievements                                    |
 | `/`               | Select          | fuzzy search everything                         |
 | `F`               | R3              | filter by genre, players, decade, played, tag   |
 | `s`               | (menu)          | sort: name, last played, most played, year      |
-| `o`               | Start → game…   | the selected game's menu: favorite, hide, tags, emulator |
-| `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, cover grid, details, stats, show hidden, reload, quit |
+| `o`               | Start → game…   | the selected game's menu: favorite, hide, tags, emulator, achievements |
+| `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, cover grid, details, stats, achievements, show hidden, reload, quit |
 | `ctrl-r`          |                 | reload config                                   |
 | `q`               |                 | quit                                            |
 
@@ -326,6 +327,13 @@ pane: how many there are, what they're worth, how many you've earned, and your b
 ```jsonc
 "retroachievements": { "username": "you" }
 ```
+
+**The achievements screen** (`A`, Start → Achievements, or Achievements… in a game's menu) lists
+your games that have achievements with your progress in each. ←/→ (or LB/RB) narrow it to a
+system, Tab (or X) to a status (in progress, not started, finished, or needing another dump), and
+`/` (or Select) searches by name. Opening a game lists its achievements: which you've earned and
+when, their points, how rare they are, and which are progression, win conditions or missable.
+They're fetched when you open the game and cached, so they show at once next time.
 
 The key goes in `~/.config/romi/retroachievements.key` (`chmod 600` it), or `"key_file"` says
 where; `RA_API_KEY` in the environment beats both. Keeping it out of `config.json` keeps it out of

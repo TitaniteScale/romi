@@ -110,6 +110,76 @@ pub fn credentials(cfg: &Config) -> Option<(String, String)> {
     Some((user, key))
 }
 
+/// One achievement of a game, as the achievements screen shows it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Cheevo {
+    pub title: String,
+    pub description: String,
+    pub points: u32,
+    /// "progression", "win_condition", "missable", or none.
+    pub kind: Option<String>,
+    /// When you earned it ("2026-10-24 12:00:00"), in either mode and in hardcore.
+    pub earned: Option<String>,
+    pub earned_hardcore: Option<String>,
+    /// The share of the game's players who have it, 0 to 1.
+    pub rarity: f32,
+}
+
+/// A game's achievements as last fetched, in RetroAchievements' order.
+pub fn cached_game(id: u64) -> Option<Vec<Cheevo>> {
+    serde_json::from_slice(&std::fs::read(cache_dir().join(format!("game-{id}.json"))).ok()?).ok()
+}
+
+/// Fetches a game's achievements and your progress in them, and caches them.
+pub fn fetch_game(cfg: &Config, id: u64) -> Result<Vec<Cheevo>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Game {
+        num_distinct_players: Option<u32>,
+        #[serde(default)]
+        achievements: HashMap<String, Achievement>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Achievement {
+        title: String,
+        description: String,
+        points: u32,
+        #[serde(rename = "Type")]
+        kind: Option<String>,
+        num_awarded: u32,
+        display_order: i64,
+        #[serde(rename = "ID")]
+        id: u64,
+        date_earned: Option<String>,
+        date_earned_hardcore: Option<String>,
+    }
+    let (user, key) = credentials(cfg).context("RetroAchievements isn't set up")?;
+    let url = format!("{API}/API_GetGameInfoAndUserProgress.php?g={id}&u={}&y={key}", crate::art::encode(&user));
+    let bytes = crate::art::get(&crate::art::agent(), &url, 32 << 20)
+        .map_err(|e| anyhow!("retroachievements.org: {}", format!("{e:#}").replace(&key, "…")))?
+        .context("retroachievements.org: no such game")?;
+    let game: Game = serde_json::from_slice(&bytes).context("retroachievements.org: unexpected game info")?;
+    let players = game.num_distinct_players.unwrap_or(0).max(1) as f32;
+    let mut list: Vec<Achievement> = game.achievements.into_values().collect();
+    list.sort_by_key(|a| (a.display_order, a.id));
+    let cheevos: Vec<Cheevo> = list
+        .into_iter()
+        .map(|a| Cheevo {
+            title: a.title,
+            description: a.description,
+            points: a.points,
+            kind: a.kind.filter(|k| !k.is_empty()),
+            earned: a.date_earned,
+            earned_hardcore: a.date_earned_hardcore,
+            rarity: (a.num_awarded as f32 / players).min(1.0),
+        })
+        .collect();
+    std::fs::create_dir_all(cache_dir())?;
+    std::fs::write(cache_dir().join(format!("game-{id}.json")), serde_json::to_vec(&cheevos)?)?;
+    Ok(cheevos)
+}
+
 /// RetroAchievements' console id for an ES-DE (or romi) system id.
 pub fn console(system: &str) -> Option<u32> {
     Some(match system {

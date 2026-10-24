@@ -134,6 +134,14 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.stats.is_some() {
         draw_stats(f, app, &theme, body);
     }
+    if app.cheevos.is_some() {
+        draw_cheevos(f, app, &theme, body);
+        if let (Some(_), Some(screen)) = (app.osk, &app.cheevos)
+            && screen.typing
+        {
+            draw_osk(f, app, &theme, body);
+        }
+    }
     draw_footer(f, app, &theme, footer);
 }
 
@@ -194,9 +202,10 @@ fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 /// The on-screen keyboard, docked at the bottom of the games pane so results stay visible above.
 fn draw_osk(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let Some((row, col)) = app.osk else { return };
-    let (title, prompt, query) = match &app.tag_name {
-        Some(name) => (" New tag ", " # ", name.as_str()),
-        None => (" Search ", " / ", app.search.as_ref().map(|s| s.query.as_str()).unwrap_or_default()),
+    let (title, prompt, query) = match (&app.tag_name, &app.cheevos) {
+        (Some(name), _) => (" New tag ", " # ", name.as_str()),
+        (None, Some(screen)) if screen.typing => (" Search ", " / ", screen.query.as_str()),
+        _ => (" Search ", " / ", app.search.as_ref().map(|s| s.query.as_str()).unwrap_or_default()),
     };
     let mut lines = vec![
         Line::from(vec![
@@ -683,6 +692,20 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         f.render_widget(Paragraph::new(line), area);
         return;
     }
+    if let Some(screen) = &app.cheevos {
+        let line = match (&screen.open, pad) {
+            (Some(_), true) => hints(&[("↑/↓", "scroll"), (back, "back")]),
+            (Some(_), false) => hints(&[("↑/↓", "scroll"), ("esc", "back")]),
+            (None, true) => {
+                hints(&[(ok, "open"), ("←/→", "system"), ("X", "status"), ("Select", "search"), (back, "close")])
+            }
+            (None, false) => {
+                hints(&[("enter", "open"), ("←/→", "system"), ("tab", "status"), ("/", "search"), ("esc", "close")])
+            }
+        };
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
     if app.stats.is_some() {
         let line = if pad { hints(&[(back, "close")]) } else { hints(&[("esc", "close")]) };
         f.render_widget(Paragraph::new(line), area);
@@ -863,6 +886,120 @@ fn draw_stats(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         lines.push(Line::raw(format!("{} in {} session{plural}{best}", fmt_duration(total), y.sessions)));
     }
     f.render_widget(Paragraph::new(lines), year);
+}
+
+/// The achievements screen: the games list with its filters, or one game's achievements.
+fn draw_cheevos(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let Some(screen) = &app.cheevos else { return };
+    f.render_widget(Clear, area);
+    let accent = Style::new().fg(theme.accent);
+    if let Some(open) = &screen.open {
+        let game = &app.lib.games[open.game];
+        let block = theme.block(format!(" {} ", game.name), true).padding(Padding::horizontal(1));
+        let inner = block.inner(area);
+        f.render_widget(block, area);
+        let mut lines = Vec::new();
+        if let Some(a) = app.achievements.games.get(&game.key) {
+            let refreshing = if screen.loading() && open.cheevos.is_some() { "  refreshing…" } else { "" };
+            lines.push(Line::from(vec![Span::styled(a.summary(), accent.bold()), Span::raw(refreshing).dim()]));
+            if !a.supported {
+                lines.push(Line::from(
+                    Span::raw("Your ROM can't earn these: RetroAchievements supports other dumps.").dim(),
+                ));
+            }
+        }
+        if let Some(e) = &open.error {
+            lines.push(Line::from(Span::styled(format!("Couldn't refresh: {e}"), Style::new().fg(Color::Yellow))));
+        }
+        lines.push(Line::raw(""));
+        let Some(cheevos) = &open.cheevos else {
+            lines.push(Line::from(Span::raw("Loading…").dim()));
+            f.render_widget(Paragraph::new(lines), inner);
+            return;
+        };
+        let width = inner.width as usize;
+        for c in cheevos.iter().skip(open.top) {
+            let earned = c.earned_hardcore.as_ref().or(c.earned.as_ref());
+            let mark = if earned.is_some() { Span::styled("✓ ", accent.bold()) } else { Span::raw("· ").dim() };
+            let mut notes = vec![format!("{} points", c.points), format!("{:.0}% of players", c.rarity * 100.0)];
+            notes.extend(c.kind.as_ref().map(|k| k.replace('_', " ")));
+            if let Some(when) = earned {
+                let mode = if c.earned_hardcore.is_some() { "hardcore, " } else { "" };
+                notes.push(format!("earned {mode}{}", when.split(' ').next().unwrap_or(when)));
+            }
+            let title = if earned.is_some() { accent.bold() } else { Style::new().bold() };
+            lines.push(Line::from(vec![
+                mark,
+                Span::styled(c.title.clone(), title),
+                Span::raw(format!("  {}", notes.join(" · "))).dim(),
+            ]));
+            lines.push(Line::from(Span::raw(format!("  {}", truncate(&c.description, width.saturating_sub(2)))).dim()));
+        }
+        app.page = inner.height as usize;
+        f.render_widget(Paragraph::new(lines), inner);
+        return;
+    }
+
+    let rows = screen.rows(&app.lib, &app.achievements, app.show_hidden);
+    let block = theme.block(" Achievements ", true).padding(Padding::horizontal(1));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let system = screen.system.as_deref().unwrap_or("all systems");
+    let mut filters = vec![
+        Span::raw("‹ ").dim(),
+        Span::styled(system.to_string(), accent),
+        Span::raw(" ›   ").dim(),
+        Span::raw("showing ").dim(),
+        Span::styled(screen.status.label(), accent),
+    ];
+    if screen.typing || !screen.query.is_empty() {
+        filters.push(Span::raw("   / ").dim());
+        filters.push(Span::raw(screen.query.clone()));
+        if screen.typing {
+            filters.push(Span::styled("█", accent));
+        }
+    }
+    let count = format!("{} game{}", rows.len(), if rows.len() == 1 { "" } else { "s" });
+    let [head, list] = Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(inner);
+    f.render_widget(Paragraph::new(vec![Line::from(filters), Line::from(Span::raw(count).dim())]), head);
+
+    app.page = list.height as usize;
+    // Every column but the name has a fixed width, so they line up down the list.
+    const BAR: usize = 10;
+    const AWARD: usize = 16; // "beaten hardcore", "another dump"
+    let system_w = if screen.system.is_none() {
+        rows.iter().map(|&g| app.lib.games[g].system.chars().count()).max().unwrap_or(0) + 2
+    } else {
+        0
+    };
+    let name_w = (list.width as usize).saturating_sub(system_w + BAR + 2 + 19 + AWARD);
+    let items: Vec<ListItem> = rows
+        .iter()
+        .map(|&g| {
+            let game = &app.lib.games[g];
+            let a = &app.achievements.games[&game.key];
+            let counts =
+                if a.supported { format!("{:>4}/{:<4}", a.earned, a.total) } else { format!("{:>9}", a.total) };
+            let award = match (&a.award, a.supported) {
+                (_, false) => "another dump".to_string(),
+                (Some(award), true) => award.replace('-', " "),
+                (None, true) => String::new(),
+            };
+            let status = format!("{counts} {:>5} pts  {award:<AWARD$}", a.points);
+            let filled = (a.earned as usize * BAR).checked_div(a.total as usize).unwrap_or(0).min(BAR);
+            let bar = format!("{}{}", "█".repeat(filled), "░".repeat(BAR - filled));
+            let system = if system_w > 0 { format!("{:<w$}", game.system, w = system_w) } else { String::new() };
+            let style = if a.supported { Style::new() } else { Style::new().dim() };
+            ListItem::new(Line::from(vec![
+                Span::styled(format!("{:<name_w$}  ", truncate(&game.name, name_w)), style),
+                Span::raw(system).dim(),
+                Span::styled(bar, accent),
+                Span::styled(format!("  {status}"), style),
+            ]))
+        })
+        .collect();
+    let mut state = ratatui::widgets::ListState::default().with_selected((!rows.is_empty()).then_some(screen.selected));
+    f.render_stateful_widget(List::new(items).highlight_style(theme.selected(true)), list, &mut state);
 }
 
 /// A Unix time as a local date, like "Oct 24, 2026".

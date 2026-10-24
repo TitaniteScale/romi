@@ -37,6 +37,7 @@ pub enum MenuItem {
     Details,
     Grid,
     Stats,
+    Achievements,
     ShowHidden,
     Reload,
     Quit,
@@ -45,6 +46,8 @@ pub enum MenuItem {
     Emulator,
     /// Opens the game's tags.
     Tags,
+    /// Opens the achievements screen on the game.
+    GameAchievements,
     /// One of your tags (by its place in name order), ticked when the game has it.
     Tag(usize),
     NewTag,
@@ -155,6 +158,7 @@ enum Op {
     GameMenu,
     ToggleGrid,
     Stats,
+    Achievements,
 }
 
 pub struct App {
@@ -204,6 +208,8 @@ pub struct App {
     pub art_since: Option<(usize, Instant)>,
     /// The stats screen, while it's open.
     pub stats: Option<crate::stats::Stats>,
+    /// The achievements screen, while it's open.
+    pub cheevos: Option<crate::cheevos::Screen>,
     /// What RetroAchievements has for the library: what was cached, then the refresh.
     pub achievements: crate::ra::Achievements,
     achievements_rx: Option<Receiver<Result<crate::ra::Achievements, String>>>,
@@ -257,6 +263,7 @@ impl App {
             grid_top: 0,
             art_since: None,
             stats: None,
+            cheevos: None,
             achievements: crate::ra::Achievements::default(),
             achievements_rx: None,
             term_focused: true,
@@ -577,6 +584,44 @@ impl App {
             }
             return;
         }
+        if let Some(screen) = &mut self.cheevos {
+            if screen.typing {
+                match k.code {
+                    KeyCode::Enter | KeyCode::Esc => {
+                        screen.typing = false;
+                        self.osk = None;
+                    }
+                    KeyCode::Backspace => {
+                        screen.query.pop();
+                        screen.selected = 0;
+                    }
+                    KeyCode::Char(c) if !ctrl => {
+                        screen.query.push(c);
+                        screen.selected = 0;
+                    }
+                    _ => {}
+                }
+                return;
+            }
+            let op = match k.code {
+                KeyCode::Up | KeyCode::Char('k') => Op::Up,
+                KeyCode::Down | KeyCode::Char('j') => Op::Down,
+                KeyCode::PageUp => Op::PageUp,
+                KeyCode::PageDown => Op::PageDown,
+                KeyCode::Char('u') if ctrl => Op::PageUp,
+                KeyCode::Char('d') if ctrl => Op::PageDown,
+                KeyCode::Left | KeyCode::Char('h' | '[') => Op::PrevSystem,
+                KeyCode::Right | KeyCode::Char('l' | ']') => Op::NextSystem,
+                KeyCode::Tab => Op::Random,
+                KeyCode::BackTab => Op::Favorite,
+                KeyCode::Char('/') => Op::Search,
+                KeyCode::Enter => Op::Confirm,
+                KeyCode::Esc | KeyCode::Backspace | KeyCode::Char('q' | 'A' | 'm') => Op::Back,
+                _ => return,
+            };
+            self.cheevos_op(op);
+            return;
+        }
         if self.filter_panel.is_some() {
             let op = match k.code {
                 KeyCode::Up | KeyCode::Char('k') => Op::Up,
@@ -666,6 +711,7 @@ impl App {
             KeyCode::Char('o') => Op::GameMenu,
             KeyCode::Char('v') => Op::ToggleGrid,
             KeyCode::Char('S') => Op::Stats,
+            KeyCode::Char('A') => Op::Achievements,
             _ => return,
         };
         self.apply(op);
@@ -712,6 +758,12 @@ impl App {
                 self.stats = None;
             }
             return;
+        }
+        if self.cheevos.is_some() {
+            if self.osk.is_some() {
+                return self.osk_op(op);
+            }
+            return self.cheevos_op(op);
         }
         if self.filter_panel.is_some() {
             return self.filter_op(op);
@@ -776,6 +828,7 @@ impl App {
                 }
             }
             Op::ToggleDetails => self.show_details = !self.show_details,
+            Op::Achievements => self.cheevos = Some(crate::cheevos::Screen::default()),
             Op::Stats => {
                 let (history, now) = (crate::stats::history(), crate::state::now());
                 self.stats = Some(crate::stats::Stats::compute(&self.lib, &self.state, &history, now));
@@ -813,6 +866,56 @@ impl App {
         self.set_status(Level::Info, if added { format!("★ {name}") } else { format!("Unfavorited {name}") });
         if self.search.is_none() {
             self.rebuild_keeping_selection();
+        }
+    }
+
+    /// The achievements screen: the list of games, or one game's achievements.
+    fn cheevos_op(&mut self, op: Op) {
+        let page = self.page.max(1) as isize;
+        let Some(screen) = &mut self.cheevos else { return };
+        if let Some(open) = &mut screen.open {
+            let n = open.cheevos.as_ref().map_or(0, Vec::len) as isize;
+            let scroll = |top: usize, by: isize| (top as isize + by).clamp(0, (n - 1).max(0)) as usize;
+            match op {
+                Op::Up => open.top = scroll(open.top, -1),
+                Op::Down => open.top = scroll(open.top, 1),
+                Op::PageUp => open.top = scroll(open.top, -page / 2),
+                Op::PageDown => open.top = scroll(open.top, page / 2),
+                Op::Back | Op::Menu | Op::Confirm => {
+                    screen.open = None;
+                    if screen.just_one || matches!(op, Op::Menu) {
+                        self.cheevos = None;
+                    }
+                }
+                _ => {}
+            }
+            return;
+        }
+        let rows = screen.rows(&self.lib, &self.achievements, self.show_hidden);
+        let n = rows.len() as isize;
+        let move_to = |at: usize, by: isize| (at as isize + by).clamp(0, (n - 1).max(0)) as usize;
+        match op {
+            Op::Up => screen.selected = move_to(screen.selected, -1),
+            Op::Down => screen.selected = move_to(screen.selected, 1),
+            Op::PageUp => screen.selected = move_to(screen.selected, -page),
+            Op::PageDown => screen.selected = move_to(screen.selected, page),
+            Op::Left | Op::PrevSystem => screen.step_system(&self.lib, &self.achievements, false),
+            Op::Right | Op::NextSystem => screen.step_system(&self.lib, &self.achievements, true),
+            Op::Random | Op::Favorite => {
+                screen.status = screen.status.step(matches!(op, Op::Random));
+                screen.selected = 0;
+            }
+            Op::Search => {
+                screen.typing = true;
+                self.osk = Some((0, 0));
+            }
+            Op::Confirm => {
+                if let Some(&g) = rows.get(screen.selected) {
+                    screen.open_game(&self.cfg, &self.achievements, &self.lib, g);
+                }
+            }
+            Op::Back | Op::Menu => self.cheevos = None,
+            _ => {}
         }
     }
 
@@ -913,14 +1016,25 @@ impl App {
             return (0..self.state.tags.len()).map(Tag).chain([NewTag]).collect();
         }
         match menu.and_then(|m| m.game) {
-            Some(g) if self.emulator_options(g).len() > 1 => vec![Favorite, Hide, Tags, Emulator],
-            Some(_) => vec![Favorite, Hide, Tags],
+            Some(g) => {
+                let mut items = vec![Favorite, Hide, Tags];
+                if self.emulator_options(g).len() > 1 {
+                    items.push(Emulator);
+                }
+                if self.achievements.games.contains_key(&self.lib.games[g].key) {
+                    items.push(GameAchievements);
+                }
+                items
+            }
             None => {
                 let mut items = Vec::new();
                 if self.selected_game().is_some() {
                     items.push(Game);
                 }
                 items.extend([Search, Filter, Sort, Random, Grid, Details, Stats]);
+                if !self.achievements.games.is_empty() {
+                    items.push(Achievements);
+                }
                 if self.lib.games.iter().any(|g| g.hidden) {
                     items.push(ShowHidden);
                 }
@@ -942,6 +1056,8 @@ impl App {
             },
             MenuItem::Random => "Random game".into(),
             MenuItem::Stats => "Stats".into(),
+            MenuItem::Achievements => "Achievements".into(),
+            MenuItem::GameAchievements => "Achievements…".into(),
             MenuItem::Grid if self.state.grid => "List view".into(),
             MenuItem::Grid => "Cover grid".into(),
             MenuItem::Details if self.show_details => "Hide details".into(),
@@ -1010,6 +1126,13 @@ impl App {
                     MenuItem::Random => self.apply(Op::Random),
                     MenuItem::Grid => self.apply(Op::ToggleGrid),
                     MenuItem::Stats => self.apply(Op::Stats),
+                    MenuItem::Achievements => self.apply(Op::Achievements),
+                    MenuItem::GameAchievements => {
+                        if let Some(g) = game {
+                            self.cheevos =
+                                Some(crate::cheevos::Screen::for_game(&self.cfg, &self.achievements, &self.lib, g));
+                        }
+                    }
                     MenuItem::Details => self.apply(Op::ToggleDetails),
                     MenuItem::ShowHidden => {
                         self.show_hidden = !self.show_hidden;
@@ -1114,6 +1237,16 @@ impl App {
 
     /// Types a character into the search (or a new tag's name), or deletes one with `None`.
     fn edit_query(&mut self, c: Option<char>) {
+        if let Some(screen) = self.cheevos.as_mut().filter(|s| s.typing) {
+            match c {
+                Some(c) => screen.query.push(c),
+                None => {
+                    screen.query.pop();
+                }
+            }
+            screen.selected = 0;
+            return;
+        }
         if let Some(name) = &mut self.tag_name {
             match c {
                 Some(c) => name.push(c),
@@ -1157,6 +1290,10 @@ impl App {
 
     fn close_osk(&mut self) {
         self.osk = None;
+        if let Some(screen) = &mut self.cheevos {
+            screen.typing = false;
+            return;
+        }
         // Closing with nothing typed means there's nothing to browse.
         if self.search.as_ref().is_some_and(|s| s.query.trim().is_empty()) {
             self.end_search();
@@ -1269,6 +1406,9 @@ impl App {
     pub fn tick(&mut self) {
         if let Some(c) = &mut self.covers {
             c.poll();
+        }
+        if let Some(screen) = &mut self.cheevos {
+            screen.poll();
         }
         if let Some(result) = self.achievements_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.achievements_rx = None;
