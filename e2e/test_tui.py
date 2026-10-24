@@ -102,3 +102,30 @@ def test_check_flags_missing_emulator(tmp_path):
     assert out.returncode == 0
     nes = next(line for line in out.stdout.splitlines() if "NES" in line)
     assert "!" in nes and "definitely-not-an-emulator not found" in nes
+
+
+def add_favorite_from_outside(sandbox, key):
+    """Plays another romi process changing state.json while the TUI is open."""
+    path = sandbox.home / ".local/state/romi/state.json"
+    state = sandbox.state()
+    state.setdefault("favorites", []).append(key)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state))
+
+
+def test_tui_keeps_changes_made_by_other_processes(start, sandbox):
+    romi = start()
+    add_favorite_from_outside(sandbox, "snes:Chrono Trigger (USA).sfc")
+    romi.keys("f")
+    eventually(lambda: "gba:Advance Wars (USA).gba" in sandbox.state().get("favorites", []))
+    romi.close()
+    assert "snes:Chrono Trigger (USA).sfc" in sandbox.state()["favorites"]
+
+
+def test_tui_picks_up_changes_when_focused(start, sandbox):
+    romi = start()
+    assert "Favorites" not in romi.text()
+    add_favorite_from_outside(sandbox, "snes:Chrono Trigger (USA).sfc")
+    romi.send("\x1b[O")  # focus lost
+    romi.send("\x1b[I")  # and gained
+    romi.wait_for("Favorites")

@@ -374,13 +374,25 @@ impl App {
 
     // ---- input ----
 
+    /// Picks up favorites and play history recorded by other romi processes, like `romi play`.
+    fn reload_state(&mut self) {
+        let state = State::load();
+        if state != self.state {
+            self.state = state;
+            self.rebuild_keeping_selection();
+        }
+    }
+
     fn input_blocked(&self) -> bool {
         self.running.is_some() || self.cooldown_until.is_some_and(|t| Instant::now() < t)
     }
 
     pub fn on_term_event(&mut self, ev: Event) {
         match ev {
-            Event::FocusGained => self.term_focused = true,
+            Event::FocusGained => {
+                self.term_focused = true;
+                self.reload_state();
+            }
             Event::FocusLost => self.term_focused = false,
             Event::Key(k) if k.kind != KeyEventKind::Release && !self.input_blocked() => {
                 self.on_key(k);
@@ -565,8 +577,8 @@ impl App {
             Op::Favorite => {
                 if let Some(g) = self.selected_game() {
                     let key = self.lib.games[g].key.clone();
-                    let added = self.state.toggle_favorite(&key);
-                    self.state.save();
+                    let mut added = false;
+                    self.state = State::update(|s| added = s.toggle_favorite(&key));
                     let name = self.lib.games[g].name.clone();
                     self.set_status(
                         Level::Info,
@@ -772,8 +784,7 @@ impl App {
         match result {
             Ok(()) => {
                 let key = self.lib.games[g].key.clone();
-                self.state.record_launch(&key);
-                self.state.save();
+                self.state = State::update(|s| s.record_launch(&key));
             }
             Err(e) => self.set_status(Level::Error, format!("{e:#}")),
         }
@@ -804,8 +815,7 @@ impl App {
     pub fn finish(&mut self, g: usize, played: Duration, code: Option<Option<i32>>) {
         let key = self.lib.games[g].key.clone();
         let name = self.lib.games[g].name.clone();
-        self.state.add_playtime(&key, played.as_secs());
-        self.state.save();
+        self.state = State::update(|s| s.add_playtime(&key, played.as_secs()));
         // Whatever window had focus is gone; assume we're back in front.
         self.term_focused = true;
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);
@@ -841,9 +851,12 @@ impl App {
     }
 
     pub fn save_selection(&mut self) {
-        self.state.selected_system = self.views.get(self.view).map(|v| v.id.clone());
-        self.state.selected_game = self.selected_game().map(|g| self.lib.games[g].key.clone());
-        self.state.save();
+        let system = self.views.get(self.view).map(|v| v.id.clone());
+        let game = self.selected_game().map(|g| self.lib.games[g].key.clone());
+        self.state = State::update(|s| {
+            s.selected_system = system;
+            s.selected_game = game;
+        });
     }
 }
 

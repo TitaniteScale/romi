@@ -242,6 +242,11 @@ class Romi:
             self.pump(0.03)
         self.pump(settle)
 
+    def send(self, data, settle=0.15):
+        """Writes bytes in one go, as a terminal sends an escape sequence (`keys` sends one at a time)."""
+        os.write(self.fd, data.encode() if isinstance(data, str) else data)
+        self.pump(settle)
+
     def press(self, button, hold=0.08, settle=0.25):
         self.pad.down(button)
         self.pump(hold)
@@ -249,6 +254,8 @@ class Romi:
         self.pump(settle)
 
     def close(self):
+        if self.fd is None:
+            return
         if self.exited is None:
             try:
                 os.write(self.fd, b"q")
@@ -262,6 +269,7 @@ class Romi:
                 pass
             os.waitpid(self.pid, 0)
         os.close(self.fd)
+        self.fd = None
 
 
 def main(argv):

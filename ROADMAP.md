@@ -32,23 +32,28 @@ Small things that make everything after them easier to build and check. All done
 romi already has `--check`, `--list` and `--scrape`. The goal is a CLI other programs can drive without
 scraping text: rofi scripts, a waybar module, other launchers, coding agents.
 
-- **Subcommands**: `romi list`, `romi info <game>`, `romi launch <game>`, `romi check`, `romi scrape`,
-  `romi random`. The old `--check`/`--list`/`--scrape` flags stay as aliases.
-- **`--json` everywhere**, in a documented, stable shape. Game keys (`psx:Some Game (USA).chd`) are
-  already stable, so they're the IDs.
-- **`list` takes the TUI's filters**: `--system`, `--genre`, `--players`, `--decade`, `--favorites`,
-  `--played`.
-- **`launch` finds games predictably**: an exact key wins. Otherwise a fuzzy query has to match exactly
-  one game, or romi prints the candidates and exits with a separate code. Flags: `--mode wait|detach|terminal`,
-  and `--dry-run`, which prints the expanded argv, cwd and env without starting anything. That's handy
-  for testing config changes, and for agents.
-- **Exit codes that mean something**: the game's own exit code when it ran, and separate codes for
-  "not found", "ambiguous" and "failed to start".
-- **One launch path**: play time, recently played and `last.log` get recorded the same way whether a
-  game starts from the TUI or the CLI. That means moving the bookkeeping out of `App::finish`.
-- **Safe shared state**: a game launched from the CLI while the TUI is open must not lose its play time
-  when the TUI saves. romi should re-read and merge `state.json` before writing it, or lock it.
-- **Shell completions** for game keys and system ids.
+Built in this order, one commit each:
+
+1. ✓ **Safe shared state.** Several romi processes can run at once (the TUI, `romi play`, a detached
+   game's watcher). Every change to `state.json` now goes through one locked read-modify-write, and
+   the TUI reloads state when its terminal regains focus.
+2. **Subcommands, using `clap`**: `romi list`, `romi info <game>`, `romi play <game>`, `romi random`,
+   `romi check`, `romi scrape`, `romi status`. The old `--check`/`--list`/`--scrape` flags stay as
+   aliases.
+3. **`list` and `info` with `--json`**, in a documented, stable shape. Game keys
+   (`psx:Some Game (USA).chd`) are already stable, so they're the IDs. `list` takes the TUI's
+   filters: `--system`, `--genre`, `--players`, `--decade`, `--favorites`, `--played`.
+4. **`romi play <game>`**, sharing one launch path with the TUI.
+   - It finds games predictably. An exact key wins, then an exact name (`--system` narrows it), then
+     a fuzzy match, but only if exactly one game matches. Otherwise it lists the candidates.
+   - Flags: `--mode wait|terminal|detach`, and `--dry-run`, which prints the expanded argv, cwd and env
+     without starting anything. That's handy for testing config changes, and for agents.
+   - Exit codes: the game's own exit code when it ran. romi's own failures use the sysexits range,
+     which games rarely use: 64 bad arguments, 65 ambiguous, 66 not found, 69 emulator missing, 78
+     config error.
+5. **`romi status --json`, tracked detached games, and shell completions.** A detached game leaves a
+   small romi process behind to record its play time. Every running game is listed in the state
+   directory, which is what `romi status` reads. Completions cover game keys and system ids.
 
 ## 2. `romi init`
 
@@ -100,8 +105,8 @@ phase 2.
   fullscreen Ghostty with a big font. Give romi its own workspace and add window rules for games, so a
   game no longer ends up on the wrong workspace. This is mostly docs and example configs, plus the
   hooks above.
-- **`romi status --json`**: what's playing and for how long, read from the state directory. With it, a
-  waybar module is a one-line script.
+- **Waybar module**: a short script on top of `romi status --json` (phase 1) showing what's playing
+  and for how long.
 
 ## 5. Looks
 
