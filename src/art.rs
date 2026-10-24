@@ -280,7 +280,7 @@ fn best_match<'a>(title: &str, listings: &[&'a Listing]) -> Option<(&'a Listing,
 }
 
 /// Percent-encodes a URL path segment.
-fn encode(s: &str) -> String {
+pub(crate) fn encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         if b.is_ascii_alphanumeric() || b"-._~".contains(&b) {
@@ -311,7 +311,7 @@ fn decode(s: &str) -> String {
 
 // ---- scraping ----
 
-fn agent() -> ureq::Agent {
+pub(crate) fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(60)))
         .user_agent(concat!("romi/", env!("CARGO_PKG_VERSION"), " (+https://github.com/TitaniteScale/romi)"))
@@ -320,7 +320,7 @@ fn agent() -> ureq::Agent {
 }
 
 /// GET with one retry for dropped connections. `None` means the server has no such file.
-fn get(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Option<Vec<u8>>> {
+pub(crate) fn get(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Option<Vec<u8>>> {
     let attempt = || -> Result<Vec<u8>, ureq::Error> {
         agent.get(url).call()?.body_mut().with_config().limit(limit).read_to_vec()
     };

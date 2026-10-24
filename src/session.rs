@@ -33,6 +33,8 @@ pub struct Running {
 pub struct Session {
     key: String,
     started: Instant,
+    /// Unix time, for the play history.
+    started_at: u64,
     file: PathBuf,
     hooks: Hooks,
 }
@@ -56,7 +58,7 @@ impl Session {
         // Best effort, like the rest of the state: a game that can't be listed still plays.
         let _ = write_atomic(&file, &record);
         let state = State::update(|s| s.record_launch(&game.key));
-        (Session { key: game.key.clone(), started: Instant::now(), file, hooks }, state)
+        (Session { key: game.key.clone(), started: Instant::now(), started_at: now(), file, hooks }, state)
     }
 
     /// Call once the game has exited, with how. Returns how long it ran and the updated state,
@@ -65,6 +67,7 @@ impl Session {
         let _ = std::fs::remove_file(&self.file);
         let played = self.started.elapsed();
         let state = State::update(|s| s.add_playtime(&self.key, played.as_secs()));
+        crate::stats::record(&self.key, self.started_at, played.as_secs());
         let hooks = self.hooks.exit(status.map(exit_code), played);
         (played, state, hooks)
     }

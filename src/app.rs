@@ -36,6 +36,7 @@ pub enum MenuItem {
     Random,
     Details,
     Grid,
+    Stats,
     ShowHidden,
     Reload,
     Quit,
@@ -153,6 +154,7 @@ enum Op {
     Sort,
     GameMenu,
     ToggleGrid,
+    Stats,
 }
 
 pub struct App {
@@ -200,6 +202,11 @@ pub struct App {
     pub grid_top: usize,
     /// The game the details pane's pictures are for, and since when: they take turns from then.
     pub art_since: Option<(usize, Instant)>,
+    /// The stats screen, while it's open.
+    pub stats: Option<crate::stats::Stats>,
+    /// What RetroAchievements has for the library: what was cached, then the refresh.
+    pub achievements: crate::ra::Achievements,
+    achievements_rx: Option<Receiver<Result<crate::ra::Achievements, String>>>,
     term_focused: bool,
     cooldown_until: Option<Instant>,
     /// Remembered game selection per view, so hopping between systems doesn't lose your place.
@@ -249,12 +256,16 @@ impl App {
             grid_cols: 0,
             grid_top: 0,
             art_since: None,
+            stats: None,
+            achievements: crate::ra::Achievements::default(),
+            achievements_rx: None,
             term_focused: true,
             cooldown_until: None,
             positions: HashMap::new(),
             matcher: SkimMatcherV2::default(),
         };
         app.load_metadata();
+        app.load_achievements();
         app.filter_options = filter::Options::from(&app.lib, &app.state);
         app.rebuild_views();
         let (mut sys, mut game) = (app.state.selected_system.clone(), app.state.selected_game.clone());
@@ -269,6 +280,25 @@ impl App {
             app.set_status(Level::Warn, w);
         }
         app
+    }
+
+    /// Shows the cached RetroAchievements data, and refreshes it off the UI thread when
+    /// RetroAchievements is set up (`tick` picks the result up).
+    fn load_achievements(&mut self) {
+        self.achievements = crate::ra::Achievements::cached(&self.lib);
+        if crate::ra::credentials(&self.cfg).is_none() {
+            self.achievements_rx = None;
+            return;
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (cfg, lib) = (self.cfg.clone(), self.lib.clone());
+        std::thread::Builder::new()
+            .name("achievements".into())
+            .spawn(move || {
+                let _ = tx.send(crate::ra::Achievements::refresh(&cfg, &lib).map_err(|e| format!("{e:#}")));
+            })
+            .ok();
+        self.achievements_rx = Some(rx);
     }
 
     /// Starts looking up database metadata off the UI thread; `tick` applies it when it's ready.
@@ -541,6 +571,12 @@ impl App {
             }
             return;
         }
+        if self.stats.is_some() {
+            if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Backspace | KeyCode::Char('q' | 'S' | 'm')) {
+                self.stats = None;
+            }
+            return;
+        }
         if self.filter_panel.is_some() {
             let op = match k.code {
                 KeyCode::Up | KeyCode::Char('k') => Op::Up,
@@ -629,6 +665,7 @@ impl App {
             KeyCode::Char('s') => Op::Sort,
             KeyCode::Char('o') => Op::GameMenu,
             KeyCode::Char('v') => Op::ToggleGrid,
+            KeyCode::Char('S') => Op::Stats,
             _ => return,
         };
         self.apply(op);
@@ -669,6 +706,12 @@ impl App {
         // The on-screen keyboard is up while a tag is named, over the game's tags.
         if self.tag_name.is_some() {
             return self.osk_op(op);
+        }
+        if self.stats.is_some() {
+            if matches!(op, Op::Back | Op::Menu | Op::Confirm) {
+                self.stats = None;
+            }
+            return;
         }
         if self.filter_panel.is_some() {
             return self.filter_op(op);
@@ -733,6 +776,10 @@ impl App {
                 }
             }
             Op::ToggleDetails => self.show_details = !self.show_details,
+            Op::Stats => {
+                let (history, now) = (crate::stats::history(), crate::state::now());
+                self.stats = Some(crate::stats::Stats::compute(&self.lib, &self.state, &history, now));
+            }
             Op::ToggleGrid => {
                 let grid = !self.state.grid;
                 self.state = State::update(|s| s.grid = grid);
@@ -873,7 +920,7 @@ impl App {
                 if self.selected_game().is_some() {
                     items.push(Game);
                 }
-                items.extend([Search, Filter, Sort, Random, Grid, Details]);
+                items.extend([Search, Filter, Sort, Random, Grid, Details, Stats]);
                 if self.lib.games.iter().any(|g| g.hidden) {
                     items.push(ShowHidden);
                 }
@@ -894,6 +941,7 @@ impl App {
                 None => "Sort: newest first".into(),
             },
             MenuItem::Random => "Random game".into(),
+            MenuItem::Stats => "Stats".into(),
             MenuItem::Grid if self.state.grid => "List view".into(),
             MenuItem::Grid => "Cover grid".into(),
             MenuItem::Details if self.show_details => "Hide details".into(),
@@ -961,6 +1009,7 @@ impl App {
                     }
                     MenuItem::Random => self.apply(Op::Random),
                     MenuItem::Grid => self.apply(Op::ToggleGrid),
+                    MenuItem::Stats => self.apply(Op::Stats),
                     MenuItem::Details => self.apply(Op::ToggleDetails),
                     MenuItem::ShowHidden => {
                         self.show_hidden = !self.show_hidden;
@@ -1221,6 +1270,13 @@ impl App {
         if let Some(c) = &mut self.covers {
             c.poll();
         }
+        if let Some(result) = self.achievements_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
+            self.achievements_rx = None;
+            match result {
+                Ok(a) => self.achievements = a,
+                Err(e) => self.set_status(Level::Warn, format!("RetroAchievements: {e}")),
+            }
+        }
         if let Some(found) = self.metadata.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.metadata = None;
             crate::meta::apply(&mut self.lib, found);
@@ -1269,6 +1325,7 @@ impl App {
                 }
                 self.cfg = cfg;
                 self.load_metadata();
+                self.load_achievements();
                 self.filter_options = filter::Options::from(&self.lib, &self.state);
                 self.end_search();
                 self.rebuild_keeping_selection();

@@ -22,10 +22,11 @@ pub fn strip_tags(s: &str) -> String {
     out
 }
 
-/// A title reduced to comparable words: no tags, articles, "and", or punctuation. A lone "-"
-/// marks where a subtitle starts.
+/// A title reduced to comparable words: no tags, articles, "and", accents or punctuation. A lone
+/// "-" marks where a subtitle starts, whether the title used " - " or ": " for it.
 pub fn words(title: &str) -> Vec<String> {
-    let t = strip_tags(title).to_lowercase().replace('&', " and ").replace(['\'', '’'], "");
+    let t = fold_accents(&strip_tags(title).to_lowercase()).replace('&', " and ").replace(['\'', '’'], "");
+    let t = t.replace(": ", " - ");
     let t: String = t.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { ' ' }).collect();
     let mut out: Vec<String> =
         t.split_whitespace().filter(|w| !matches!(*w, "the" | "and")).map(String::from).collect();
@@ -33,6 +34,23 @@ pub fn words(title: &str) -> Vec<String> {
         out.remove(0);
     }
     out
+}
+
+/// "Pokémon" -> "pokemon": the accented Latin letters titles use, without them.
+fn fold_accents(s: &str) -> String {
+    s.chars()
+        .map(|c| match c {
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
+            'ç' => 'c',
+            'è' | 'é' | 'ê' | 'ë' => 'e',
+            'ì' | 'í' | 'î' | 'ï' => 'i',
+            'ñ' => 'n',
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' => 'o',
+            'ù' | 'ú' | 'û' | 'ü' => 'u',
+            'ý' | 'ÿ' => 'y',
+            c => c,
+        })
+        .collect()
 }
 
 /// Lower is better: real releases before demos/bootlegs, then by region, then the plainest name.
@@ -69,7 +87,8 @@ impl TitleIndex {
 
 /// Finds the best name for `title` across indexes, trying stricter matches first: the exact name
 /// (as-is or with libretro's character substitutions), the same words, the same words plus a
-/// subtitle, then ignoring dashes. Returns (which index, which name).
+/// subtitle, ignoring dashes, then ignoring spaces too ("Megaman" for "Mega Man"). Returns
+/// (which index, which name).
 pub fn best_across(title: &str, indexes: &[&TitleIndex]) -> Option<(usize, usize)> {
     let safe = libretro_safe(title);
     for (n, idx) in indexes.iter().enumerate() {
@@ -83,11 +102,15 @@ pub fn best_across(title: &str, indexes: &[&TitleIndex]) -> Option<(usize, usize
     }
     let undashed = |w: &[String]| w.iter().filter(|x| *x != "-").cloned().collect::<Vec<_>>();
     let want_undashed = undashed(&want);
+    let joined = |w: &[String]| undashed(w).concat();
+    let want_joined = joined(&want);
     type Tier<'t> = &'t dyn Fn(&[String]) -> bool;
-    let tiers: [Tier; 3] =
-        [&|w| w == want.as_slice(), &|w| w.len() > want.len() && w.starts_with(&want) && w[want.len()] == "-", &|w| {
-            undashed(w) == want_undashed
-        }];
+    let tiers: [Tier; 4] = [
+        &|w| w == want.as_slice(),
+        &|w| w.len() > want.len() && w.starts_with(&want) && w[want.len()] == "-",
+        &|w| undashed(w) == want_undashed,
+        &|w| joined(w) == want_joined,
+    ];
     for tier in tiers {
         let best = indexes
             .iter()
@@ -154,6 +177,18 @@ mod tests {
             Some("Sonic The Hedgehog - Pocket Adventure (World)")
         );
         assert_eq!(matched("Nige-Ron-Pa", &["Nigeronpa (Japan)"]), None);
+    }
+
+    #[test]
+    fn accents_colons_and_spacing() {
+        assert!(matched("Pokemon - Emerald Version", &["Pokémon Emerald Version"]).is_some());
+        assert!(matched("Samurai Shodown III", &["Samurai Shodown III: Blades of Blood"]).is_some());
+        assert!(
+            matched("Megaman - Battle Network 3 - Blue Version", &["Mega Man Battle Network 3: Blue Version"])
+                .is_some()
+        );
+        assert!(matched("Ghouls'n Ghosts", &["Ghouls 'n Ghosts"]).is_some());
+        assert_eq!(matched("Raiden DX", &["Raiden", "Raiden II"]), None);
     }
 
     #[test]

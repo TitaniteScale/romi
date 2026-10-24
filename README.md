@@ -16,6 +16,8 @@ romi list      # every game as TSV: system, name, key (handy for rofi/fzf script
 romi info chrono trigger   # everything romi knows about one game
 romi play super metroid    # start it, from a script, a keybind, or another launcher
 romi status    # what's running right now, and for how long
+romi stats     # play time per system, most-played games, and this year month by month
+romi achievements          # refresh your RetroAchievements progress, list games that have them
 romi scrape    # find box art on disk, download the rest (or: romi scrape psx gba)
 romi guide -- CMD          # run CMD when a controller's Guide button is pressed (couch mode)
 ```
@@ -67,7 +69,9 @@ first of those that matches anything, and if that's more than one game it lists 
 guessing. `--system` narrows the search.
 
 **JSON**: `list --json` prints an array of games and `info --json` prints one. Each has `key`,
-`name`, `system` (the id), `system_name`, `hidden`, `tags` (yours, in name order), `emulator` (the one picked in the game's
+`name`, `system` (the id), `system_name`, `hidden`, `tags` (yours, in name order), `achievements`
+(RetroAchievements' `id`, `title`, `total`, `points`, your `earned` and `earned_hardcore`, your best
+`award`, and whether your dump is `supported`; null when there's nothing), `emulator` (the one picked in the game's
 menu, or null for the system's default), `path` (null for scripts, ports and Steam; the first disc
 of a multi-disc game), `discs` (every disc, in order, for a multi-disc game; otherwise empty), `favorite`,
 `playtime_secs`, `last_played` (Unix time or null), `art`, `title_screen` and `screenshot` (paths
@@ -177,11 +181,12 @@ Hooks fit in here too: `"on_launch": "playerctl pause"` stops the music while yo
 | `r`               | X               | random game                                     |
 | `d`               |                 | toggle details pane                             |
 | `v`               | L3              | cover grid / list                               |
+| `S`               | (menu)          | stats                                           |
 | `/`               | Select          | fuzzy search everything                         |
 | `F`               | R3              | filter by genre, players, decade, played, tag   |
 | `s`               | (menu)          | sort: name, last played, most played, year      |
 | `o`               | Start → game…   | the selected game's menu: favorite, hide, tags, emulator |
-| `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, cover grid, details, show hidden, reload, quit |
+| `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, cover grid, details, stats, show hidden, reload, quit |
 | `ctrl-r`          |                 | reload config                                   |
 | `q`               |                 | quit                                            |
 
@@ -314,6 +319,26 @@ signal number if the game was killed) and `{played_secs}`. `{rom}`, `{file}`, `{
 `sh -c '...'`, use those: a name like "Advance Wars (USA)" pasted into a shell script trips on the
 parentheses.
 
+**RetroAchievements**: with your username in the config and your web API key (from Settings on
+retroachievements.org) in a file of its own, romi shows each game's achievements in the details
+pane: how many there are, what they're worth, how many you've earned, and your best award.
+
+```jsonc
+"retroachievements": { "username": "you" }
+```
+
+The key goes in `~/.config/romi/retroachievements.key` (`chmod 600` it), or `"key_file"` says
+where; `RA_API_KEY` in the environment beats both. Keeping it out of `config.json` keeps it out of
+your dotfiles. The TUI refreshes your progress when it starts, and `romi achievements` refreshes it
+and lists your games that have achievements.
+
+Games are matched the way RetroArch does it, by hashing the ROM, for arcade sets (the set name) and
+cartridges (the ROM, minus a copier header, in N64's native byte order), so a game only shows
+achievements if your dump can earn them. When it can't but another version of the game can (often
+a "Rev 1"), the details pane says so and links RetroAchievements' list of supported dumps. Disc
+systems and the DS are matched by title. The first refresh hashes every cartridge, which reads a
+few GB; after that only new or changed files are read. Everything is cached in `~/.cache/romi/ra`.
+
 **BIOS checks**: list a system's required files under `"bios"`, either one file or a list where any
 one will do. Relative names are looked up in `bios_dirs` (default `~/.config/retroarch/system`) and
 in the system's ROM folder. Absolute paths and `*` wildcards also work, e.g.
@@ -343,6 +368,12 @@ the discs were merged carry over, and the old disc keys still work with `info` a
 override for the game goes under the playlist's name or disc 1's. If a folder already has its own
 `.m3u`, the discs it lists are left to it. Note that RetroArch names save files after what it
 launched, so saves made by booting a disc directly are under that disc's name.
+
+**Stats** (`S`, Start → Stats, or `romi stats`, with `--json`) show your total play time, play
+time per system, your most-played games, and this year month by month with its most-played
+games. Totals come from all the play time romi has recorded; the months come from a log of every
+session, `history.jsonl` in the state folder. romi started keeping it with the stats screen, so
+earlier play only counts in the totals, and the year fills in as you play.
 
 State (favorites, recents, play time, last selection, sort orders, tags) lives in `~/.local/state/romi/state.json`.
 
@@ -440,6 +471,8 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/add.rs`      | `romi add`: guessing a game entry from a path, appending to games.jsonc |
 | `src/cli.rs`      | the command line: arguments, commands, completions, exit codes   |
 | `src/session.rs`  | recording a game's start and end, running games, background play |
+| `src/stats.rs`    | the session history and the stats worked out from it             |
+| `src/ra.rs`       | RetroAchievements: game lists, your progress, ROM hashing        |
 | `src/hooks.rs`    | `on_launch` and `on_exit` hooks                                  |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |

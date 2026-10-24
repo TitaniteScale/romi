@@ -186,6 +186,18 @@ pub enum Command {
         #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true, value_name = "COMMAND")]
         command: Vec<String>,
     },
+    /// Refresh your RetroAchievements progress and list your games that have achievements
+    Achievements {
+        /// Print JSON instead
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show play time per system, the most-played games, and this year month by month
+    Stats {
+        /// Print JSON instead
+        #[arg(long)]
+        json: bool,
+    },
     /// Find box art on disk and download the rest
     Scrape {
         /// Only these systems (ids from the config); all of them if none are given
@@ -352,6 +364,8 @@ pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
             play(cfg, cfg_path, &game, system.as_deref(), mode, dry_run, json)
         }
         Command::Status { json } => status(json),
+        Command::Stats { json } => stats(cfg, json),
+        Command::Achievements { json } => achievements(cfg, json),
         Command::Scrape { systems } => art::scrape(cfg, &Library::load_complete(cfg), &systems),
     }
 }
@@ -437,7 +451,8 @@ fn list(cfg: &Config, filters: &Filters, json: bool) -> Result<()> {
     let mut out = stdout().lock();
     if json {
         let mut finder = art::Finder::new(cfg);
-        let records: Vec<_> = games.iter().map(|&g| GameJson::new(&lib, g, &state, &mut finder)).collect();
+        let ach = crate::ra::Achievements::cached(&lib);
+        let records: Vec<_> = games.iter().map(|&g| GameJson::new(&lib, g, &state, &ach, &mut finder)).collect();
         serde_json::to_writer_pretty(&mut out, &records)?;
         writeln!(out)?;
     } else {
@@ -468,6 +483,9 @@ struct GameJson<'a> {
     emulator: Option<&'a str>,
     /// Your tags for it, in name order.
     tags: Vec<&'a str>,
+    /// What RetroAchievements has for it, from the last refresh; null if it has nothing or
+    /// RetroAchievements isn't set up.
+    achievements: Option<&'a crate::ra::Info>,
     playtime_secs: u64,
     /// Unix time.
     last_played: Option<u64>,
@@ -481,7 +499,13 @@ struct GameJson<'a> {
 }
 
 impl<'a> GameJson<'a> {
-    fn new(lib: &'a Library, g: usize, state: &'a State, finder: &mut art::Finder) -> GameJson<'a> {
+    fn new(
+        lib: &'a Library,
+        g: usize,
+        state: &'a State,
+        ach: &'a crate::ra::Achievements,
+        finder: &mut art::Finder,
+    ) -> GameJson<'a> {
         let game = &lib.games[g];
         let system = lib.system_of(g);
         GameJson {
@@ -495,6 +519,7 @@ impl<'a> GameJson<'a> {
             hidden: game.hidden,
             emulator: game.emulator.as_deref(),
             tags: state.tags_of(&game.key),
+            achievements: ach.games.get(&game.key),
             playtime_secs: state.playtime.get(&game.key).copied().unwrap_or(0),
             last_played: state.last_played.get(&game.key).copied(),
             art: finder.find(system, game).map(|(p, _)| p.to_string_lossy().into_owned()),
@@ -532,7 +557,8 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
     let g = resolve(&lib, query, system)?;
     let state = State::load();
     let mut finder = art::Finder::new(cfg);
-    let record = GameJson::new(&lib, g, &state, &mut finder);
+    let ach = crate::ra::Achievements::cached(&lib);
+    let record = GameJson::new(&lib, g, &state, &ach, &mut finder);
     if json {
         println!("{}", serde_json::to_string_pretty(&record)?);
         return Ok(());
@@ -569,6 +595,7 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
         ("favorite", record.favorite.then(|| "yes".to_string())),
         ("hidden", record.hidden.then(|| "yes".to_string())),
         ("tags", (!record.tags.is_empty()).then(|| record.tags.join(", "))),
+        ("cheevos", record.achievements.map(|a| a.summary())),
         ("played", played),
         ("emulator", options.get(crate::emulators::current(game, &options)).map(|e| e.name.clone())),
         (
@@ -976,6 +1003,115 @@ fn print_suggestions(cfg: &Config, lib: &Library) {
 }
 
 // ---- status ----
+
+// ---- achievements ----
+
+fn achievements(cfg: &Config, json: bool) -> Result<()> {
+    if crate::ra::credentials(cfg).is_none() {
+        let msg = format!(
+            "RetroAchievements isn't set up: add \"retroachievements\": {{ \"username\": \"...\" }} to the config, \
+             and put your web API key (retroachievements.org → Settings) in {} or RA_API_KEY",
+            cfg.retroachievements.key_file
+        );
+        return fail(exit::CONFIG, msg);
+    }
+    let lib = Library::load(cfg);
+    let ach = crate::ra::Achievements::refresh(cfg, &lib).or_else(|e| fail(exit::UNAVAILABLE, format!("{e:#}")))?;
+    // Games you've started first, furthest along first; then the rest by system and name.
+    let mut games: Vec<(usize, &crate::ra::Info)> = lib
+        .systems
+        .iter()
+        .flat_map(|s| &s.games)
+        .filter_map(|&g| Some((g, ach.games.get(&lib.games[g].key)?)))
+        .collect();
+    games.sort_by_key(|&(_, a)| std::cmp::Reverse((a.earned * 1000).checked_div(a.total).unwrap_or(0)));
+    if json {
+        let rows: Vec<_> = games
+            .iter()
+            .map(|&(g, a)| serde_json::json!({ "key": lib.games[g].key, "name": lib.games[g].name, "achievements": a }))
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&rows)?);
+        return Ok(());
+    }
+    let (ok, other): (Vec<_>, Vec<_>) = games.iter().partition(|(_, a)| a.supported);
+    let points: u32 = ok.iter().map(|(_, a)| a.points).sum();
+    let started = ok.iter().filter(|(_, a)| a.earned > 0).count();
+    let mut out = stdout().lock();
+    writeln!(
+        out,
+        "{} of your games have achievements, worth {points} points; you've earned some in {started}.",
+        ok.len()
+    )?;
+    let row = |out: &mut std::io::StdoutLock, g: usize, text: String| {
+        let game = &lib.games[g];
+        writeln!(out, "  {:<20} {:<40} {text}", truncate(&game.system, 20), truncate(&game.name, 40))
+    };
+    for (g, a) in &ok {
+        row(&mut out, *g, a.summary())?;
+    }
+    if !other.is_empty() {
+        writeln!(out, "\n{} more have achievements for another version of the ROM than yours:", other.len())?;
+        for (g, a) in &other {
+            row(&mut out, *g, format!("{} achievements · {}", a.total, a.hashes_url()))?;
+        }
+    }
+    Ok(())
+}
+
+// ---- stats ----
+
+fn stats(cfg: &Config, json: bool) -> Result<()> {
+    let lib = Library::load(cfg);
+    let s = crate::stats::Stats::compute(&lib, &State::load(), &crate::stats::history(), now());
+    if json {
+        println!("{}", serde_json::to_string_pretty(&s)?);
+        return Ok(());
+    }
+    let dur = crate::ui::fmt_duration;
+    if s.games == 0 {
+        println!("Nothing played from romi yet.");
+        return Ok(());
+    }
+    println!("Played {} across {} game{}", dur(s.total_secs), s.games, if s.games == 1 { "" } else { "s" });
+    let table = |title: &str, rows: &[(String, u64)]| {
+        let most = rows.first().map_or(1, |r| r.1.max(1));
+        println!("\n{title}");
+        for (name, secs) in rows {
+            let bar = "█".repeat(((secs * 20).div_ceil(most)) as usize);
+            println!("  {:<32} {:>8}  {bar}", truncate(name, 32), dur(*secs));
+        }
+    };
+    table("By system", &s.systems);
+    table("Most played", &s.top);
+    let y = &s.year;
+    println!("\n{}", y.year);
+    match y.since {
+        None => println!("  Sessions are recorded from now on; the months fill in as you play."),
+        Some(_) if y.sessions == 0 => println!("  Nothing played yet this year."),
+        Some(since) => {
+            let year_total: u64 = y.months.iter().sum();
+            let n = y.sessions;
+            println!("  {} in {n} session{}", dur(year_total), if n == 1 { "" } else { "s" });
+            let most = y.months.iter().copied().max().unwrap_or(1).max(1);
+            for (m, secs) in MONTHS.iter().zip(y.months).filter(|(_, s)| *s > 0) {
+                println!("  {m}  {:>8}  {}", dur(secs), "█".repeat(((secs * 20).div_ceil(most)) as usize));
+            }
+            if crate::stats::local_year_month(since).0 == y.year {
+                println!("  (recorded since {})", crate::ui::fmt_date(since));
+            }
+        }
+    }
+    if !y.top.is_empty() {
+        table(&format!("Most played in {}", y.year), &y.top);
+    }
+    Ok(())
+}
+
+const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+fn truncate(s: &str, max: usize) -> String {
+    if s.chars().count() <= max { s.to_string() } else { format!("{}…", s.chars().take(max - 1).collect::<String>()) }
+}
 
 fn status(json: bool) -> Result<()> {
     let running = session::running();

@@ -39,6 +39,7 @@ pub struct Config {
     pub steam: SteamConfig,
     pub art: ArtConfig,
     pub metadata: MetadataConfig,
+    pub retroachievements: RetroAchievementsConfig,
     /// More config files whose systems, games and vars are added to this one's (see `Include`).
     /// Relative paths are relative to this file's folder.
     pub include: Vec<String>,
@@ -112,6 +113,7 @@ impl Default for Config {
             steam: SteamConfig::default(),
             art: ArtConfig::default(),
             metadata: MetadataConfig::default(),
+            retroachievements: RetroAchievementsConfig::default(),
             include: Vec::new(),
         }
     }
@@ -418,6 +420,23 @@ impl Default for ArtConfig {
             show: true,
             screens: true,
         }
+    }
+}
+
+/// RetroAchievements: which games have achievements, and your progress in them.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct RetroAchievementsConfig {
+    /// Your username on retroachievements.org. Without it, romi leaves achievements out.
+    pub username: Option<String>,
+    /// A file holding your web API key (retroachievements.org → Settings → Keys), kept out of
+    /// this file so the config can be shared. `RA_API_KEY` in the environment overrides it.
+    pub key_file: String,
+}
+
+impl Default for RetroAchievementsConfig {
+    fn default() -> Self {
+        Self { username: None, key_file: "~/.config/romi/retroachievements.key".into() }
     }
 }
 

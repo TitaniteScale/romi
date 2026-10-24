@@ -131,6 +131,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.filter_panel.is_some() {
         draw_filter(f, app, &theme, body);
     }
+    if app.stats.is_some() {
+        draw_stats(f, app, &theme, body);
+    }
     draw_footer(f, app, &theme, footer);
 }
 
@@ -592,6 +595,10 @@ fn draw_details(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     if game.hidden {
         lines.push(Line::from(vec![label("Hidden"), Span::raw("yes (o to unhide)")]));
     }
+    if let Some(a) = app.achievements.games.get(&game.key) {
+        let style = if a.supported { Style::new() } else { Style::new().dim() };
+        lines.push(Line::from(vec![label("Cheevos"), Span::styled(a.summary(), style)]));
+    }
     if !game.discs.is_empty() {
         lines.push(Line::from(vec![label("Discs"), Span::raw(game.discs.len().to_string())]));
     } else if let Some(file) = game.path.as_ref().and_then(|p| p.file_name()) {
@@ -673,6 +680,11 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         } else {
             hints(&[("←/→", "change"), ("↑/↓", "row"), ("esc", "done")])
         };
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
+    if app.stats.is_some() {
+        let line = if pad { hints(&[(back, "close")]) } else { hints(&[("esc", "close")]) };
         f.render_widget(Paragraph::new(line), area);
         return;
     }
@@ -779,6 +791,90 @@ pub fn fmt_duration(secs: u64) -> String {
         60..3600 => format!("{}m", secs / 60),
         _ => format!("{}h {}m", secs / 3600, secs % 3600 / 60),
     }
+}
+
+/// The stats screen: totals, play time by system and by game, and this year month by month.
+fn draw_stats(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let Some(s) = &app.stats else { return };
+    f.render_widget(Clear, area);
+    let block = theme.block(" Stats ", true).padding(Padding::new(2, 2, 1, 0));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    let accent = Style::new().fg(theme.accent);
+    let heading = |t: String| Line::from(Span::styled(t, accent.bold()));
+    if s.games == 0 {
+        f.render_widget(Paragraph::new("Nothing played from romi yet.").dim(), inner);
+        return;
+    }
+    let plural = if s.games == 1 { "" } else { "s" };
+    let summary = Line::from(vec![
+        Span::styled(fmt_duration(s.total_secs), accent.bold()),
+        Span::raw(format!(" played across {} game{plural}", s.games)),
+    ]);
+    let [top, columns, year] =
+        Layout::vertical([Constraint::Length(2), Constraint::Min(4), Constraint::Length(6)]).areas(inner);
+    f.render_widget(Paragraph::new(summary), top);
+
+    // Name, time and a bar scaled to the first (biggest) row.
+    let table = |title: &str, rows: &[(String, u64)], width: u16| {
+        let most = rows.first().map_or(1, |r| r.1.max(1));
+        let bar_room = u64::from(width.saturating_sub(4) / 4);
+        let name_w = (width as usize).saturating_sub(bar_room as usize + 11).max(8);
+        let mut lines = vec![heading(title.to_string())];
+        for (name, secs) in rows {
+            let bar = "█".repeat((secs * bar_room).div_ceil(most) as usize);
+            lines.push(Line::from(vec![
+                Span::raw(format!("{:<name_w$} ", truncate(name, name_w))),
+                Span::styled(format!("{:>8}  ", fmt_duration(*secs)), Style::new().dim()),
+                Span::styled(bar, accent),
+            ]));
+        }
+        lines
+    };
+    let [left, right] =
+        Layout::horizontal([Constraint::Percentage(50), Constraint::Percentage(50)]).spacing(4).areas(columns);
+    f.render_widget(Paragraph::new(table("By system", &s.systems, left.width)), left);
+    f.render_widget(Paragraph::new(table("Most played", &s.top, right.width)), right);
+
+    // The year: a bar per month, or a note while the history is new.
+    let y = &s.year;
+    let mut lines = vec![heading(y.year.to_string())];
+    if y.sessions == 0 {
+        let note = if y.since.is_none() {
+            "Sessions are recorded from now on; the months fill in as you play."
+        } else {
+            "Nothing played yet this year."
+        };
+        lines.push(Line::from(Span::raw(note).dim()));
+    } else {
+        const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+        const LETTERS: [&str; 12] = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+        let most = y.months.iter().copied().max().unwrap_or(1).max(1);
+        let bars: String = y
+            .months
+            .iter()
+            .map(|&m| if m == 0 { "  ".to_string() } else { format!("{} ", BARS[((m * 7).div_ceil(most)) as usize]) })
+            .collect();
+        let total: u64 = y.months.iter().sum();
+        let best = y.top.first().map(|(n, t)| format!(" · most: {n} ({})", fmt_duration(*t))).unwrap_or_default();
+        lines.push(Line::from(Span::styled(bars, accent)));
+        lines.push(Line::from(Span::raw(LETTERS.join(" ")).dim()));
+        let plural = if y.sessions == 1 { "" } else { "s" };
+        lines.push(Line::raw(format!("{} in {} session{plural}{best}", fmt_duration(total), y.sessions)));
+    }
+    f.render_widget(Paragraph::new(lines), year);
+}
+
+/// A Unix time as a local date, like "Oct 24, 2026".
+pub fn fmt_date(t: u64) -> String {
+    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    let tt = t as libc::time_t;
+    // SAFETY: localtime_r only writes the tm it's given.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&tt, &mut tm) }.is_null() {
+        return String::new();
+    }
+    format!("{} {}, {}", MONTHS[tm.tm_mon as usize], tm.tm_mday, tm.tm_year + 1900)
 }
 
 fn fmt_clock(secs: u64) -> String {
