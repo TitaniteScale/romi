@@ -148,7 +148,8 @@ are in [`examples/couch`](examples/couch):
 - **`hyprland.lua`** (Hyprland 0.55+'s Lua config) gives that window a workspace of its own named
   `romi`, which status bars show by name, and binds SUPER+SHIFT+G to go there, starting romi if it
   isn't running. Games started from romi open over it on the same workspace, and focus goes back to
-  romi when they exit. Closing romi takes you back to the workspace you came from. An optional rule
+  romi, full screen again, when they exit. Closing romi takes you back to the workspace you came
+  from. An optional rule
   sends slow starters (RetroArch, Steam games) there too, so they don't land wherever you looked
   while they loaded.
 - **`romi guide`** makes the controller's Guide button do the same. It watches every controller

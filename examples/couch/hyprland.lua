@@ -32,12 +32,18 @@ function romi_couch()
 end
 hl.bind("SUPER + SHIFT + G", romi_couch)
 
--- Closing romi leaves its workspace empty: go back instead. Checked a moment later, once the
--- window is really gone.
+-- When a window closes (checked a moment later, once it's really gone):
+--  - a game that went full screen over romi took romi's full screen (one per workspace), so romi
+--    gets it back once it's alone again;
+--  - closing romi leaves its workspace empty, so go back to where you were instead.
 hl.on("window.destroy", function()
     hl.timer(function()
+        local romi = hl.get_windows({ class = "romi.couch" })[1]
+        if romi and romi.fullscreen == 0 and romi.workspace and romi.workspace.windows == 1 then
+            hl.dispatch(hl.dsp.window.fullscreen({ mode = "fullscreen", action = "set", window = romi }))
+        end
         local ws = hl.get_active_workspace()
-        if ws and ws.name == "romi" and ws.windows == 0 and before_couch then
+        if not romi and ws and ws.name == "romi" and ws.windows == 0 and before_couch then
             hl.dispatch(hl.dsp.focus({ workspace = before_couch }))
         end
     end, { timeout = 150, type = "oneshot" })
