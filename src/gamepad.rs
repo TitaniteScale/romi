@@ -169,6 +169,35 @@ fn run(tx: Sender<PadEvent>, swap_confirm: bool) {
     }
 }
 
+/// Presses closer together than this count as one, so a bouncy button doesn't run it twice.
+const GUIDE_DEBOUNCE: Duration = Duration::from_secs(1);
+
+/// `romi guide`: runs `command` each time a controller's Guide button is pressed, until killed.
+/// The controller is read the same way the TUI reads it, without taking it from anything else,
+/// so it keeps working everywhere. While a game started from romi is running, Guide is the
+/// game's (or Steam's overlay's), and nothing is run.
+pub fn run_on_guide(command: &[String]) -> anyhow::Result<()> {
+    let mut gilrs = Gilrs::new().map_err(|e| anyhow::anyhow!("can't read controllers: {e}"))?;
+    let mut last: Option<Instant> = None;
+    loop {
+        let Some(ev) = gilrs.next_event_blocking(None) else { continue };
+        if !matches!(ev.event, EventType::ButtonPressed(Button::Mode, _)) {
+            continue;
+        }
+        if last.is_some_and(|t| t.elapsed() < GUIDE_DEBOUNCE) || !crate::session::running().is_empty() {
+            continue;
+        }
+        last = Some(Instant::now());
+        match std::process::Command::new(&command[0]).args(&command[1..]).stdin(std::process::Stdio::null()).spawn() {
+            // Reaped on a thread of its own, so a slow command doesn't hold up the next press.
+            Ok(mut child) => {
+                std::thread::spawn(move || child.wait());
+            }
+            Err(e) => eprintln!("romi guide: {}: {e}", command[0]),
+        }
+    }
+}
+
 /// Converts a stick axis into a direction with hysteresis so it doesn't flicker at the edge.
 fn stick(v: f32, current: Option<PadAction>, pos: PadAction, neg: PadAction) -> Option<PadAction> {
     if v >= STICK_ON {

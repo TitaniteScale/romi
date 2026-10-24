@@ -103,9 +103,11 @@ the config includes (hidden games, emulator picks). All done.
 - ✓ **Hooks**: `on_launch` and `on_exit` commands, either global or per system, with the same placeholders
   as launch commands. Use them to move a game to its own workspace, pause music, or set the CPU
   governor.
-- ✓ **Couch mode**: a Hyprland keybind, or the controller's Guide button (through xremap), opens romi in
+- ✓ **Couch mode**: a Hyprland keybind, or the controller's Guide button (through `romi guide`), opens romi in
   fullscreen Ghostty with a big font. Give romi its own workspace and add window rules for games, so a
-  game no longer ends up on the wrong workspace. This is docs and example configs in `examples/couch`.
+  game no longer ends up on the wrong workspace. This is docs and example configs in `examples/couch`,
+  and `romi guide`, which runs a command on the Guide button without taking the controller from
+  anything else.
 
 ## 5. Looks
 

@@ -178,6 +178,13 @@ pub enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Run a command whenever a controller's Guide button is pressed, outside of games: for
+    /// opening romi from the couch. Runs until stopped; start it with your desktop
+    Guide {
+        /// The command and its arguments, e.g. `romi guide -- hyprctl eval 'romi_couch()'`
+        #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true, value_name = "COMMAND")]
+        command: Vec<String>,
+    },
     /// Find box art on disk and download the rest
     Scrape {
         /// Only these systems (ids from the config); all of them if none are given
@@ -330,11 +337,13 @@ pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
         Command::Add { path, name, system, mode, print, yes } => {
             return add(cfg_path, &path, name, system, mode, print, yes);
         }
+        // guide only watches the controller.
+        Command::Guide { command } => return crate::gamepad::run_on_guide(&command),
         _ => {}
     }
     let cfg = &load_config(cfg_path)?;
     match command {
-        Command::Init { .. } | Command::Add { .. } => unreachable!(),
+        Command::Init { .. } | Command::Add { .. } | Command::Guide { .. } => unreachable!(),
         Command::Check => check(cfg, cfg_path),
         Command::List { filters, json } => list(cfg, &filters, json),
         Command::Info { game, system, json } => info(cfg, &game, system.as_deref(), json),
