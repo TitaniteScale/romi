@@ -44,13 +44,14 @@ Built in this order, one commit each:
    (`psx:Some Game (USA).chd`) are the IDs. `list` takes the TUI's filters plus systems and
    favorites. `info` finds games by key, exact name, or words from the name, and lists the candidates
    (exit 65) rather than guessing.
-4. **`romi play <game>`**, sharing one launch path with the TUI.
+4. ✓ **`romi play <game>`**, sharing one launch path with the TUI.
    - It finds games the same way `info` does.
    - Flags: `--mode wait|terminal|detach`, and `--dry-run`, which prints the expanded argv, cwd and env
      without starting anything. That's handy for testing config changes, and for agents.
    - Exit codes: the game's own exit code when it ran. romi's own failures use the sysexits range,
-     which games rarely use. 64, 65 and 66 already exist; `play` adds 69 for a missing emulator and
-     78 for a config error.
+     which games rarely use: 64, 65 and 66 as above, 69 for a missing emulator and 78 for a config
+     error.
+   - ^C or a script's `timeout` stops the game as well as romi, and the session is still recorded.
 5. **`romi status --json`, tracked detached games, and shell completions.** A detached game leaves a
    small romi process behind to record its play time. Every running game is listed in the state
    directory, which is what `romi status` reads. Completions cover game keys and system ids.

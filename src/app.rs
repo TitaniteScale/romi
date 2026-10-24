@@ -6,6 +6,7 @@ use crate::filter::{self, Filter};
 use crate::gamepad::{PadAction, PadEvent};
 use crate::launch::Prepared;
 use crate::library::Library;
+use crate::session::Session;
 use crate::state::State;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -77,6 +78,7 @@ pub struct Running {
     pub game: usize,
     pub child: Child,
     pub started: Instant,
+    pub session: Session,
 }
 
 pub enum PadState {
@@ -770,23 +772,24 @@ impl App {
             }
         };
         let result = match game.launch.mode {
-            LaunchMode::Wait => prepared.spawn_quiet(&log_path()).map(|child| {
-                self.running = Some(Running { game: g, child, started: Instant::now() });
+            LaunchMode::Wait => prepared.spawn_logged(&log_path(), true).map(|child| {
+                let (session, state) = Session::begin(&game.key);
+                self.state = state;
+                self.running = Some(Running { game: g, child, started: Instant::now(), session });
             }),
             LaunchMode::Detach => prepared.spawn_detached(&log_path()).map(|()| {
+                let key = self.lib.games[g].key.clone();
+                self.state = State::update(|s| s.record_launch(&key));
                 self.set_status(Level::Info, format!("Started {name}"));
             }),
+            // The main loop releases the terminal, then starts it (see `run_in_terminal`).
             LaunchMode::Terminal => {
                 self.terminal_job = Some(TerminalJob { game: g, prepared });
                 Ok(())
             }
         };
-        match result {
-            Ok(()) => {
-                let key = self.lib.games[g].key.clone();
-                self.state = State::update(|s| s.record_launch(&key));
-            }
-            Err(e) => self.set_status(Level::Error, format!("{e:#}")),
+        if let Err(e) = result {
+            self.set_status(Level::Error, format!("{e:#}"));
         }
     }
 
@@ -808,14 +811,15 @@ impl App {
             Err(_) => None,
         };
         let run = self.running.take().unwrap();
-        self.finish(run.game, run.started.elapsed(), status.map(|s| s.code()));
+        let (played, state) = run.session.end();
+        self.state = state;
+        self.finish(run.game, played, status.map(|s| s.code()));
     }
 
-    /// Bookkeeping after a game exits (wait or terminal mode).
+    /// Back to the list after a game exits (wait or terminal mode). Its session has already
+    /// been recorded.
     pub fn finish(&mut self, g: usize, played: Duration, code: Option<Option<i32>>) {
-        let key = self.lib.games[g].key.clone();
         let name = self.lib.games[g].name.clone();
-        self.state = State::update(|s| s.add_playtime(&key, played.as_secs()));
         // Whatever window had focus is gone; assume we're back in front.
         self.term_focused = true;
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);

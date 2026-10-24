@@ -1,16 +1,22 @@
 //! The command line: `romi check`, `list`, `info` and `scrape`, plus the flags they replaced.
 
-use crate::config::{self, Config};
+use crate::config::{self, Config, LaunchMode};
 use crate::filter::Filter;
+use crate::launch::{Prepared, find_program};
 use crate::library::{Game, Library, Resolve};
 use crate::meta::Meta;
+use crate::session::Session;
 use crate::state::{State, now};
 use crate::{app, art, steam};
 use anyhow::Result;
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use serde::Serialize;
 use std::io::{Write, stdout};
+use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
+use std::process::{Child, ExitStatus};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::time::{Duration, Instant};
 
 /// Shown under `romi --help`.
 const KEYS: &str = "\
@@ -36,6 +42,10 @@ pub mod exit {
     pub const AMBIGUOUS: i32 = 65;
     /// No game matched (EX_NOINPUT).
     pub const NOT_FOUND: i32 = 66;
+    /// The game's emulator or program isn't installed (EX_UNAVAILABLE).
+    pub const UNAVAILABLE: i32 = 69;
+    /// The config can't be read, or a game's command in it is malformed (EX_CONFIG).
+    pub const CONFIG: i32 = 78;
 }
 
 /// An error that ends romi with a particular exit code.
@@ -97,6 +107,24 @@ pub enum Command {
         #[arg(long, value_name = "ID")]
         system: Option<String>,
         /// Print JSON instead
+        #[arg(long)]
+        json: bool,
+    },
+    /// Start a game. Exits with the game's own exit code
+    Play {
+        /// A game key (from `romi list`), an exact name, or words from the name
+        game: String,
+        /// Only look in this system (id or name)
+        #[arg(long, value_name = "ID")]
+        system: Option<String>,
+        /// Run it this way instead of how the config says: wait (output goes to a log), terminal
+        /// (output comes here), or detach (start it and return)
+        #[arg(long, value_enum)]
+        mode: Option<LaunchMode>,
+        /// Print the command, working directory and environment instead of running it
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the outcome (or with --dry-run, the command) as JSON
         #[arg(long)]
         json: bool,
     },
@@ -180,6 +208,7 @@ pub fn run(command: Command, cfg: &Config, cfg_path: &std::path::Path) -> Result
         Command::Check => check(cfg, cfg_path),
         Command::List { filters, json } => list(cfg, &filters, json),
         Command::Info { game, system, json } => info(cfg, &game, system.as_deref(), json),
+        Command::Play { game, system, mode, dry_run, json } => play(cfg, &game, system.as_deref(), mode, dry_run, json),
         Command::Scrape { systems } => art::scrape(cfg, &Library::load_complete(cfg), &systems),
     }
 }
@@ -364,6 +393,142 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
         println!("\n{desc}");
     }
     Ok(())
+}
+
+// ---- play ----
+
+fn play(
+    cfg: &Config,
+    query: &str,
+    system: Option<&str>,
+    mode: Option<LaunchMode>,
+    dry_run: bool,
+    json: bool,
+) -> Result<()> {
+    // No metadata needed, so this skips the database lookups `list` and `info` do.
+    let lib = Library::load(cfg);
+    let game = &lib.games[resolve(&lib, query, system)?];
+    let mode = mode.unwrap_or(game.launch.mode);
+    let prepared = match game.launch.prepare() {
+        Ok(p) => p,
+        Err(e) => return fail(exit::CONFIG, format!("{}: {e:#}", game.name)),
+    };
+    if dry_run {
+        return print_command(game, &prepared, mode, json);
+    }
+    if find_program(&prepared.argv[0]).is_none() {
+        let msg = format!("{}: {} not found (not installed or not on PATH?)", game.name, prepared.argv[0]);
+        return fail(exit::UNAVAILABLE, msg);
+    }
+    let log = app::log_path();
+    if mode == LaunchMode::Detach {
+        prepared.spawn_detached(&log)?;
+        State::update(|s| s.record_launch(&game.key));
+        if json {
+            println!("{}", serde_json::json!({ "key": game.key, "name": game.name, "mode": mode }));
+        }
+        return Ok(());
+    }
+    catch_stop_signals();
+    let mut child = match mode {
+        LaunchMode::Terminal => prepared.spawn_attached()?,
+        _ => prepared.spawn_logged(&log, false)?,
+    };
+    let (session, _) = Session::begin(&game.key);
+    let status = wait_for_game(&mut child)?;
+    let (played, _) = session.end();
+    // Like a shell: 128 plus the signal number when the game was killed.
+    let code = status.code().unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
+    let log = (mode == LaunchMode::Wait).then(|| log.to_string_lossy().into_owned());
+    if json {
+        let outcome = serde_json::json!({
+            "key": game.key,
+            "name": game.name,
+            "mode": mode,
+            "exit_code": code,
+            "played_secs": played.as_secs(),
+            "log": log,
+        });
+        println!("{outcome}");
+    }
+    if code != 0 {
+        let how = match status.signal() {
+            Some(sig) => format!("was killed by signal {sig}"),
+            None => format!("exited with code {code}"),
+        };
+        let log = log.map(|l| format!(" (log: {})", app::tilde(std::path::Path::new(&l)))).unwrap_or_default();
+        return fail(code, format!("{} {how}{log}", game.name));
+    }
+    Ok(())
+}
+
+fn print_command(game: &Game, prepared: &Prepared, mode: LaunchMode, json: bool) -> Result<()> {
+    let cwd = prepared.cwd.as_ref().map(|c| c.to_string_lossy().into_owned());
+    if json {
+        let env: serde_json::Map<String, serde_json::Value> =
+            prepared.env.iter().map(|(k, v)| (k.clone(), v.clone().into())).collect();
+        let command = serde_json::json!({
+            "key": game.key,
+            "name": game.name,
+            "mode": mode,
+            "argv": prepared.argv,
+            "cwd": cwd,
+            "env": env,
+        });
+        println!("{}", serde_json::to_string_pretty(&command)?);
+        return Ok(());
+    }
+    println!("mode     {}", serde_json::to_value(mode)?.as_str().unwrap_or_default());
+    println!("command  {}", shell_words::join(&prepared.argv));
+    if let Some(cwd) = cwd {
+        println!("cwd      {cwd}");
+    }
+    for (k, v) in &prepared.env {
+        println!("env      {k}={}", shell_words::quote(v));
+    }
+    Ok(())
+}
+
+/// The signal that asked romi to stop while a game was running, or 0.
+static STOP_SIGNAL: AtomicI32 = AtomicI32::new(0);
+
+extern "C" fn on_stop_signal(sig: libc::c_int) {
+    STOP_SIGNAL.store(sig, Ordering::Relaxed);
+}
+
+/// Keeps romi alive long enough to record the session when it's told to stop. Must run before
+/// the game starts, so there's no moment when a signal would kill romi and leave the game going.
+fn catch_stop_signals() {
+    for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        // SAFETY: the handler only stores to an atomic. A handler, unlike SIG_IGN, is reset to the
+        // default when the game's program is exec'd, so the game still reacts to signals normally.
+        unsafe { libc::signal(sig, on_stop_signal as extern "C" fn(libc::c_int) as libc::sighandler_t) };
+    }
+}
+
+/// Waits for the game to exit. ^C in the terminal, or `timeout` in a script, signals the whole
+/// process group, which the game shares with romi, so the game gets it too and romi just waits.
+/// A signal sent to romi alone is passed on if the game is still running a second later.
+fn wait_for_game(child: &mut Child) -> std::io::Result<ExitStatus> {
+    const PASS_ON_AFTER: Duration = Duration::from_secs(1);
+    let mut signalled: Option<(i32, Instant)> = None;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        let sig = STOP_SIGNAL.swap(0, Ordering::Relaxed);
+        if sig != 0 {
+            signalled = Some((sig, Instant::now()));
+        }
+        if let Some((sig, at)) = signalled
+            && at.elapsed() >= PASS_ON_AFTER
+        {
+            // SAFETY: kill(2) on our own child's pid; it can't be reused before we reap it.
+            unsafe { libc::kill(child.id() as libc::pid_t, sig) };
+            signalled = None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
 }
 
 // ---- check ----

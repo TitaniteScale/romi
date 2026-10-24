@@ -8,6 +8,7 @@ mod gamepad;
 mod launch;
 mod library;
 mod meta;
+mod session;
 mod state;
 mod steam;
 mod titles;
@@ -22,6 +23,7 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use session::Session;
 use std::io::{Write, stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
@@ -29,7 +31,7 @@ use std::time::{Duration, Instant};
 
 fn main() {
     let (command, cfg_path) = cli::parse();
-    let result = config::load(&cfg_path).and_then(|cfg| match command {
+    let result = load_config(&cfg_path).and_then(|cfg| match command {
         Some(command) => cli::run(command, &cfg, &cfg_path),
         None => run(cfg, cfg_path),
     });
@@ -120,6 +122,10 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, rx: &Receiver<PadEv
     Ok(())
 }
 
+fn load_config(path: &std::path::Path) -> Result<config::Config> {
+    config::load(path).map_err(|e| cli::Exit { code: cli::exit::CONFIG, message: format!("{e:#}") }.into())
+}
+
 /// Hands the terminal to a command, then takes it back.
 fn run_in_terminal(
     terminal: &mut DefaultTerminal,
@@ -130,11 +136,16 @@ fn run_in_terminal(
     execute!(stdout(), DisableFocusChange, LeaveAlternateScreen)?;
     disable_raw_mode()?;
 
-    let started = Instant::now();
-    let status = job.prepared.run_in_terminal();
-    let played = started.elapsed();
-    let code = match &status {
-        Ok(s) => Some(s.code()),
+    let mut played = Duration::ZERO;
+    let code = match job.prepared.spawn_attached() {
+        Ok(mut child) => {
+            let (session, state) = Session::begin(&app.lib.games[job.game].key);
+            app.state = state;
+            let status = child.wait();
+            let (time, state) = session.end();
+            (app.state, played) = (state, time);
+            status.ok().map(|s| s.code())
+        }
         Err(e) => {
             eprintln!("romi: {e:#}");
             None

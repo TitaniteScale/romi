@@ -12,12 +12,13 @@ romi           # open the launcher
 romi check     # what got found, and what looks broken (missing emulators/cores)
 romi list      # every game as TSV: system, name, key (handy for rofi/fzf scripts)
 romi info chrono trigger   # everything romi knows about one game
+romi play super metroid    # start it, from a script, a keybind, or another launcher
 romi scrape    # find box art on disk, download the rest (or: romi scrape psx gba)
 ```
 
 ## Command line
 
-`romi list` and `romi info` are meant for scripts as much as for people. Add `--json` to either
+`romi list`, `romi info` and `romi play` are meant for scripts as much as for people. Add `--json`
 for machine-readable output.
 
 ```
@@ -25,9 +26,19 @@ romi list --system snes --genre rpg        # filters combine: --system (repeatab
 romi list --players 2 --decade 90s --json  # --players, --decade, --favorites, --played, --unplayed
 romi info "super metroid"
 romi info metroid --system gba --json
+romi play "super metroid" --dry-run         # the command, cwd and env it would run
+romi play hello --mode terminal             # override the configured launch mode
 ```
 
-**Naming a game**: `info` takes a key from `romi list` (`snes:Chrono Trigger (USA).sfc`), an exact
+**Playing**: `romi play` records history and play time like the TUI does, and exits with the
+game's own exit code (128 plus the signal number if it was killed). Without `--mode` it uses the
+configured one: `wait` sends the game's output to `last.log`, `terminal` lets it print here, and
+`detach` starts it and returns. The game stays in romi's process group, so ^C, or `timeout` in a
+script, stops both; romi waits for the game to exit and records the session before it does. A
+signal sent to romi alone is passed on to the game. `--json` prints the outcome: `exit_code`,
+`played_secs` and the `log` path.
+
+**Naming a game**: `info` and `play` take a key from `romi list` (`snes:Chrono Trigger (USA).sfc`), an exact
 name in any case, or words that all appear in the name (`romi info fusion metroid`). It stops at the
 first of those that matches anything, and if that's more than one game it lists them rather than
 guessing. `--system` narrows the search.
@@ -47,6 +58,10 @@ appear; existing ones won't be renamed or removed.
 | 64   | bad arguments, or a `--system`/`--genre` that doesn't exist |
 | 65   | more than one game matches; the candidates are listed |
 | 66   | no game matches                                      |
+| 69   | the game's emulator or program isn't installed        |
+| 78   | the config can't be read, or a game's command in it is malformed |
+
+`romi play` otherwise exits with whatever the game did.
 
 ## Install
 
@@ -217,7 +232,8 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
-| `src/cli.rs`      | the command line: arguments, `check`, `list`, `info`, exit codes  |
+| `src/cli.rs`      | the command line: arguments, `check`, `list`, `info`, `play`, exit codes |
+| `src/session.rs`  | recording a game's start and end, for the TUI and `romi play`   |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
 | `e2e/test_*.py`   | end-to-end tests of the TUI and the CLI                          |

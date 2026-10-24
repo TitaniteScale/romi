@@ -1740,6 +1740,7 @@ dependencies = [
  "gilrs",
  "image",
  "json_comments",
+ "libc",
  "ratatui",
  "ratatui-image",
  "roxmltree",

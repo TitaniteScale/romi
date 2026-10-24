@@ -1,7 +1,7 @@
 //! Config file: `~/.config/romi/config.json` (JSON with `//` and `/* */` comments allowed).
 
 use anyhow::{Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -49,7 +49,7 @@ impl Default for Config {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize, PartialEq, Eq, clap::ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum LaunchMode {
     /// Hide output, show a "now playing" screen, and come back when the game exits.
@@ -306,7 +306,7 @@ pub fn state_dir() -> PathBuf {
 pub fn load(path: &Path) -> Result<Config> {
     if !path.exists() {
         if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir)?;
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
         }
         std::fs::write(path, DEFAULT_CONFIG)
             .with_context(|| format!("writing default config to {}", path.display()))?;

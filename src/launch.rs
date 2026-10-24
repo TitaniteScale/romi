@@ -78,33 +78,33 @@ impl Prepared {
         cmd
     }
 
-    /// Starts a game in the background with output going to `log`. It gets its own process
-    /// group so closing the terminal (or ^C) doesn't take the game down with it.
-    pub fn spawn_quiet(&self, log: &Path) -> Result<Child> {
+    /// Starts a game with output going to `log`. With `own_group`, it gets its own process group,
+    /// so closing the terminal (or ^C) doesn't take the game down with it; the TUI wants that.
+    /// `romi play` doesn't: there, ^C or a script's `timeout` should stop the game too.
+    pub fn spawn_logged(&self, log: &Path, own_group: bool) -> Result<Child> {
         if let Some(dir) = log.parent() {
             std::fs::create_dir_all(dir)?;
         }
         let out = std::fs::File::create(log)?;
         let err = out.try_clone()?;
-        self.command()
-            .stdin(Stdio::null())
-            .stdout(out)
-            .stderr(err)
-            .process_group(0)
-            .spawn()
-            .map_err(|e| spawn_error(&self.argv[0], e))
+        let mut cmd = self.command();
+        cmd.stdin(Stdio::null()).stdout(out).stderr(err);
+        if own_group {
+            cmd.process_group(0);
+        }
+        cmd.spawn().map_err(|e| spawn_error(&self.argv[0], e))
+    }
+
+    /// Starts a game with the terminal attached. The caller must have released the terminal.
+    pub fn spawn_attached(&self) -> Result<Child> {
+        self.command().spawn().map_err(|e| spawn_error(&self.argv[0], e))
     }
 
     /// Fire and forget. A thread reaps the child so it doesn't linger as a zombie.
     pub fn spawn_detached(&self, log: &Path) -> Result<()> {
-        let mut child = self.spawn_quiet(log)?;
+        let mut child = self.spawn_logged(log, true)?;
         std::thread::spawn(move || child.wait());
         Ok(())
-    }
-
-    /// Runs with the terminal attached and waits. The caller must have released the terminal.
-    pub fn run_in_terminal(&self) -> Result<std::process::ExitStatus> {
-        self.command().status().map_err(|e| spawn_error(&self.argv[0], e))
     }
 }
 
