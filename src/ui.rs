@@ -401,7 +401,8 @@ fn draw_details(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     } else if let Some(file) = game.path.as_ref().and_then(|p| p.file_name()) {
         lines.push(Line::from(vec![label("File"), Span::raw(file.to_string_lossy().into_owned())]));
     }
-    lines.push(Line::from(vec![label("Runs"), Span::raw(runs_label(&game.launch.command))]));
+    let runs = game.emulator.clone().unwrap_or_else(|| runs_label(&game.launch.command));
+    lines.push(Line::from(vec![label("Runs"), Span::raw(runs)]));
     if let Some(desc) = &m.description {
         lines.push(Line::raw(""));
         lines.extend(desc.lines().map(|l| Line::raw(l.to_string())));
@@ -557,7 +558,7 @@ fn truncate(s: &str, max: usize) -> String {
 }
 
 /// "retroarch · mgba" for libretro cores, otherwise just the program name.
-fn runs_label(command: &str) -> String {
+pub fn runs_label(command: &str) -> String {
     let mut words = command.split_whitespace();
     let program = words.next().unwrap_or_default();
     let program = program.rsplit('/').next().unwrap_or(program);

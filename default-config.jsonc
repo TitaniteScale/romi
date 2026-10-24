@@ -145,7 +145,9 @@
       "id": "psx", "name": "PlayStation",
       "extensions": ["chd", "cue", "m3u", "pbp", "iso", "img", "ccd", "zip", "7z"],
       "bios": [["scph5501.bin", "scph5500.bin", "scph5502.bin"]],
-      "command": "retroarch -L {cores}/mednafen_psx_hw_libretro.so {rom}"
+      "command": "retroarch -L {cores}/mednafen_psx_hw_libretro.so {rom}",
+      // Offered in each game's menu, with any other installed emulators ES-DE knows for the system.
+      "emulators": [{ "name": "DuckStation", "command": "duckstation-qt -batch {rom}" }]
     },
     {
       "id": "ps2", "name": "PlayStation 2",

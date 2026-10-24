@@ -1,7 +1,8 @@
 //! App state and input handling. Keyboard and controller both funnel into the same `Op`s.
 
-use crate::config::{self, Config, LaunchMode};
+use crate::config::{self, Config, Emulator, LaunchMode};
 use crate::cover::Covers;
+use crate::emulators::Emulators;
 use crate::filter::{self, Filter};
 use crate::gamepad::{PadAction, PadEvent};
 use crate::launch::Prepared;
@@ -38,6 +39,7 @@ pub enum MenuItem {
     Quit,
     Favorite,
     Hide,
+    Emulator,
 }
 
 /// An open menu. Everything that would otherwise need a keyboard is in one.
@@ -161,6 +163,8 @@ pub struct App {
     pub menu: Option<Menu>,
     /// List hidden games too (dimmed), so they can be brought back.
     pub show_hidden: bool,
+    /// The other emulators for each system, found the first time one of its games' menus opens.
+    emulators: Emulators,
     /// Cursor (row, column) while the on-screen keyboard is open.
     pub osk: Option<(usize, usize)>,
     /// Letter (or year) shown briefly after jumping to it.
@@ -210,6 +214,7 @@ impl App {
             covers: None,
             menu: None,
             show_hidden: false,
+            emulators: Emulators::default(),
             osk: None,
             flash: None,
             metadata: None,
@@ -675,6 +680,7 @@ impl App {
             Op::Menu => self.menu = Some(Menu { game: None, selected: 0 }),
             Op::GameMenu => {
                 if let Some(g) = self.selected_game() {
+                    self.emulators.find(&self.cfg, &self.lib, g);
                     self.menu = Some(Menu { game: Some(g), selected: 0 });
                 }
             }
@@ -731,6 +737,46 @@ impl App {
         self.set_status(Level::Info, text);
     }
 
+    /// The ways a game can run, default first, once its menu has looked them up.
+    pub fn emulator_options(&self, g: usize) -> Vec<Emulator> {
+        self.emulators.options(&self.lib, g)
+    }
+
+    fn current_emulator(&self, g: usize, options: &[Emulator]) -> usize {
+        crate::emulators::current(&self.lib.games[g], options)
+    }
+
+    /// Switches a game to the next way it can run, saved in overrides.jsonc.
+    fn cycle_emulator(&mut self, g: usize) {
+        let options = self.emulator_options(g);
+        if options.len() < 2 {
+            return;
+        }
+        let next = (self.current_emulator(g, &options) + 1) % options.len();
+        let pick = &options[next];
+        let key = self.lib.games[g].key.clone();
+        let saved = crate::overrides::update(&self.cfg_path, &key, |ov| {
+            let picked = next > 0;
+            ov.emulator = picked.then(|| pick.name.clone());
+            ov.command = picked.then(|| pick.command.clone());
+            ov.mode = pick.mode.filter(|_| picked);
+            ov.cwd = pick.cwd.clone().filter(|_| picked);
+        });
+        if let Err(e) = saved {
+            self.set_status(Level::Error, format!("Couldn't save: {e:#}"));
+            return;
+        }
+        // The same as loading the override would do: what it doesn't say stays the default's.
+        let game = &mut self.lib.games[g];
+        let default = game.default_run.clone();
+        game.launch.command.clone_from(&pick.command);
+        game.launch.mode = pick.mode.or(default.mode).unwrap_or_default();
+        game.launch.cwd = pick.cwd.clone().or(default.cwd);
+        game.emulator = (next > 0).then(|| pick.name.clone());
+        let text = format!("{} runs with {}", game.name, pick.name);
+        self.set_status(Level::Info, text);
+    }
+
     /// Whether a game shows in lists and search.
     fn visible(&self, g: usize) -> bool {
         self.show_hidden || !self.lib.games[g].hidden
@@ -740,6 +786,7 @@ impl App {
     pub fn menu_items(&self) -> Vec<MenuItem> {
         use MenuItem::*;
         match self.menu.as_ref().and_then(|m| m.game) {
+            Some(g) if self.emulator_options(g).len() > 1 => vec![Favorite, Hide, Emulator],
             Some(_) => vec![Favorite, Hide],
             None => {
                 let mut items = Vec::new();
@@ -779,6 +826,12 @@ impl App {
             MenuItem::Favorite => "Favorite".into(),
             MenuItem::Hide if game.is_some_and(|g| g.hidden) => "Unhide".into(),
             MenuItem::Hide => "Hide".into(),
+            MenuItem::Emulator => {
+                let g = self.menu.as_ref().and_then(|m| m.game);
+                let options = g.map(|g| self.emulator_options(g)).unwrap_or_default();
+                let at = g.map_or(0, |g| self.current_emulator(g, &options));
+                format!("Emulator: {}", options.get(at).map_or("default", |e| e.name.as_str()))
+            }
         }
     }
 
@@ -820,6 +873,13 @@ impl App {
                         if let Some(g) = game {
                             self.toggle_hidden(g);
                         }
+                    }
+                    // Stays open, like Sort.
+                    MenuItem::Emulator => {
+                        if let Some(g) = game {
+                            self.cycle_emulator(g);
+                        }
+                        self.menu = Some(Menu { game, selected });
                     }
                 }
             }
@@ -1044,6 +1104,7 @@ impl App {
         match config::load(&self.cfg_path) {
             Ok(cfg) => {
                 self.lib = Library::load(&cfg);
+                self.emulators = Emulators::default();
                 if let Some(c) = &mut self.covers {
                     c.reset(&cfg);
                 }

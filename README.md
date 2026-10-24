@@ -66,7 +66,8 @@ first of those that matches anything, and if that's more than one game it lists 
 guessing. `--system` narrows the search.
 
 **JSON**: `list --json` prints an array of games and `info --json` prints one. Each has `key`,
-`name`, `system` (the id), `system_name`, `hidden`, `path` (null for scripts, ports and Steam; the first disc
+`name`, `system` (the id), `system_name`, `hidden`, `emulator` (the one picked in the game's
+menu, or null for the system's default), `path` (null for scripts, ports and Steam; the first disc
 of a multi-disc game), `discs` (every disc, in order, for a multi-disc game; otherwise empty), `favorite`,
 `playtime_secs`, `last_played` (Unix time or null), `art` (a path or null), and `meta` with
 `genres`, `year`, `players`, `developer`, `publisher`, `franchise` and `description`. New fields may
@@ -152,7 +153,7 @@ before adding it to `games.jsonc`, which your config includes. `--print` shows i
 | `/`               | Select          | fuzzy search everything                         |
 | `F`               | R3              | filter by genre, players, decade, played        |
 | `s`               | (menu)          | sort: name, last played, most played, year      |
-| `o`               | Start → game…   | the selected game's menu: favorite, hide        |
+| `o`               | Start → game…   | the selected game's menu: favorite, hide, emulator |
 | `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, details, show hidden, reload, quit |
 | `ctrl-r`          |                 | reload config                                   |
 | `q`               |                 | quit                                            |
@@ -166,6 +167,12 @@ wherever you left off.
 **Hiding** a game (from its menu) takes it out of every list and search. Start → Show hidden games
 lists them again, dimmed, so you can unhide them from the same menu. `romi play` still finds
 hidden games, and `romi list --hidden` includes them.
+
+**Emulators**: when a system's games can run in something else you have installed (ParaLLEl N64
+next to Mupen64Plus-Next, mGBA's standalone app next to its core), the game's menu has an
+Emulator entry; A cycles through them. The others come from ES-DE's list for the system, limited
+to what's installed, plus any listed under the system's `"emulators"`. The pick is saved per game
+in `overrides.jsonc`, with its command, and `romi info` shows a game's emulator and the others.
 
 Searching with a controller brings up an on-screen keyboard: the d-pad picks a key, A types, X
 deletes, Y adds a space, and B (or ✓) closes it, leaving the results to browse. B again leaves the
@@ -214,11 +221,21 @@ for every option.
 }
 ```
 
+**Other emulators** for a system, for the game menu to offer alongside the ones ES-DE knows:
+
+```jsonc
+"emulators": [
+  { "name": "DuckStation", "command": "duckstation-qt -batch {rom}" },
+  { "name": "Standalone mGBA", "command": "mgba-qt -f {rom}", "mode": "wait" }
+]
+```
+
 **Overrides by game key**: the top-level `"overrides"` change any game, Steam and hand-added ones
 included, using its key from `romi list`. They take the same fields as a system's overrides and beat
-everything else. romi's menus write theirs (hidden games, so far) to `overrides.jsonc` next to the
-config, adding it to `"include"` the first time. romi rewrites that file whole, so keep your own
-overrides in config.json. Unlike `init.jsonc` it names your games, so think twice before putting it
+everything else. romi's menus write theirs (hidden games and emulator picks) to `overrides.jsonc`
+next to the config, adding it to `"include"` the first time. romi rewrites that file whole, so keep
+your own overrides in config.json: for a game in both, yours win field by field, and an emulator
+pick (`emulator` with its `command`, `mode` and `cwd`) only applies if you haven't set a `command`. Unlike `init.jsonc` it names your games, so think twice before putting it
 in a public dotfiles repository.
 
 ```jsonc
@@ -340,6 +357,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/sort.rs`     | sort orders for systems and favorites                            |
 | `src/overrides.rs`| saving changes made in the menus to `overrides.jsonc`            |
+| `src/emulators.rs`| the other emulators a game can run with, for its menu and `info` |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
 | `src/init.rs`     | `romi init`: ES-DE's system list, finding emulators, writing init.jsonc |
 | `src/add.rs`      | `romi add`: guessing a game entry from a path, appending to games.jsonc |

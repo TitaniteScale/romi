@@ -86,7 +86,7 @@ impl Config {
             }
         }
         for (key, ov) in inc.overrides {
-            self.overrides.entry(key).or_insert(ov);
+            self.overrides.entry(key).or_default().fill(ov);
         }
     }
 }
@@ -163,6 +163,22 @@ pub struct SystemConfig {
     /// Per-file tweaks, keyed by path relative to the system dir (usually just the file name).
     #[serde(default)]
     pub overrides: HashMap<String, Override>,
+    /// Other ways to run this system's games, offered in each game's menu along with the
+    /// installed emulators ES-DE knows for the system.
+    #[serde(default)]
+    pub emulators: Vec<Emulator>,
+}
+
+/// A named command for running a system's games.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Emulator {
+    pub name: String,
+    pub command: String,
+    #[serde(default)]
+    pub mode: Option<LaunchMode>,
+    #[serde(default)]
+    pub cwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -212,6 +228,9 @@ fn bios_exists(file: &str, dirs: &[PathBuf]) -> bool {
 pub struct Override {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    /// The name of the emulator picked in the game's menu, which wrote its command here too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emulator: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -234,6 +253,33 @@ pub struct Override {
     pub players: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub year: Option<u16>,
+}
+
+impl Override {
+    /// Takes whatever this doesn't say from `other`.
+    fn fill(&mut self, other: Override) {
+        fn pick<T>(a: &mut Option<T>, b: Option<T>) {
+            if a.is_none() {
+                *a = b;
+            }
+        }
+        pick(&mut self.name, other.name);
+        // An emulator's name, command, mode and cwd go together.
+        if self.command.is_none() {
+            pick(&mut self.emulator, other.emulator);
+            self.command = other.command;
+            pick(&mut self.mode, other.mode);
+            pick(&mut self.cwd, other.cwd);
+        }
+        for (k, v) in other.env {
+            self.env.entry(k).or_insert(v);
+        }
+        self.hidden |= other.hidden;
+        pick(&mut self.art, other.art);
+        pick(&mut self.genre, other.genre);
+        pick(&mut self.players, other.players);
+        pick(&mut self.year, other.year);
+    }
 }
 
 /// A hand-added entry: anything that can be started with a command.
@@ -490,6 +536,21 @@ mod tests {
         assert!(cfg.bios_dirs.contains(&"~/bios".to_string()));
         let names: Vec<&str> = cfg.systems.iter().map(|s| s.name.as_str()).collect();
         assert_eq!(names, ["Mine", "SNES"]);
+    }
+
+    #[test]
+    fn included_overrides_fill_in_around_your_own() {
+        let mut mine: Override = serde_json::from_str(r#"{ "name": "Mine", "command": "mine {rom}" }"#).unwrap();
+        let menus: Override = serde_json::from_str(
+            r#"{ "hidden": true, "emulator": "Other", "command": "other {rom}", "mode": "detach" }"#,
+        )
+        .unwrap();
+        mine.fill(menus);
+        assert_eq!(mine.name.as_deref(), Some("Mine"));
+        assert!(mine.hidden);
+        // The emulator pick comes as a whole or not at all.
+        assert_eq!(mine.command.as_deref(), Some("mine {rom}"));
+        assert_eq!((mine.emulator, mine.mode), (None, None));
     }
 
     #[test]

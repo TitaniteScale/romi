@@ -124,6 +124,33 @@ impl Catalog {
             .or_else(|| self.systems.iter().find(|s| s.folder == alias))
     }
 
+    /// The definition for a configured system: by its folder's name, or else its id.
+    fn def_for(&self, sys: &config::SystemConfig) -> Option<&SystemDef> {
+        let folder = sys.dir.as_deref().unwrap_or(&sys.id);
+        let folder = Path::new(folder).file_name().map_or(folder.to_string(), |f| f.to_string_lossy().into_owned());
+        self.lookup(&folder).or_else(|| self.lookup(&sys.id))
+    }
+
+    /// The emulators installed here that can run a configured system's ROMs, best first. That
+    /// leaves out ES-DE's commands that run the game file itself ("Native port", "Shortcut or
+    /// script"), which only make sense for scripts.
+    pub fn installed_emulators(&self, cfg: &Config, sys: &config::SystemConfig) -> Vec<Translated> {
+        let Some(def) = self.def_for(sys) else { return Vec::new() };
+        let mut def = def.clone();
+        def.commands.retain(|(_, raw)| !raw.contains("%EMULATOR_OS-SHELL%"));
+        let mut finder = Finder::new(&self.rules);
+        let found = self.try_commands(&mut finder, &def, &expand_path(&cfg.roms_dir)).0;
+        // `{cores}` stands for the folder the cores were found in; spell it out when the config's
+        // `{cores}` is somewhere else, or missing.
+        match &finder.cores {
+            Some(dir) if cfg.vars.get("cores").map(|c| expand_path(c)).as_ref() != Some(dir) => found
+                .into_iter()
+                .map(|t| Translated { command: t.command.replace("{cores}", &crate::app::tilde(dir)), ..t })
+                .collect(),
+            _ => found,
+        }
+    }
+
     /// The system's commands that can run here, best first, and why the others can't.
     fn try_commands(&self, finder: &mut Finder, def: &SystemDef, roms_dir: &Path) -> (Vec<Translated>, Vec<String>) {
         let mut runnable = Vec::new();
@@ -527,9 +554,7 @@ pub fn suggest(catalog: &Catalog, cfg: &Config, lib: &crate::library::Library) -
     let mut out = Vec::new();
     for sys in lib.systems.iter().filter(|s| s.problem.as_ref().is_some_and(|p| !p.starts_with("missing BIOS"))) {
         let Some(conf) = cfg.systems.iter().find(|c| c.id == sys.id) else { continue };
-        let folder = conf.dir.as_deref().unwrap_or(&conf.id);
-        let folder = Path::new(folder).file_name().map_or(folder.to_string(), |f| f.to_string_lossy().into_owned());
-        let def = catalog.lookup(&folder).or_else(|| catalog.lookup(&conf.id));
+        let def = catalog.def_for(conf);
         if let Some(run) = def.and_then(|d| catalog.try_commands(&mut finder, d, &roms_dir).0.into_iter().next()) {
             out.push(Suggestion::Replace { id: sys.id.clone(), run });
         }

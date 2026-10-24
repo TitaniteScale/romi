@@ -4,6 +4,7 @@ mod art;
 mod cli;
 mod config;
 mod cover;
+mod emulators;
 mod filter;
 mod gamepad;
 mod init;

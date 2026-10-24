@@ -1,6 +1,6 @@
 //! Builds the game list from ROM folders, hand-added entries and Steam.
 
-use crate::config::{self, Config, Override, SystemConfig, expand_path, glob_match, missing_bios};
+use crate::config::{self, Config, Emulator, Override, SystemConfig, expand_path, glob_match, missing_bios};
 use crate::launch::{Launch, check_command};
 use crate::state::State;
 use crate::steam;
@@ -36,6 +36,11 @@ pub struct Game {
     pub disc_keys: Vec<String>,
     /// Hidden from lists (from romi's menus or the config's top-level overrides).
     pub hidden: bool,
+    /// How the game runs without a top-level override (unnamed), to go back to after another
+    /// emulator was picked.
+    pub default_run: Emulator,
+    /// The emulator picked for it in its menu, by name; None for the default.
+    pub emulator: Option<String>,
 }
 
 impl Game {
@@ -55,6 +60,7 @@ impl Game {
             self.launch.cwd = Some(cwd.clone());
         }
         self.launch.env.extend(ov.env.clone());
+        self.emulator.clone_from(&ov.emulator);
         if let Some(art) = &ov.art {
             self.art.manual = Some(expand_path(art));
         }
@@ -408,6 +414,12 @@ impl Library {
         launch: Launch,
         art: ArtRef,
     ) -> &mut Game {
+        let default_run = Emulator {
+            name: String::new(),
+            command: launch.command.clone(),
+            mode: Some(launch.mode),
+            cwd: launch.cwd.clone(),
+        };
         self.games.push(Game {
             key,
             sort_key: sort_key(&name),
@@ -421,6 +433,8 @@ impl Library {
             discs: Vec::new(),
             disc_keys: Vec::new(),
             hidden: false,
+            default_run,
+            emulator: None,
         });
         self.systems[system].games.push(self.games.len() - 1);
         self.games.last_mut().expect("just pushed")

@@ -425,6 +425,8 @@ struct GameJson<'a> {
     favorite: bool,
     /// Hidden from lists in romi's menus; `list` leaves these out without `--hidden`.
     hidden: bool,
+    /// The emulator picked in the game's menu; null when it runs the system's default.
+    emulator: Option<&'a str>,
     playtime_secs: u64,
     /// Unix time.
     last_played: Option<u64>,
@@ -446,6 +448,7 @@ impl<'a> GameJson<'a> {
             discs: game.discs.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
             favorite: state.is_favorite(&game.key),
             hidden: game.hidden,
+            emulator: game.emulator.as_deref(),
             playtime_secs: state.playtime.get(&game.key).copied().unwrap_or(0),
             last_played: state.last_played.get(&game.key).copied(),
             art: finder.find(system, game).map(|(p, _)| p.to_string_lossy().into_owned()),
@@ -489,6 +492,9 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
     let game = &lib.games[g];
     let m = &game.meta;
     let tilde = |p: &str| app::tilde(std::path::Path::new(p));
+    let mut emulators = crate::emulators::Emulators::default();
+    emulators.find(cfg, &lib, g);
+    let options = emulators.options(&lib, g);
     let played = (record.playtime_secs > 0 || record.last_played.is_some()).then(|| {
         let mut s = crate::ui::fmt_duration(record.playtime_secs);
         if let Some(at) = record.last_played {
@@ -515,6 +521,16 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
         ("favorite", record.favorite.then(|| "yes".to_string())),
         ("hidden", record.hidden.then(|| "yes".to_string())),
         ("played", played),
+        ("emulator", options.get(crate::emulators::current(game, &options)).map(|e| e.name.clone())),
+        (
+            "also",
+            (options.len() > 1).then(|| {
+                let current = crate::emulators::current(game, &options);
+                let others: Vec<&str> =
+                    options.iter().enumerate().filter(|&(i, _)| i != current).map(|(_, e)| e.name.as_str()).collect();
+                others.join(", ")
+            }),
+        ),
         ("command", Some(game.launch.command.clone())),
         ("art", record.art.as_deref().map(tilde)),
     ] {
