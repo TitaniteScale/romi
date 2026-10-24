@@ -2,13 +2,15 @@
 //! games running right now that `romi status` reads. The TUI and `romi play` both go through
 //! here, so history and play time are kept the same way.
 
+use crate::hooks::Hooks;
 use crate::library::Library;
 use crate::state::{State, now};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::os::unix::process::CommandExt;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
 /// A running game, as kept in `<state dir>/running/<pid>.json` while it plays.
@@ -32,11 +34,13 @@ pub struct Session {
     key: String,
     started: Instant,
     file: PathBuf,
+    hooks: Hooks,
 }
 
 impl Session {
-    /// Call once game `g` has started as process `pid`. Returns the updated state.
-    pub fn begin(lib: &Library, g: usize, pid: u32) -> (Session, State) {
+    /// Call once game `g` has started as process `pid`, after running `hooks.launch()`. Returns
+    /// the updated state.
+    pub fn begin(lib: &Library, g: usize, pid: u32, hooks: Hooks) -> (Session, State) {
         let game = &lib.games[g];
         let system = lib.system_of(g);
         let record = Running {
@@ -52,16 +56,23 @@ impl Session {
         // Best effort, like the rest of the state: a game that can't be listed still plays.
         let _ = write_atomic(&file, &record);
         let state = State::update(|s| s.record_launch(&game.key));
-        (Session { key: game.key.clone(), started: Instant::now(), file }, state)
+        (Session { key: game.key.clone(), started: Instant::now(), file, hooks }, state)
     }
 
-    /// Call once the game has exited. Returns how long it ran and the updated state.
-    pub fn end(self) -> (Duration, State) {
+    /// Call once the game has exited, with how. Returns how long it ran and the updated state,
+    /// and starts the `on_exit` hooks on a thread that's returned too, for anyone who must wait.
+    pub fn end(self, status: Option<ExitStatus>) -> (Duration, State, std::thread::JoinHandle<()>) {
         let _ = std::fs::remove_file(&self.file);
         let played = self.started.elapsed();
         let state = State::update(|s| s.add_playtime(&self.key, played.as_secs()));
-        (played, state)
+        let hooks = self.hooks.exit(status.map(exit_code), played);
+        (played, state, hooks)
     }
+}
+
+/// Like a shell: the exit code, or 128 plus the signal number when the game was killed.
+pub fn exit_code(status: ExitStatus) -> i32 {
+    status.code().unwrap_or_else(|| 128 + status.signal().unwrap_or(0))
 }
 
 fn running_dir() -> PathBuf {

@@ -2,6 +2,7 @@
 
 use crate::config::{self, Config, LaunchMode};
 use crate::filter::Filter;
+use crate::hooks::Hooks;
 use crate::launch::Prepared;
 use crate::library::{Game, Library, Resolve};
 use crate::meta::Meta;
@@ -596,8 +597,9 @@ fn play(
         Ok(p) => p,
         Err(e) => return fail(exit::CONFIG, format!("{}: {e:#}", game.name)),
     };
+    let hooks = crate::hooks::Hooks::for_game(cfg, &lib, g);
     if dry_run {
-        return print_command(game, &prepared, mode, json);
+        return print_command(game, &prepared, mode, &hooks, json);
     }
     if let Err(e) = prepared.check_program() {
         return fail(exit::UNAVAILABLE, format!("{}: {e:#}", game.name));
@@ -612,15 +614,19 @@ fn play(
         return Ok(());
     }
     catch_stop_signals();
+    if let Some(problem) = hooks.launch() {
+        eprintln!("romi: {problem}");
+    }
     let mut child = match mode {
         LaunchMode::Terminal => prepared.spawn_attached()?,
         _ => prepared.spawn_logged(&log, false)?,
     };
-    let (session, _) = Session::begin(&lib, g, child.id());
+    let (session, _) = Session::begin(&lib, g, child.id(), hooks);
     let status = wait_for_game(&mut child)?;
-    let (played, _) = session.end();
-    // Like a shell: 128 plus the signal number when the game was killed.
-    let code = status.code().unwrap_or_else(|| 128 + status.signal().unwrap_or(0));
+    let (played, _, exit_hooks) = session.end(Some(status));
+    let code = session::exit_code(status);
+    // romi is about to exit, which would cut the hooks short.
+    let _ = exit_hooks.join();
     let log = (mode == LaunchMode::Wait).then(|| log.to_string_lossy().into_owned());
     if json {
         let outcome = serde_json::json!({
@@ -644,8 +650,9 @@ fn play(
     Ok(())
 }
 
-fn print_command(game: &Game, prepared: &Prepared, mode: LaunchMode, json: bool) -> Result<()> {
+fn print_command(game: &Game, prepared: &Prepared, mode: LaunchMode, hooks: &Hooks, json: bool) -> Result<()> {
     let cwd = prepared.cwd.as_ref().map(|c| c.to_string_lossy().into_owned());
+    let (on_launch, on_exit) = hooks.preview();
     if json {
         let env: serde_json::Map<String, serde_json::Value> =
             prepared.env.iter().map(|(k, v)| (k.clone(), v.clone().into())).collect();
@@ -656,6 +663,7 @@ fn print_command(game: &Game, prepared: &Prepared, mode: LaunchMode, json: bool)
             "argv": prepared.argv,
             "cwd": cwd,
             "env": env,
+            "hooks": { "on_launch": on_launch, "on_exit": on_exit },
         });
         println!("{}", serde_json::to_string_pretty(&command)?);
         return Ok(());
@@ -667,6 +675,10 @@ fn print_command(game: &Game, prepared: &Prepared, mode: LaunchMode, json: bool)
     }
     for (k, v) in &prepared.env {
         println!("env      {k}={}", shell_words::quote(v));
+    }
+    // On exit, {exit_code} is shown as 0 and {played_secs} as 0.
+    for (label, argv) in on_launch.iter().map(|a| ("on_launch", a)).chain(on_exit.iter().map(|a| ("on_exit  ", a))) {
+        println!("{label} {}", shell_words::join(argv));
     }
     Ok(())
 }

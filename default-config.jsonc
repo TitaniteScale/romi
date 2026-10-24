@@ -36,6 +36,12 @@
   // played, in its system).
   "start_on": "last_selected",
 
+  // Commands run when a game starts and stops, here and per system (see the README).
+  // "hooks": {
+  //   "on_launch": ["playerctl pause", "powerprofilesctl set performance"],
+  //   "on_exit": ["powerprofilesctl set balanced"]
+  // },
+
   "theme": {
     // Terminal palette names keep romi in sync with your terminal theme:
     // black red green yellow blue magenta cyan white, the bright_* variants, or "default".

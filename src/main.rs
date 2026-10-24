@@ -7,6 +7,7 @@ mod cover;
 mod emulators;
 mod filter;
 mod gamepad;
+mod hooks;
 mod init;
 mod launch;
 mod library;
@@ -139,12 +140,16 @@ fn run_in_terminal(
     disable_raw_mode()?;
 
     let mut played = Duration::ZERO;
+    let hooks = hooks::Hooks::for_game(&app.cfg, &app.lib, job.game);
+    if let Some(problem) = hooks.launch() {
+        eprintln!("romi: {problem}");
+    }
     let code = match job.prepared.spawn_attached() {
         Ok(mut child) => {
-            let (session, state) = Session::begin(&app.lib, job.game, child.id());
+            let (session, state) = Session::begin(&app.lib, job.game, child.id(), hooks);
             app.state = state;
             let status = child.wait();
-            let (time, state) = session.end();
+            let (time, state, _) = session.end(status.as_ref().ok().copied());
             (app.state, played) = (state, time);
             status.ok().map(|s| s.code())
         }

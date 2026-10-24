@@ -100,7 +100,7 @@ the config includes (hidden games, emulator picks). All done.
 
 ## 4. Couch mode, hooks and status
 
-- **Hooks**: `on_launch` and `on_exit` commands, either global or per system, with the same placeholders
+- ✓ **Hooks**: `on_launch` and `on_exit` commands, either global or per system, with the same placeholders
   as launch commands. Use them to move a game to its own workspace, pause music, or set the CPU
   governor.
 - **Couch mode**: a Hyprland keybind, or the controller's Guide button (through xremap), opens romi in

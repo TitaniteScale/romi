@@ -27,6 +27,8 @@ pub struct Config {
     pub vars: HashMap<String, String>,
     /// Which game is selected when romi starts.
     pub start_on: StartOn,
+    /// Commands run when any game starts and stops. A system's own hooks run as well.
+    pub hooks: Hooks,
     pub theme: Theme,
     pub controller: ControllerConfig,
     pub systems: Vec<SystemConfig>,
@@ -101,6 +103,7 @@ impl Default for Config {
             bios_dirs: vec!["~/.config/retroarch/system".into()],
             vars: HashMap::new(),
             start_on: StartOn::default(),
+            hooks: Hooks::default(),
             theme: Theme::default(),
             controller: ControllerConfig::default(),
             systems: Vec::new(),
@@ -167,6 +170,44 @@ pub struct SystemConfig {
     /// installed emulators ES-DE knows for the system.
     #[serde(default)]
     pub emulators: Vec<Emulator>,
+    /// Commands run when one of this system's games starts and stops, after the global ones
+    /// (and before them when it stops).
+    #[serde(default)]
+    pub hooks: Hooks,
+}
+
+/// Commands run around a game, with the same placeholders as launch commands plus `{game}`,
+/// `{key}` and `{system}`, and `{exit_code}` and `{played_secs}` once it's stopped.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Hooks {
+    /// Before the game starts. romi waits for each (up to a few seconds).
+    pub on_launch: Commands,
+    /// After it exits.
+    pub on_exit: Commands,
+}
+
+/// One command, or several run in order.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Commands {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl Default for Commands {
+    fn default() -> Self {
+        Commands::Many(Vec::new())
+    }
+}
+
+impl Commands {
+    pub fn list(&self) -> &[String] {
+        match self {
+            Commands::One(c) => std::slice::from_ref(c),
+            Commands::Many(cs) => cs,
+        }
+    }
 }
 
 /// A named command for running a system's games.

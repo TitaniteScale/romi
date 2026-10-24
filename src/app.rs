@@ -5,6 +5,7 @@ use crate::cover::Covers;
 use crate::emulators::Emulators;
 use crate::filter::{self, Filter};
 use crate::gamepad::{PadAction, PadEvent};
+use crate::hooks::Hooks;
 use crate::launch::Prepared;
 use crate::library::Library;
 use crate::session::Session;
@@ -1153,11 +1154,19 @@ impl App {
             }
         };
         let result = match game.launch.mode {
-            LaunchMode::Wait => prepared.spawn_logged(&log_path(), true).map(|child| {
-                let (session, state) = Session::begin(&self.lib, g, child.id());
-                self.state = state;
-                self.running = Some(Running { game: g, child, started: Instant::now(), session });
-            }),
+            LaunchMode::Wait => {
+                let hooks = Hooks::for_game(&self.cfg, &self.lib, g);
+                let problem = hooks.launch();
+                let started = prepared.spawn_logged(&log_path(), true).map(|child| {
+                    let (session, state) = Session::begin(&self.lib, g, child.id(), hooks);
+                    self.state = state;
+                    self.running = Some(Running { game: g, child, started: Instant::now(), session });
+                });
+                if let Some(problem) = problem {
+                    self.set_status(Level::Warn, problem);
+                }
+                started
+            }
             // A copy of romi plays it in the background and records the session, so play time
             // counts even if this one quits first.
             LaunchMode::Detach => prepared
@@ -1196,7 +1205,7 @@ impl App {
             Err(_) => None,
         };
         let run = self.running.take().unwrap();
-        let (played, state) = run.session.end();
+        let (played, state, _) = run.session.end(status);
         self.state = state;
         self.finish(run.game, played, status.map(|s| s.code()));
     }

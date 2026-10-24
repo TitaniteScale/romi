@@ -251,6 +251,36 @@ in a public dotfiles repository.
 }
 ```
 
+**Hooks** run commands when a game starts and stops: pause music, switch power profiles, move to
+a workspace. Set them at the top level for every game, or on a system for its games:
+
+```jsonc
+"hooks": {
+  "on_launch": ["playerctl pause", "powerprofilesctl set performance"],
+  "on_exit": ["powerprofilesctl set balanced", "playerctl play"]
+},
+"systems": [
+  { "id": "ps2", ..., "hooks": { "on_launch": "hyprctl dispatch workspace 5", "on_exit": "hyprctl dispatch workspace 1" } }
+]
+```
+
+`on_launch` hooks run before the game starts, global ones first, and romi waits for each (up to 10
+seconds) so a workspace switch happens before the game's window opens. `on_exit` hooks run after
+it exits, the system's first, and nothing waits for them except `romi play`, which finishes them
+before it exits. A hook that fails or isn't installed never stops the game: the TUI or `romi play`
+says so, and `~/.local/state/romi/hooks.log` has what happened and the hooks' output (each launch
+starts it afresh). Hooks run for every launch mode, detached games included, and `romi play
+--dry-run` lists them.
+
+Hooks take a command or a list of them, split like launch commands, with the same placeholders
+plus `{game}` (the name), `{key}` and `{system}` (the id), and on exit `{exit_code}` (128 plus the
+signal number if the game was killed) and `{played_secs}`. `{rom}`, `{file}`, `{name}`, `{dir}` and
+`{appid}` are empty for games that don't have them. The same values are in the environment as
+`ROMI_GAME`, `ROMI_KEY`, `ROMI_SYSTEM`, `ROMI_SYSTEM_NAME`, `ROMI_ROM`, and on exit
+`ROMI_EXIT_CODE` and `ROMI_PLAYED_SECS`, with `ROMI_EVENT` set to `launch` or `exit`. Inside
+`sh -c '...'`, use those: a name like "Advance Wars (USA)" pasted into a shell script trips on the
+parentheses.
+
 **BIOS checks**: list a system's required files under `"bios"`, either one file or a list where any
 one will do. Relative names are looked up in `bios_dirs` (default `~/.config/retroarch/system`) and
 in the system's ROM folder. Absolute paths and `*` wildcards also work, e.g.
@@ -369,6 +399,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/add.rs`      | `romi add`: guessing a game entry from a path, appending to games.jsonc |
 | `src/cli.rs`      | the command line: arguments, commands, completions, exit codes   |
 | `src/session.rs`  | recording a game's start and end, running games, background play |
+| `src/hooks.rs`    | `on_launch` and `on_exit` hooks                                  |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
 | `e2e/test_*.py`   | end-to-end tests of the TUI and the CLI                          |
