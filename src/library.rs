@@ -93,6 +93,13 @@ fn unescape(s: &str) -> String {
     s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
 }
 
+/// Why `Library::resolve` couldn't pick a game.
+#[derive(Debug, PartialEq)]
+pub enum Resolve {
+    NotFound,
+    Ambiguous(Vec<usize>),
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Library {
     pub games: Vec<Game>,
@@ -305,6 +312,37 @@ impl Library {
 
     pub fn find(&self, key: &str) -> Option<usize> {
         self.games.iter().position(|g| g.key == key)
+    }
+
+    /// The system a game belongs to.
+    pub fn system_of(&self, game: usize) -> &System {
+        self.systems.iter().find(|s| s.games.contains(&game)).expect("every game is in a system")
+    }
+
+    /// Finds the one game a query means, for the command line. Tried in order, stopping at the
+    /// first that matches anything: the exact key, the exact name (ignoring case), then names
+    /// containing every word of the query. More than one match is an error, never a guess.
+    pub fn resolve(&self, query: &str, system: Option<usize>) -> Result<usize, Resolve> {
+        let candidates: Vec<usize> = match system {
+            Some(s) => self.systems[s].games.clone(),
+            None => (0..self.games.len()).collect(),
+        };
+        let words = |s: &str| s.to_lowercase().split_whitespace().map(str::to_string).collect::<Vec<_>>();
+        let query_words = words(query);
+        let tries: [&dyn Fn(&Game) -> bool; 3] =
+            [&|g| g.key == query, &|g| g.name.eq_ignore_ascii_case(query.trim()), &|g| {
+                let name = g.name.to_lowercase();
+                !query_words.is_empty() && query_words.iter().all(|w| name.contains(w.as_str()))
+            }];
+        for matches in tries {
+            let found: Vec<usize> = candidates.iter().copied().filter(|&g| matches(&self.games[g])).collect();
+            match found.len() {
+                0 => continue,
+                1 => return Ok(found[0]),
+                _ => return Err(Resolve::Ambiguous(found)),
+            }
+        }
+        Err(Resolve::NotFound)
     }
 }
 

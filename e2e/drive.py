@@ -42,8 +42,17 @@ CONFIG = {
     "controller": {"enabled": False},
     "steam": {"enabled": False},
     "systems": [
-        {"id": "gba", "name": "Game Boy Advance", "extensions": ["gba"], "command": "true {rom}"},
-        {"id": "snes", "name": "Super Nintendo", "extensions": ["sfc"], "command": "true {rom}"},
+        {
+            "id": "gba", "name": "Game Boy Advance", "extensions": ["gba"], "command": "true {rom}",
+            "overrides": {"Advance Wars (USA).gba": {"genre": "Strategy", "year": 2001, "players": 4}},
+        },
+        {
+            "id": "snes", "name": "Super Nintendo", "extensions": ["sfc"], "command": "true {rom}",
+            "overrides": {
+                "Super Metroid (Japan, USA).sfc": {"genre": "Action", "year": 1994, "players": 1},
+                "Chrono Trigger (USA).sfc": {"genre": "RPG", "year": 1995, "players": 1},
+            },
+        },
     ],
     "games": [{"name": "Hello Script", "command": "sh -c 'echo hello from a script'", "mode": "terminal"}],
 }
@@ -81,6 +90,11 @@ class Sandbox:
             "ROMI_CONFIG": str(self.config_path),
             "LANG": "C.UTF-8",
         }
+
+    def write_state(self, state):
+        path = self.home / ".local/state/romi/state.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state))
 
     def state(self):
         path = self.home / ".local/state/romi/state.json"

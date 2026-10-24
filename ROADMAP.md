@@ -40,17 +40,17 @@ Built in this order, one commit each:
 2. ✓ **Subcommands, using `clap`**: `romi check`, `romi list` and `romi scrape` so far, with `info`,
    `play`, `random` and `status` to come. The old `--check`/`--list`/`--scrape` flags still work, and
    bad arguments exit with 64.
-3. **`list` and `info` with `--json`**, in a documented, stable shape. Game keys
-   (`psx:Some Game (USA).chd`) are already stable, so they're the IDs. `list` takes the TUI's
-   filters: `--system`, `--genre`, `--players`, `--decade`, `--favorites`, `--played`.
+3. ✓ **`list` and `info` with `--json`**, in a documented, stable shape. Game keys
+   (`psx:Some Game (USA).chd`) are the IDs. `list` takes the TUI's filters plus systems and
+   favorites. `info` finds games by key, exact name, or words from the name, and lists the candidates
+   (exit 65) rather than guessing.
 4. **`romi play <game>`**, sharing one launch path with the TUI.
-   - It finds games predictably. An exact key wins, then an exact name (`--system` narrows it), then
-     a fuzzy match, but only if exactly one game matches. Otherwise it lists the candidates.
+   - It finds games the same way `info` does.
    - Flags: `--mode wait|terminal|detach`, and `--dry-run`, which prints the expanded argv, cwd and env
      without starting anything. That's handy for testing config changes, and for agents.
    - Exit codes: the game's own exit code when it ran. romi's own failures use the sysexits range,
-     which games rarely use: 64 bad arguments, 65 ambiguous, 66 not found, 69 emulator missing, 78
-     config error.
+     which games rarely use. 64, 65 and 66 already exist; `play` adds 69 for a missing emulator and
+     78 for a config error.
 5. **`romi status --json`, tracked detached games, and shell completions.** A detached game leaves a
    small romi process behind to record its play time. Every running game is listed in the state
    directory, which is what `romi status` reads. Completions cover game keys and system ids.

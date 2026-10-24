@@ -6,6 +6,7 @@
 use crate::config::{self, Config, expand_path};
 use crate::library::Library;
 use crate::titles::TitleIndex;
+use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -18,7 +19,9 @@ const UNHASHABLE: &[&str] = &[
     "wia", "cso", "zso", "gz", "7z", "sh", "vpx",
 ];
 
-#[derive(Debug, Clone, Default)]
+/// Printed as-is by `romi list --json` and `romi info --json`, so the field names are part of the
+/// command-line interface.
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct Meta {
     pub description: Option<String>,
     pub developer: Option<String>,

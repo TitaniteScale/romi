@@ -561,7 +561,7 @@ fn fmt_clock(secs: u64) -> String {
     format!("{:02}:{:02}:{:02}", secs / 3600, secs % 3600 / 60, secs % 60)
 }
 
-fn fmt_ago(secs: u64) -> String {
+pub fn fmt_ago(secs: u64) -> String {
     match secs {
         0..60 => "just now".into(),
         60..3600 => format!("{}m ago", secs / 60),

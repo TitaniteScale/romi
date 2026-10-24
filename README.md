@@ -11,8 +11,42 @@ inside the TUI. See the [roadmap](ROADMAP.md).
 romi           # open the launcher
 romi check     # what got found, and what looks broken (missing emulators/cores)
 romi list      # every game as TSV: system, name, key (handy for rofi/fzf scripts)
+romi info chrono trigger   # everything romi knows about one game
 romi scrape    # find box art on disk, download the rest (or: romi scrape psx gba)
 ```
+
+## Command line
+
+`romi list` and `romi info` are meant for scripts as much as for people. Add `--json` to either
+for machine-readable output.
+
+```
+romi list --system snes --genre rpg        # filters combine: --system (repeatable), --genre,
+romi list --players 2 --decade 90s --json  # --players, --decade, --favorites, --played, --unplayed
+romi info "super metroid"
+romi info metroid --system gba --json
+```
+
+**Naming a game**: `info` takes a key from `romi list` (`snes:Chrono Trigger (USA).sfc`), an exact
+name in any case, or words that all appear in the name (`romi info fusion metroid`). It stops at the
+first of those that matches anything, and if that's more than one game it lists them rather than
+guessing. `--system` narrows the search.
+
+**JSON**: `list --json` prints an array of games and `info --json` prints one. Each has `key`,
+`name`, `system` (the id), `system_name`, `path` (null for scripts, ports and Steam), `favorite`,
+`playtime_secs`, `last_played` (Unix time or null), `art` (a path or null), and `meta` with
+`genres`, `year`, `players`, `developer`, `publisher`, `franchise` and `description`. New fields may
+appear; existing ones won't be renamed or removed.
+
+**Exit codes**: romi's own failures use codes games rarely do, so scripts can tell them apart.
+
+| Code | Meaning                                              |
+|------|------------------------------------------------------|
+| 0    | fine                                                 |
+| 1    | anything else that went wrong (the message says what) |
+| 64   | bad arguments, or a `--system`/`--genre` that doesn't exist |
+| 65   | more than one game matches; the candidates are listed |
+| 66   | no game matches                                      |
 
 ## Install
 
@@ -183,6 +217,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
-| `src/main.rs`     | CLI, event loop, handing the terminal to `terminal`-mode commands |
+| `src/cli.rs`      | the command line: arguments, `check`, `list`, `info`, exit codes  |
+| `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
 | `e2e/test_*.py`   | end-to-end tests of the TUI and the CLI                          |
