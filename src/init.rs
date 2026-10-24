@@ -109,6 +109,35 @@ impl Catalog {
         Some(Catalog { systems, rules, esde: true })
     }
 
+    /// ES-DE's definitions if it's installed (or where the config says), else romi's.
+    pub fn for_config(cfg: &Config) -> Catalog {
+        Catalog::esde(cfg.esde_dir.as_deref().map(expand_path).as_deref()).unwrap_or_else(Catalog::builtin)
+    }
+
+    /// The system a ROM folder is for, by its name or a common alternate name.
+    fn lookup(&self, folder: &str) -> Option<&SystemDef> {
+        let lower = folder.to_lowercase();
+        let alias = FOLDER_ALIASES.iter().find(|(a, _)| *a == lower).map_or(lower.as_str(), |(_, to)| to);
+        self.systems
+            .iter()
+            .find(|s| s.folder.eq_ignore_ascii_case(folder))
+            .or_else(|| self.systems.iter().find(|s| s.folder == alias))
+    }
+
+    /// The system's commands that can run here, best first, and why the others can't.
+    fn try_commands(&self, finder: &mut Finder, def: &SystemDef, roms_dir: &Path) -> (Vec<Translated>, Vec<String>) {
+        let mut runnable = Vec::new();
+        let mut tried = Vec::new();
+        for (label, raw) in &def.commands {
+            let result = if self.esde { finder.translate_esde(label, raw, roms_dir) } else { finder.check_romi(raw) };
+            match result {
+                Ok(t) => runnable.push(t),
+                Err(why) => tried.push(if label.is_empty() { why } else { format!("{label}: {why}") }),
+            }
+        }
+        (runnable, tried)
+    }
+
     /// The systems in romi's default config, for when ES-DE isn't installed.
     pub fn builtin() -> Catalog {
         let cfg = config::parse(config::DEFAULT_CONFIG).expect("the default config parses");
@@ -396,14 +425,7 @@ pub fn scan(catalog: &Catalog, roms_dir: &Path, existing: Option<&Config>) -> Re
             if let Some(id) = configured_for(existing, roms_dir, &path) {
                 return Finding::Configured { folder, id };
             }
-            let lower = folder.to_lowercase();
-            let alias = FOLDER_ALIASES.iter().find(|(a, _)| *a == lower).map_or(lower.as_str(), |(_, to)| to);
-            let by_name = catalog
-                .systems
-                .iter()
-                .find(|s| s.folder.eq_ignore_ascii_case(&folder))
-                .or_else(|| catalog.systems.iter().find(|s| s.folder == alias));
-            let (def, guessed) = match by_name {
+            let (def, guessed) = match catalog.lookup(&folder) {
                 Some(def) => (SystemDef { folder: folder.clone(), ..def.clone() }, false),
                 None => match guess_by_extension(catalog, &path) {
                     Some(def) => (SystemDef { folder: folder.clone(), ..def.clone() }, true),
@@ -414,16 +436,7 @@ pub fn scan(catalog: &Catalog, roms_dir: &Path, existing: Option<&Config>) -> Re
             if games == 0 {
                 return Finding::Empty { def };
             }
-            let mut runnable = Vec::new();
-            let mut tried = Vec::new();
-            for (label, raw) in &def.commands {
-                let result =
-                    if catalog.esde { finder.translate_esde(label, raw, roms_dir) } else { finder.check_romi(raw) };
-                match result {
-                    Ok(t) => runnable.push(t),
-                    Err(why) => tried.push(if label.is_empty() { why } else { format!("{label}: {why}") }),
-                }
-            }
+            let (mut runnable, tried) = catalog.try_commands(&mut finder, &def, roms_dir);
             if runnable.is_empty() {
                 return Finding::NoEmulator { def, games, tried };
             }
@@ -490,6 +503,46 @@ fn files(dir: &Path, depth: usize) -> Vec<PathBuf> {
             }
         } else {
             out.push(path);
+        }
+    }
+    out
+}
+
+/// Something `romi check` can tell you to do.
+#[derive(Debug)]
+pub enum Suggestion {
+    /// A configured system can't run, but something installed could run it.
+    Replace { id: String, run: Translated },
+    /// A folder with games that isn't in the config, and an emulator that can run them.
+    Add { folder: String, name: String, games: usize, run: Translated },
+    /// A folder with games for a known system, but nothing installed can run them.
+    Install { folder: String, name: String, games: usize, tried: Vec<String> },
+}
+
+/// What could fix or extend a config, given what's installed. `lib` is the config's library,
+/// which knows which systems can't launch.
+pub fn suggest(catalog: &Catalog, cfg: &Config, lib: &crate::library::Library) -> Vec<Suggestion> {
+    let roms_dir = expand_path(&cfg.roms_dir);
+    let mut finder = Finder::new(&catalog.rules);
+    let mut out = Vec::new();
+    for sys in lib.systems.iter().filter(|s| s.problem.as_ref().is_some_and(|p| !p.starts_with("missing BIOS"))) {
+        let Some(conf) = cfg.systems.iter().find(|c| c.id == sys.id) else { continue };
+        let folder = conf.dir.as_deref().unwrap_or(&conf.id);
+        let folder = Path::new(folder).file_name().map_or(folder.to_string(), |f| f.to_string_lossy().into_owned());
+        let def = catalog.lookup(&folder).or_else(|| catalog.lookup(&conf.id));
+        if let Some(run) = def.and_then(|d| catalog.try_commands(&mut finder, d, &roms_dir).0.into_iter().next()) {
+            out.push(Suggestion::Replace { id: sys.id.clone(), run });
+        }
+    }
+    for finding in scan(catalog, &roms_dir, Some(cfg)).findings {
+        match finding {
+            Finding::New { def, games, run, .. } => {
+                out.push(Suggestion::Add { folder: def.folder, name: def.name, games, run })
+            }
+            Finding::NoEmulator { def, games, tried } => {
+                out.push(Suggestion::Install { folder: def.folder, name: def.name, games, tried })
+            }
+            _ => {}
         }
     }
     out
@@ -585,7 +638,7 @@ pub fn summary(report: &Report) -> String {
     for f in &report.findings {
         let line = match f {
             Finding::New { def, games, run, guessed, .. } => {
-                let how = if run.label.is_empty() { runs(&run.command) } else { run.label.clone() };
+                let how = describe(run);
                 let guess = if *guessed { "  (recognized by file type)" } else { "" };
                 format!("  + {:<14} {:<28} {}  {how}{guess}", def.folder, def.name, plural(*games))
             }
@@ -610,6 +663,11 @@ pub fn summary(report: &Report) -> String {
     let added = report.findings.iter().filter(|f| matches!(f, Finding::New { .. })).count();
     let _ = writeln!(out, "\n{added} system{} to add", if added == 1 { "" } else { "s" });
     out
+}
+
+/// What a command runs, for people: ES-DE's label, or "retroarch · mgba".
+pub fn describe(run: &Translated) -> String {
+    if run.label.is_empty() { runs(&run.command) } else { run.label.clone() }
 }
 
 /// "retroarch · mgba" for a romi command, like the TUI's details pane shows.

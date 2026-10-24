@@ -10,7 +10,7 @@ inside the TUI. See the [roadmap](ROADMAP.md).
 ```
 romi           # open the launcher
 romi init      # find your ROMs and emulators and write a config for them
-romi check     # what got found, and what looks broken (missing emulators/cores)
+romi check     # what got found, what looks broken, and what could fix it
 romi list      # every game as TSV: system, name, key (handy for rofi/fzf scripts)
 romi info chrono trigger   # everything romi knows about one game
 romi play super metroid    # start it, from a script, a keybind, or another launcher
@@ -112,6 +112,10 @@ What it finds goes in `init.jsonc` next to your config, which your config includ
 after installing an emulator or adding a folder: it replaces `init.jsonc` and nothing else, and
 systems you've set up in `config.json` take priority. `--print` shows the result without writing;
 `--yes` skips the question.
+
+`romi check` uses the same knowledge to suggest fixes: a system whose emulator is gone but which
+something else installed can run (with the command to use), folders with games that aren't in your
+config yet, and folders for systems you have no emulator for.
 
 ## Controls
 

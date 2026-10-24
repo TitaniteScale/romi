@@ -256,3 +256,45 @@ def test_uses_the_rom_folder_set_in_esde(machine):
     out = init(machine, "--print")
     assert out.returncode == 0, out.stderr
     assert out.stderr.startswith("ROMs in ~/Games")
+
+
+def check(sandbox):
+    out = romi(sandbox, "check")
+    assert out.returncode == 0, out.stderr
+    return out.stdout
+
+
+def with_esde(sandbox, config):
+    sandbox.write_config(dict(config, esde_dir=str(sandbox.esde)))
+
+
+def test_check_suggests_an_installed_emulator(machine):
+    config = json.loads(json.dumps(CONFIG))
+    config["systems"].append({"id": "gb", "name": "Game Boy", "extensions": ["gb"], "command": "gone-emu {rom}"})
+    with_esde(machine, config)
+    out = check(machine)
+    assert re.search(r"! Game Boy .* gone-emu not found", out)
+    assert re.search(r'  gb +FakeGB \(Standalone\) is installed and can run it.*\n +"~/Apps/FakeGB-1.2.AppImage -f \{rom\}"', out)
+
+
+def test_check_suggests_folders_to_add_and_emulators_to_install(machine):
+    config = json.loads(json.dumps(CONFIG))
+    config["systems"] = [s for s in config["systems"] if s["id"] != "snes"]
+    with_esde(machine, config)
+    out = check(machine)
+    assert "  scd          1 game for Sega CD, not in your config. Genesis Plus GX can run them: `romi init` adds them." in out
+    assert "  snes         2 games for Nintendo SNES, but no emulator for it is installed (ES-DE knows: Nope)" in out
+    # Empty and unknown folders aren't worth mentioning.
+    assert "n64" not in out and "notes" not in out
+
+
+def test_check_has_no_suggestions_when_all_is_well(sandbox):
+    # (The heading, not the word: pytest puts the test's name in the config's path.)
+    assert "\nsuggestions\n" not in check(sandbox)
+
+
+def test_init_uses_esde_dir_from_the_config(machine):
+    with_esde(machine, CONFIG)
+    out = romi(machine, "init", "--print")
+    assert out.returncode == 0, out.stderr
+    assert "ES-DE's system list" in out.stderr and "gb" in systems(out.stdout)

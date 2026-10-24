@@ -20,6 +20,10 @@
   // instead of short names (sfa3u -> Street Fighter Alpha 3) and to hide BIOS/device zips.
   "arcade_db": "/usr/share/es-de/resources/MAME",
 
+  // Optional: where ES-DE's es_systems.xml and es_find_rules.xml are, if ES-DE isn't installed in
+  // the usual place. `romi init` and `romi check` use them to know systems and emulators.
+  // "esde_dir": "/usr/share/es-de/resources/systems/linux",
+
   // Where "bios" files listed on systems are looked for (each system's ROM folder is checked too).
   // `romi check` and the TUI flag systems whose BIOS is missing.
   "bios_dirs": ["~/.config/retroarch/system"],

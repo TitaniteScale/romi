@@ -17,6 +17,10 @@ pub struct Config {
     /// Folder with ES-DE's mamenames.xml / mamebioses.xml / mamedevices.xml, used by systems
     /// marked `"arcade": true` to turn short names like `sfa3u` into titles and hide BIOS sets.
     pub arcade_db: Option<String>,
+    /// Folder with ES-DE's es_systems.xml and es_find_rules.xml, which `romi init` and
+    /// `romi check` use to know systems and emulators. Only needed if ES-DE isn't installed in the
+    /// usual place.
+    pub esde_dir: Option<String>,
     /// Where relative `bios` files are looked for, in order.
     pub bios_dirs: Vec<String>,
     /// Extra `{placeholders}` usable in any command, cwd or env value.
@@ -74,6 +78,7 @@ impl Default for Config {
             roms_dir: "~/ROMs".into(),
             gamelists_dir: None,
             arcade_db: None,
+            esde_dir: None,
             bios_dirs: vec!["~/.config/retroarch/system".into()],
             vars: HashMap::new(),
             theme: Theme::default(),

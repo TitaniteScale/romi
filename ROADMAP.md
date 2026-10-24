@@ -78,8 +78,8 @@ Built in this order, one commit each:
   with a controller, instead of writing the default.
 - **`romi add <path>`** adds one game, script or port to `"games"`, guessing `cwd` from the path.
 
-The same system definitions let `romi check` suggest fixes, like "the `psx` folder has no command, but
-DuckStation is installed."
+✓ The same system definitions let `romi check` suggest fixes: another installed emulator for a system
+that can't launch, folders that aren't in the config yet, and systems with no emulator installed.
 
 ## 3. Managing the library from inside romi
 

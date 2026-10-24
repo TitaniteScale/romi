@@ -637,6 +637,7 @@ fn init(
     if cfg_path.exists() && existing.is_none() {
         return fail(exit::CONFIG, format!("{} can't be read; fix it first", app::tilde(cfg_path)));
     }
+    let esde = esde.or_else(|| existing.as_ref().and_then(|(_, c)| c.esde_dir.as_deref()).map(config::expand_path));
     let catalog = if no_esde {
         crate::init::Catalog::builtin()
     } else {
@@ -725,6 +726,36 @@ fn init(
     Ok(())
 }
 
+fn print_suggestions(cfg: &Config, lib: &Library) {
+    use crate::init::{Suggestion, describe};
+    let catalog = crate::init::Catalog::for_config(cfg);
+    let suggestions = crate::init::suggest(&catalog, cfg, lib);
+    if suggestions.is_empty() {
+        return;
+    }
+    let games = |n: usize| format!("{n} game{}", if n == 1 { "" } else { "s" });
+    println!("\nsuggestions");
+    for s in suggestions {
+        match s {
+            Suggestion::Replace { id, run } => {
+                println!("  {id:<12} {} is installed and can run it. To use it, set its command to", describe(&run));
+                println!("  {:<12} {}", "", serde_json::to_string(&run.command).unwrap_or_default());
+            }
+            Suggestion::Add { folder, name, games: n, run } => println!(
+                "  {folder:<12} {} for {name}, not in your config. {} can run them: `romi init` adds them.",
+                games(n),
+                describe(&run)
+            ),
+            Suggestion::Install { folder, name, games: n, tried } => {
+                let known: Vec<&str> = tried.iter().map(|t| t.split(':').next().unwrap_or(t)).take(4).collect();
+                let known =
+                    if known.is_empty() { String::new() } else { format!(" (ES-DE knows: {})", known.join(", ")) };
+                println!("  {folder:<12} {} for {name}, but no emulator for it is installed{known}", games(n));
+            }
+        }
+    }
+}
+
 // ---- status ----
 
 fn status(json: bool) -> Result<()> {
@@ -782,6 +813,7 @@ fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
             println!("  ✓ {:<width$} {}", s.name, games(s.games.len()).trim_end());
         }
     }
+    print_suggestions(cfg, &lib);
     if cfg.steam.enabled && steam::find_steam_dir(cfg.steam.dir.as_deref()).is_none() {
         println!("\n  steam is enabled but no Steam install was found");
     }
