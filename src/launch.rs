@@ -98,10 +98,16 @@ impl Prepared {
     /// Fails if the program isn't installed. Spawning reports that too, but a detached game is
     /// spawned by a background romi whose errors nobody sees, so check first.
     pub fn check_program(&self) -> Result<()> {
-        match find_program(&self.argv[0]) {
-            Some(_) => Ok(()),
-            None => bail!("{}: not found (not installed or not on PATH?)", self.argv[0]),
+        // A relative path like `./game` is run from the game's cwd, so look for it there.
+        let program = &self.argv[0];
+        let found = match &self.cwd {
+            Some(cwd) if program.contains('/') && !program.starts_with('/') => cwd.join(program).is_file(),
+            _ => find_program(program).is_some(),
+        };
+        if !found {
+            bail!("{program}: not found (not installed or not on PATH?)");
         }
+        Ok(())
     }
 
     /// Starts a game with the terminal attached. The caller must have released the terminal.
@@ -185,6 +191,19 @@ mod tests {
     fn unknown_placeholder_errors() {
         assert!(substitute("{nope}", &HashMap::new()).is_err());
         assert_eq!(substitute("a{b", &HashMap::new()).unwrap(), "a{b");
+    }
+
+    #[test]
+    fn relative_programs_are_found_in_their_cwd() {
+        let at = |argv0: &str, cwd: Option<&str>| Prepared {
+            argv: vec![argv0.to_string()],
+            cwd: cwd.map(PathBuf::from),
+            env: Vec::new(),
+        };
+        assert!(at("./sh", Some("/bin")).check_program().is_ok());
+        assert!(at("./sh", Some("/nonexistent")).check_program().is_err());
+        assert!(at("sh", Some("/nonexistent")).check_program().is_ok());
+        assert!(at("/bin/sh", None).check_program().is_ok());
     }
 
     #[test]
