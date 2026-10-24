@@ -1,7 +1,8 @@
 //! Builds the game list from ROM folders, hand-added entries and Steam.
 
-use crate::config::{Config, SystemConfig, expand_path, glob_match, missing_bios};
+use crate::config::{self, Config, SystemConfig, expand_path, glob_match, missing_bios};
 use crate::launch::{Launch, check_command};
+use crate::state::State;
 use crate::steam;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -28,6 +29,11 @@ pub struct Game {
     pub meta: Meta,
     pub launch: Launch,
     pub art: ArtRef,
+    /// Every disc, in order, when several are played as one game through a generated `.m3u`.
+    /// `path` is the first.
+    pub discs: Vec<PathBuf>,
+    /// The keys those discs had as games of their own, so old history and scripts still find it.
+    pub disc_keys: Vec<String>,
 }
 
 /// What box art lookups need to know about a game.
@@ -170,7 +176,25 @@ impl Library {
             sys.games.sort_by(|&a, &b| games[a].sort_key.cmp(&games[b].sort_key));
             disambiguate(&mut lib.games, &sys.games);
         }
+        lib.adopt_disc_history();
         lib
+    }
+
+    /// Favorites and play history of discs played before they were merged go to the merged game.
+    fn adopt_disc_history(&self) {
+        let moves: Vec<(&str, &str)> =
+            self.games.iter().flat_map(|g| g.disc_keys.iter().map(|k| (k.as_str(), g.key.as_str()))).collect();
+        if moves.is_empty() {
+            return;
+        }
+        let state = State::load();
+        if moves.iter().any(|(from, _)| state.mentions(from)) {
+            State::update(|s| {
+                for (from, to) in &moves {
+                    s.rename_key(from, to);
+                }
+            });
+        }
     }
 
     fn scan_system(
@@ -215,54 +239,127 @@ impl Library {
             skyscraper: sys.skyscraper.clone().unwrap_or_else(|| crate::art::default_skyscraper(&sys.id)),
         });
 
+        let mut kept = Vec::new();
         for rel in files {
-            let path = dir.join(&rel);
-            let rel_str = rel.to_string_lossy().into_owned();
-            let file_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
-            let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+            let rel_str = rel.to_string_lossy();
+            let file_name = rel.file_name().unwrap_or_default().to_string_lossy();
+            let ext = rel.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
             if !exts.contains(&ext) || sys.exclude.iter().any(|p| glob_match(p, &file_name) || glob_match(p, &rel_str))
             {
                 continue;
             }
-            let ov = sys.overrides.get(&rel_str).or_else(|| sys.overrides.get(&file_name)).cloned().unwrap_or_default();
-            if ov.hidden {
+            if sys.overrides.get(&*rel_str).or_else(|| sys.overrides.get(&*file_name)).is_some_and(|ov| ov.hidden) {
                 continue;
             }
-            let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-            if arcade.is_some_and(|db| db.not_games.contains(&stem)) {
+            let stem = rel.file_stem().unwrap_or_default().to_string_lossy();
+            if arcade.is_some_and(|db| db.not_games.contains(&*stem)) {
                 continue;
             }
-            let (es_name, es_meta) = meta.get(&rel_str).cloned().unwrap_or_default();
-            let mut meta = configured_meta(None, ov.genre.as_deref(), ov.players, ov.year);
-            meta.fill(&es_meta);
-            let mame_title = arcade.and_then(|db| db.names.get(&stem)).cloned();
-            // MAME appends alternate titles ("Art of Fighting / Ryuuko no Ken"); show only the first.
-            // For arcade sets MAME's own title beats a scraped one (scrapers often mix up sequels).
-            let mame_name = mame_title.as_deref().map(|t| clean_name(t.split(" / ").next().unwrap_or(t)));
-            let name = ov.name.or(mame_name).or(es_name).unwrap_or_else(|| clean_name(&stem));
-            let art = ArtRef {
-                // Thumbnail sets use the full title, alternates and all.
-                title: Some(mame_title.unwrap_or_else(|| stem.clone())),
-                appid: None,
-                manual: ov.art.as_deref().map(expand_path),
-            };
+            kept.push(rel);
+        }
 
-            let mut vars = cfg.vars.clone();
-            vars.insert("rom".into(), path.to_string_lossy().into_owned());
-            vars.insert("file".into(), file_name);
-            vars.insert("name".into(), stem);
-            vars.insert("dir".into(), path.parent().unwrap_or(&dir).to_string_lossy().into_owned());
-            let mut env = sys.env.clone();
-            env.extend(ov.env);
-            let launch = Launch {
-                command: ov.command.unwrap_or_else(|| sys.command.clone()),
-                mode: ov.mode.unwrap_or(sys.mode),
-                cwd: ov.cwd.or_else(|| sys.cwd.clone()),
-                env,
-                vars,
-            };
-            let key = format!("{}:{}", sys.id, rel_str);
-            self.push_game(idx, key, name, Some(path), meta, launch, art);
+        // Systems whose emulators take an .m3u get each multi-disc game as one entry. Discs that
+        // an .m3u in the folder already lists are left to it.
+        let entries = if exts.iter().any(|e| e == "m3u") {
+            let listed = playlist_entries(&dir, &kept);
+            kept.retain(|rel| !listed.contains(rel));
+            group_discs(kept)
+        } else {
+            kept.into_iter().map(|rel| vec![rel]).collect()
+        };
+
+        for discs in entries {
+            if discs.len() == 1 {
+                self.push_rom(cfg, sys, idx, &dir, &discs, None, &meta, arcade);
+                continue;
+            }
+            let stem = discs[0].file_stem().unwrap_or_default().to_string_lossy();
+            let base = split_disc(&stem).map_or_else(|| stem.to_string(), |(base, _)| base);
+            let rel = discs[0].with_file_name(format!("{base}.m3u"));
+            let playlist = config::cache_dir().join("m3u").join(&sys.id).join(&rel);
+            let paths: Vec<PathBuf> = discs.iter().map(|d| dir.join(d)).collect();
+            match write_playlist(&playlist, &paths) {
+                Ok(()) => self.push_rom(cfg, sys, idx, &dir, &discs, Some((rel, playlist)), &meta, arcade),
+                Err(e) => {
+                    self.warnings.push(format!("{}: can't write {}: {e}", sys.id, playlist.display()));
+                    for disc in discs {
+                        self.push_rom(cfg, sys, idx, &dir, &[disc], None, &meta, arcade);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Adds a ROM, or several discs of one game with the playlist (relative to the system's
+    /// folder, and where it was written) that launches them.
+    #[allow(clippy::too_many_arguments)]
+    fn push_rom(
+        &mut self,
+        cfg: &Config,
+        sys: &SystemConfig,
+        idx: usize,
+        dir: &Path,
+        discs: &[PathBuf],
+        playlist: Option<(PathBuf, PathBuf)>,
+        gamelist: &HashMap<String, (Option<String>, Meta)>,
+        arcade: Option<&ArcadeDb>,
+    ) {
+        let rel = &discs[0];
+        let path = dir.join(rel);
+        let rel_str = rel.to_string_lossy().into_owned();
+        let file_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+        // A playlist stands in for the file: it's what gets launched and what the key names.
+        let (key_rel, launched) = match &playlist {
+            Some((rel, at)) => (rel.to_string_lossy().into_owned(), at.clone()),
+            None => (rel_str.clone(), path.clone()),
+        };
+        let launched_file = launched.file_name().unwrap_or_default().to_string_lossy().into_owned();
+        let launched_stem = launched.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+
+        let ov = [&key_rel, &launched_file, &rel_str, &file_name]
+            .into_iter()
+            .find_map(|k| sys.overrides.get(k))
+            .cloned()
+            .unwrap_or_default();
+        if ov.hidden {
+            return;
+        }
+        let (es_name, es_meta) = gamelist.get(&key_rel).or_else(|| gamelist.get(&rel_str)).cloned().unwrap_or_default();
+        // Disc 1's entry in a gamelist may carry its disc number.
+        let es_name = es_name.map(|n| if playlist.is_some() { split_disc(&n).map_or(n, |(base, _)| base) } else { n });
+        let mut meta = configured_meta(None, ov.genre.as_deref(), ov.players, ov.year);
+        meta.fill(&es_meta);
+        let mame_title = arcade.and_then(|db| db.names.get(&stem)).cloned();
+        // MAME appends alternate titles ("Art of Fighting / Ryuuko no Ken"); show only the first.
+        // For arcade sets MAME's own title beats a scraped one (scrapers often mix up sequels).
+        let mame_name = mame_title.as_deref().map(|t| clean_name(t.split(" / ").next().unwrap_or(t)));
+        let name = ov.name.or(mame_name).or(es_name).unwrap_or_else(|| clean_name(&launched_stem));
+        let art = ArtRef {
+            // Thumbnail sets use the full title, alternates and all, and name discs separately.
+            title: Some(mame_title.unwrap_or_else(|| stem.clone())),
+            appid: None,
+            manual: ov.art.as_deref().map(expand_path),
+        };
+
+        let mut vars = cfg.vars.clone();
+        vars.insert("rom".into(), launched.to_string_lossy().into_owned());
+        vars.insert("file".into(), launched_file);
+        vars.insert("name".into(), launched_stem);
+        vars.insert("dir".into(), launched.parent().unwrap_or(dir).to_string_lossy().into_owned());
+        let mut env = sys.env.clone();
+        env.extend(ov.env);
+        let launch = Launch {
+            command: ov.command.unwrap_or_else(|| sys.command.clone()),
+            mode: ov.mode.unwrap_or(sys.mode),
+            cwd: ov.cwd.or_else(|| sys.cwd.clone()),
+            env,
+            vars,
+        };
+        let game = self.push_game(idx, format!("{}:{key_rel}", sys.id), name, Some(path), meta, launch, art);
+        if playlist.is_some() {
+            game.discs = discs.iter().map(|d| dir.join(d)).collect();
+            game.disc_keys = discs.iter().map(|d| format!("{}:{}", sys.id, d.to_string_lossy())).collect();
         }
     }
 
@@ -276,7 +373,7 @@ impl Library {
         meta: Meta,
         launch: Launch,
         art: ArtRef,
-    ) {
+    ) -> &mut Game {
         self.games.push(Game {
             key,
             sort_key: sort_key(&name),
@@ -287,8 +384,11 @@ impl Library {
             meta,
             launch,
             art,
+            discs: Vec::new(),
+            disc_keys: Vec::new(),
         });
         self.systems[system].games.push(self.games.len() - 1);
+        self.games.last_mut().expect("just pushed")
     }
 
     /// Finds a system by id or name, or makes a new group for hand-added games.
@@ -329,11 +429,14 @@ impl Library {
         };
         let words = |s: &str| s.to_lowercase().split_whitespace().map(str::to_string).collect::<Vec<_>>();
         let query_words = words(query);
-        let tries: [&dyn Fn(&Game) -> bool; 3] =
-            [&|g| g.key == query, &|g| g.name.eq_ignore_ascii_case(query.trim()), &|g| {
+        let tries: [&dyn Fn(&Game) -> bool; 3] = [
+            &|g| g.key == query || g.disc_keys.iter().any(|k| k == query),
+            &|g| g.name.eq_ignore_ascii_case(query.trim()),
+            &|g| {
                 let name = g.name.to_lowercase();
                 !query_words.is_empty() && query_words.iter().all(|w| name.contains(w.as_str()))
-            }];
+            },
+        ];
         for matches in tries {
             let found: Vec<usize> = candidates.iter().copied().filter(|&g| matches(&self.games[g])).collect();
             match found.len() {
@@ -363,6 +466,85 @@ fn collect_files(root: &Path, dir: &Path, recursive: bool, out: &mut Vec<PathBuf
             out.push(rel.to_path_buf());
         }
     }
+}
+
+/// "Final Fantasy VII (USA) (Disc 2)" -> ("Final Fantasy VII (USA)", "2"). "Disk" and
+/// "(Disc 2 of 3)" count too.
+fn split_disc(stem: &str) -> Option<(String, String)> {
+    let mut from = 0;
+    while let Some(open) = stem[from..].find('(').map(|i| from + i) {
+        let close = open + stem[open..].find(')')?;
+        let inner = &stem[open + 1..close];
+        let is_disc =
+            inner.get(..5).is_some_and(|w| w.eq_ignore_ascii_case("disc ") || w.eq_ignore_ascii_case("disk "));
+        if is_disc {
+            let label = inner[5..].split(" of ").next().unwrap_or_default().trim();
+            if !label.is_empty() && label.len() <= 3 && label.chars().all(|c| c.is_ascii_alphanumeric()) {
+                return Some((format!("{}{}", stem[..open].trim_end(), &stem[close + 1..]), label.to_string()));
+            }
+        }
+        from = close;
+    }
+    None
+}
+
+/// Groups discs of the same game (same folder, extension and name apart from the disc number),
+/// in disc order. Everything else, and a lone disc, stays on its own.
+fn group_discs(files: Vec<PathBuf>) -> Vec<Vec<PathBuf>> {
+    let mut entries: Vec<Vec<(String, PathBuf)>> = Vec::new();
+    let mut groups: HashMap<(PathBuf, String, String), usize> = HashMap::new();
+    for rel in files {
+        let stem = rel.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+        let Some((base, label)) = split_disc(&stem) else {
+            entries.push(vec![(String::new(), rel)]);
+            continue;
+        };
+        let ext = rel.extension().unwrap_or_default().to_string_lossy().to_lowercase();
+        let key = (rel.parent().unwrap_or(Path::new("")).to_path_buf(), base, ext);
+        let i = *groups.entry(key).or_insert_with(|| {
+            entries.push(Vec::new());
+            entries.len() - 1
+        });
+        entries[i].push((label, rel));
+    }
+    let mut out = Vec::new();
+    for mut discs in entries {
+        discs.sort_by_key(|(label, _)| (label.parse::<u32>().unwrap_or(u32::MAX), label.to_lowercase()));
+        // Two files claiming the same disc means these aren't one set; leave them be.
+        if discs.windows(2).any(|w| w[0].0.eq_ignore_ascii_case(&w[1].0)) {
+            out.extend(discs.into_iter().map(|(_, rel)| vec![rel]));
+        } else {
+            out.push(discs.into_iter().map(|(_, rel)| rel).collect());
+        }
+    }
+    out
+}
+
+/// Files (relative to `dir`) that the .m3u playlists among `files` list.
+fn playlist_entries(dir: &Path, files: &[PathBuf]) -> HashSet<PathBuf> {
+    let mut listed = HashSet::new();
+    for rel in files.iter().filter(|f| f.extension().is_some_and(|e| e.eq_ignore_ascii_case("m3u"))) {
+        let Ok(text) = std::fs::read_to_string(dir.join(rel)) else { continue };
+        let base = dir.join(rel.parent().unwrap_or(Path::new("")));
+        for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
+            if let Ok(entry) = base.join(line).strip_prefix(dir) {
+                listed.insert(entry.to_path_buf());
+            }
+        }
+    }
+    listed
+}
+
+/// Writes an .m3u of absolute disc paths, unless it already says exactly that.
+fn write_playlist(path: &Path, discs: &[PathBuf]) -> std::io::Result<()> {
+    let text: String = discs.iter().map(|d| format!("{}\n", d.display())).collect();
+    if std::fs::read_to_string(path).is_ok_and(|old| old == text) {
+        return Ok(());
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, text)
 }
 
 /// Reads ES-DE's gamelist.xml into `relative path -> (name, metadata)`.
@@ -482,6 +664,44 @@ mod tests {
         let xml = "<game>\n<mamename>sfa3u</mamename>\n<realname>Street Fighter Alpha 3 (USA)</realname>\n</game>\n<game><mamename>x</mamename><realname>A &amp; B</realname></game>";
         assert_eq!(tag_values(xml, "realname"), ["Street Fighter Alpha 3 (USA)", "A & B"]);
         assert_eq!(tag_values(xml, "mamename"), ["sfa3u", "x"]);
+    }
+
+    #[test]
+    fn disc_numbers() {
+        let split = split_disc;
+        assert_eq!(split("Final Fantasy VII (USA) (Disc 2)"), Some(("Final Fantasy VII (USA)".into(), "2".into())));
+        assert_eq!(
+            split("Metal Gear Solid (USA) (Disc 1) (Rev 1)"),
+            Some(("Metal Gear Solid (USA) (Rev 1)".into(), "1".into()))
+        );
+        assert_eq!(split("Riven (USA) (Disk 3 of 5)"), Some(("Riven (USA)".into(), "3".into())));
+        assert_eq!(split("Discworld (Europe)"), None);
+        assert_eq!(split("Mr. Bones (Discography)"), None);
+        assert_eq!(split("Apotris"), None);
+    }
+
+    #[test]
+    fn discs_group_in_order() {
+        let files = [
+            "Chrono Cross (USA) (Disc 2).chd",
+            "Crash Bandicoot (USA).chd",
+            "Chrono Cross (USA) (Disc 1).chd",
+            "Final Fantasy IX (USA) (Disc 1).chd",
+            "Final Fantasy IX (USA) (Disc 1).cue",
+            "other/Chrono Cross (USA) (Disc 3).chd",
+        ];
+        let groups = group_discs(files.iter().map(PathBuf::from).collect());
+        let names: Vec<Vec<&str>> = groups.iter().map(|g| g.iter().map(|p| p.to_str().unwrap()).collect()).collect();
+        assert_eq!(
+            names,
+            [
+                vec!["Chrono Cross (USA) (Disc 1).chd", "Chrono Cross (USA) (Disc 2).chd"],
+                vec!["Crash Bandicoot (USA).chd"],
+                vec!["Final Fantasy IX (USA) (Disc 1).chd"],
+                vec!["Final Fantasy IX (USA) (Disc 1).cue"],
+                vec!["other/Chrono Cross (USA) (Disc 3).chd"],
+            ]
+        );
     }
 
     #[test]

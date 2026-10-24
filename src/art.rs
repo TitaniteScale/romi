@@ -105,7 +105,9 @@ impl Finder {
         if let Some(p) = game.art.manual.as_ref().filter(|p| p.is_file()) {
             return Some((p.clone(), Source::Manual));
         }
-        if let Some(p) = existing_image(&cache_stem(sys, game)) {
+        // Art scraped before a game's discs were merged is still under the first disc's key.
+        let keys = std::iter::once(&game.key).chain(&game.disc_keys);
+        if let Some(p) = keys.map(|k| cache_stem_for(sys, k)).find_map(|stem| existing_image(&stem)) {
             return Some((p, Source::Cache));
         }
         if let (Some(root), Some(path)) = (&self.esde, &game.path) {
@@ -167,7 +169,11 @@ fn with_ext(stem: &Path, ext: &str) -> PathBuf {
 
 /// Where the scraper stores art for a game, minus the image extension.
 fn cache_stem(sys: &System, game: &Game) -> PathBuf {
-    let (_, rest) = game.key.split_once(':').unwrap_or(("", &game.key));
+    cache_stem_for(sys, &game.key)
+}
+
+fn cache_stem_for(sys: &System, key: &str) -> PathBuf {
+    let (_, rest) = key.split_once(':').unwrap_or(("", key));
     config::cache_dir().join("art").join(&sys.id).join(rest.replace('/', "__"))
 }
 

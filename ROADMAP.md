@@ -87,7 +87,7 @@ that can't launch, folders that aren't in the config yet, and systems with no em
 Most of these need a place to save changes made in the TUI: `state.json`, or the generated config from
 phase 2.
 
-- **Multi-disc games as one entry.** "Mr. Bones (Disc 1)" and "(Disc 2)" become one game, launched
+- ✓ **Multi-disc games as one entry.** "Mr. Bones (Disc 1)" and "(Disc 2)" become one game, launched
   through a generated `.m3u` so the emulator can swap discs.
 - **Sorting** by name, last played, most played or year. Available from the Start menu and a key, and
   remembered per system.

@@ -87,6 +87,45 @@ impl State {
     pub fn add_playtime(&mut self, key: &str, secs: u64) {
         *self.playtime.entry(key.to_string()).or_default() += secs;
     }
+
+    /// Whether anything is remembered about `key`.
+    pub fn mentions(&self, key: &str) -> bool {
+        self.is_favorite(key)
+            || self.recent.iter().any(|k| k == key)
+            || self.playtime.contains_key(key)
+            || self.last_played.contains_key(key)
+            || self.selected_game.as_deref() == Some(key)
+    }
+
+    /// Moves everything remembered about `from` to `to`, merging with what `to` already has.
+    pub fn rename_key(&mut self, from: &str, to: &str) {
+        if let Some(i) = self.favorites.iter().position(|k| k == from) {
+            self.favorites.remove(i);
+            if !self.is_favorite(to) {
+                self.favorites.push(to.to_string());
+            }
+        }
+        // Keep `to` at whichever of the two places was more recent.
+        let mut seen = false;
+        self.recent.retain_mut(|k| {
+            if k == from {
+                *k = to.to_string();
+            }
+            let first = !(k == to && seen);
+            seen |= k == to;
+            first
+        });
+        if let Some(secs) = self.playtime.remove(from) {
+            self.add_playtime(to, secs);
+        }
+        if let Some(at) = self.last_played.remove(from) {
+            let latest = self.last_played.entry(to.to_string()).or_default();
+            *latest = (*latest).max(at);
+        }
+        if self.selected_game.as_deref() == Some(from) {
+            self.selected_game = Some(to.to_string());
+        }
+    }
 }
 
 pub fn now() -> u64 {
@@ -96,6 +135,26 @@ pub fn now() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn renaming_merges_into_the_new_key() {
+        let mut s = State {
+            favorites: vec!["psx:a (Disc 2).chd".into()],
+            recent: vec!["snes:x.sfc".into(), "psx:a (Disc 2).chd".into(), "psx:a.m3u".into()],
+            playtime: [("psx:a (Disc 2).chd".into(), 60), ("psx:a.m3u".into(), 30)].into(),
+            last_played: [("psx:a (Disc 2).chd".into(), 200), ("psx:a.m3u".into(), 100)].into(),
+            selected_system: None,
+            selected_game: Some("psx:a (Disc 2).chd".into()),
+        };
+        assert!(s.mentions("psx:a (Disc 2).chd"));
+        s.rename_key("psx:a (Disc 2).chd", "psx:a.m3u");
+        assert!(!s.mentions("psx:a (Disc 2).chd"));
+        assert_eq!(s.favorites, ["psx:a.m3u"]);
+        assert_eq!(s.recent, ["snes:x.sfc", "psx:a.m3u"]);
+        assert_eq!(s.playtime["psx:a.m3u"], 90);
+        assert_eq!(s.last_played["psx:a.m3u"], 200);
+        assert_eq!(s.selected_game.as_deref(), Some("psx:a.m3u"));
+    }
 
     #[test]
     fn concurrent_updates_are_not_lost() {

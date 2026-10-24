@@ -65,7 +65,8 @@ first of those that matches anything, and if that's more than one game it lists 
 guessing. `--system` narrows the search.
 
 **JSON**: `list --json` prints an array of games and `info --json` prints one. Each has `key`,
-`name`, `system` (the id), `system_name`, `path` (null for scripts, ports and Steam), `favorite`,
+`name`, `system` (the id), `system_name`, `path` (null for scripts, ports and Steam; the first disc
+of a multi-disc game), `discs` (every disc, in order, for a multi-disc game; otherwise empty), `favorite`,
 `playtime_secs`, `last_played` (Unix time or null), `art` (a path or null), and `meta` with
 `genres`, `year`, `players`, `developer`, `publisher`, `franchise` and `description`. New fields may
 appear; existing ones won't be renamed or removed.
@@ -218,6 +219,17 @@ argument, so paths with spaces need no extra quoting. Need pipes or `&&`? Use `s
 **Display names**, in priority order: override `name`, then the MAME title (for `"arcade": true`
 systems), then the ES-DE gamelist name, then the file name with region tags stripped
 (`King of Fighters 2002, The (Japan)` → `The King of Fighters 2002`).
+
+**Multi-disc games** show as one entry: "Final Fantasy VII (USA) (Disc 1)" to "(Disc 3)" become
+"Final Fantasy VII", launched through an `.m3u` playlist so the emulator can swap discs. That
+happens for systems whose `extensions` include `m3u` (a sign the emulator takes playlists), and
+for discs with the same name, folder and file type. romi writes the playlist to
+`~/.cache/romi/m3u/<system>/` and never touches your ROM folders; `{rom}` is the playlist and the
+game's key names it (`psx:Final Fantasy VII (USA).m3u`). Favorites, play time and art from before
+the discs were merged carry over, and the old disc keys still work with `info` and `play`. An
+override for the game goes under the playlist's name or disc 1's. If a folder already has its own
+`.m3u`, the discs it lists are left to it. Note that RetroArch names save files after what it
+launched, so saves made by booting a disc directly are under that disc's name.
 
 State (favorites, recents, play time, last selection) lives in `~/.local/state/romi/state.json`.
 

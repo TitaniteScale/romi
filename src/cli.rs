@@ -413,8 +413,10 @@ struct GameJson<'a> {
     /// System id, as used by `--system`.
     system: &'a str,
     system_name: &'a str,
-    /// The ROM file; null for scripts, ports and Steam games.
+    /// The ROM file (the first disc of a multi-disc game); null for scripts, ports and Steam games.
     path: Option<String>,
+    /// Every disc of a multi-disc game, in order; empty otherwise.
+    discs: Vec<String>,
     favorite: bool,
     playtime_secs: u64,
     /// Unix time.
@@ -434,6 +436,7 @@ impl<'a> GameJson<'a> {
             system: &system.id,
             system_name: &system.name,
             path: game.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
+            discs: game.discs.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
             favorite: state.is_favorite(&game.key),
             playtime_secs: state.playtime.get(&game.key).copied().unwrap_or(0),
             last_played: state.last_played.get(&game.key).copied(),
@@ -489,7 +492,12 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
     for (label, value) in [
         ("key", Some(game.key.clone())),
         ("system", Some(format!("{} ({})", record.system_name, record.system))),
-        ("file", record.path.as_deref().map(tilde)),
+        ("file", record.discs.is_empty().then(|| record.path.as_deref().map(tilde)).flatten()),
+        (
+            "discs",
+            (!record.discs.is_empty())
+                .then(|| record.discs.iter().map(|d| tilde(d)).collect::<Vec<_>>().join("\n             ")),
+        ),
         ("genre", (!m.genres.is_empty()).then(|| m.genres.join(", "))),
         ("developer", m.developer.clone()),
         ("publisher", m.publisher.clone()),

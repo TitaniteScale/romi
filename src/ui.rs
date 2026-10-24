@@ -381,7 +381,9 @@ fn draw_details(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     if let Some(&at) = app.state.last_played.get(&game.key) {
         lines.push(Line::from(vec![label("Last"), Span::raw(fmt_ago(now().saturating_sub(at)))]));
     }
-    if let Some(file) = game.path.as_ref().and_then(|p| p.file_name()) {
+    if !game.discs.is_empty() {
+        lines.push(Line::from(vec![label("Discs"), Span::raw(game.discs.len().to_string())]));
+    } else if let Some(file) = game.path.as_ref().and_then(|p| p.file_name()) {
         lines.push(Line::from(vec![label("File"), Span::raw(file.to_string_lossy().into_owned())]));
     }
     lines.push(Line::from(vec![label("Runs"), Span::raw(runs_label(&game.launch.command))]));
