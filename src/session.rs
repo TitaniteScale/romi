@@ -141,9 +141,11 @@ mod tests {
 
     #[test]
     fn reads_own_process_stat() {
+        // The state is the main thread's, which may be running or sleeping, but not a zombie.
         let (state, start) = proc_stat(std::process::id()).unwrap();
-        assert_eq!(state, 'R');
+        assert_ne!(state, 'Z');
         assert!(start > 0);
+        assert_eq!(proc_stat(std::process::id()).unwrap().1, start);
         assert_eq!(proc_stat(u32::MAX), None);
     }
 }
