@@ -142,6 +142,8 @@ def test_print_shows_what_it_found_and_writes_nothing(machine):
     assert "recognized by file type" in summary
     assert not machine.config_path.exists()
     assert not (machine.root / "init.jsonc").exists()
+    # Nothing about the games themselves goes in the file.
+    assert "Tetris" not in out.stdout and not re.search(r"\d+ games?\b", out.stdout)
 
 
 def test_fresh_init_writes_a_working_config(machine):

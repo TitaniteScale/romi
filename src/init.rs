@@ -530,19 +530,23 @@ pub fn render(report: &Report) -> String {
         let _ = writeln!(out, "  \"vars\": {{ \"cores\": {} }},", q(&crate::app::tilde(cores)));
     }
     out.push_str("  \"systems\": [");
-    for (i, (def, games, run, others, guessed)) in new.iter().enumerate() {
+    // Nothing here says what's in the ROM folders (not even how many games), so the file is safe
+    // to keep in a public dotfiles repository.
+    for (i, (def, _, run, others, guessed)) in new.iter().enumerate() {
         out.push_str(if i == 0 { "\n" } else { ",\n" });
-        let mut note = format!("{games} game{}", if **games == 1 { "" } else { "s" });
+        let mut notes = Vec::new();
         if **guessed {
-            note.push_str(", recognized by file type");
+            notes.push("Recognized by file type".to_string());
         }
         if !run.label.is_empty() {
-            let _ = write!(note, ". Using {}", run.label);
+            notes.push(format!("Using {}", run.label));
         }
         if !others.is_empty() {
-            let _ = write!(note, "; also installed: {}", others.join(", "));
+            notes.push(format!("also installed: {}", others.join(", ")));
         }
-        let _ = writeln!(out, "    // {note}");
+        if !notes.is_empty() {
+            let _ = writeln!(out, "    // {}", notes.join("; "));
+        }
         out.push_str("    {\n");
         let _ = write!(out, "      \"id\": {}, \"name\": {}", q(&def.id), q(&def.name));
         if def.folder != def.id {

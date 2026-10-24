@@ -103,6 +103,11 @@ otherwise the systems in romi's default config. It shows what it found and asks 
   ? notes          not a system romi knows
 ```
 
+init only looks in those places: ES-DE's system files and settings, the folders on your PATH and
+the few others ES-DE's find rules name, RetroArch's core folders, and two levels into your ROM
+folder to count files. It sends nothing anywhere, and `init.jsonc` records only systems and
+commands, not which games you have or how many, so it's safe in a public dotfiles repository.
+
 What it finds goes in `init.jsonc` next to your config, which your config includes. Rerun init
 after installing an emulator or adding a folder: it replaces `init.jsonc` and nothing else, and
 systems you've set up in `config.json` take priority. `--print` shows the result without writing;
