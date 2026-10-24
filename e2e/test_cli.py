@@ -162,3 +162,23 @@ def test_info_not_found(sandbox):
     out = run_cli(sandbox, "info", "zelda")
     assert out.returncode == 66
     assert "zelda" in out.stderr
+
+
+def test_title_screens_and_screenshots(sandbox):
+    art = sandbox.home / ".cache/romi/art/gba"
+    for sub in ("titles", "snaps"):
+        (art / sub).mkdir(parents=True)
+    (art / "titles/Advance Wars (USA).gba.png").write_bytes(b"\x89PNG")
+    (art / "snaps/Advance Wars (USA).gba.png").write_bytes(b"\x89PNG")
+    game = json.loads(run_cli(sandbox, "info", "advance wars", "--json").stdout)
+    assert game["title_screen"].endswith("/art/gba/titles/Advance Wars (USA).gba.png")
+    assert game["screenshot"].endswith("/art/gba/snaps/Advance Wars (USA).gba.png")
+    assert game["art"] is None
+    out = run_cli(sandbox, "scrape", "gba").stdout
+    assert "2 games      0 covers      1 titles      1 snaps" in out
+
+    config = json.loads(json.dumps(CONFIG))
+    config["art"]["screens"] = False
+    sandbox.write_config(config)
+    out = run_cli(sandbox, "scrape", "gba").stdout
+    assert "titles" not in out and "0 covers" in out

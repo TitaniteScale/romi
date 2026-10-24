@@ -3,7 +3,7 @@
 //! covers it wanted, in order (the selected one first); covers that scrolled out of view before a
 //! worker got to them are dropped.
 
-use crate::art::Finder;
+use crate::art::{Finder, Kind};
 use crate::config::Config;
 use crate::library::Library;
 use image::imageops::FilterType;
@@ -46,8 +46,8 @@ struct Work {
 pub struct Covers {
     finder: Finder,
     font: FontSize,
-    /// Game key -> image on disk (or none), resolved once per run.
-    paths: HashMap<String, Option<PathBuf>>,
+    /// Game key and kind -> image on disk (or none), resolved once per run.
+    paths: HashMap<(String, Kind), Option<PathBuf>>,
     ready: HashMap<Slot, Protocol>,
     order: VecDeque<Slot>,
     failed: HashSet<Slot>,
@@ -117,29 +117,34 @@ impl Covers {
         self.wanted.clear();
     }
 
-    /// The image file for a game, if it has one.
+    /// The cover image file for a game, if it has one.
     pub fn path(&mut self, lib: &Library, game: usize) -> Option<PathBuf> {
+        self.path_kind(lib, game, Kind::Cover)
+    }
+
+    pub fn path_kind(&mut self, lib: &Library, game: usize, kind: Kind) -> Option<PathBuf> {
         let g = &lib.games[game];
-        if let Some(p) = self.paths.get(&g.key) {
+        let key = (g.key.clone(), kind);
+        if let Some(p) = self.paths.get(&key) {
             return p.clone();
         }
-        let found = lib
-            .systems
-            .iter()
-            .find(|s| s.games.contains(&game))
-            .and_then(|sys| self.finder.find(sys, g))
-            .map(|(p, _)| p);
-        self.paths.insert(g.key.clone(), found.clone());
+        let found = self.finder.find_kind(lib.system_of(game), g, kind).map(|(p, _)| p);
+        self.paths.insert(key, found.clone());
         found
     }
 
     /// The cover for a game sized to fit `size` cells, kicking off a load if it isn't ready.
     pub fn get(&mut self, lib: &Library, game: usize, size: Size) -> Cover<'_> {
+        self.get_kind(lib, game, Kind::Cover, size)
+    }
+
+    pub fn get_kind(&mut self, lib: &Library, game: usize, kind: Kind, size: Size) -> Cover<'_> {
         if size.width < 4 || size.height < 3 {
             return Cover::None;
         }
-        let Some(path) = self.path(lib, game) else { return Cover::None };
-        let slot = (lib.games[game].key.clone(), size);
+        let Some(path) = self.path_kind(lib, game, kind) else { return Cover::None };
+        let key = &lib.games[game].key;
+        let slot = (if kind == Kind::Cover { key.clone() } else { format!("{key}#{}", kind.plural()) }, size);
         if self.failed.contains(&slot) {
             return Cover::None;
         }
@@ -212,5 +217,7 @@ impl Covers {
 
 fn encode(picker: &Picker, req: &Request) -> Option<Protocol> {
     let img = image::ImageReader::open(&req.path).ok()?.with_guessed_format().ok()?.decode().ok()?;
-    picker.new_protocol(img, req.slot.1, Resize::Fit(Some(FilterType::Triangle))).ok()
+    // Scale rather than Fit, so small images (title screens are 320 pixels wide) fill the space
+    // on a high-resolution screen too.
+    picker.new_protocol(img, req.slot.1, Resize::Scale(Some(FilterType::Triangle))).ok()
 }

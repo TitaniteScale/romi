@@ -70,7 +70,8 @@ guessing. `--system` narrows the search.
 `name`, `system` (the id), `system_name`, `hidden`, `tags` (yours, in name order), `emulator` (the one picked in the game's
 menu, or null for the system's default), `path` (null for scripts, ports and Steam; the first disc
 of a multi-disc game), `discs` (every disc, in order, for a multi-disc game; otherwise empty), `favorite`,
-`playtime_secs`, `last_played` (Unix time or null), `art` (a path or null), and `meta` with
+`playtime_secs`, `last_played` (Unix time or null), `art`, `title_screen` and `screenshot` (paths
+or null), and `meta` with
 `genres`, `year`, `players`, `developer`, `publisher`, `franchise` and `description`. New fields may
 appear; existing ones won't be renamed or removed.
 
@@ -384,9 +385,17 @@ Online sources need no accounts or keys:
   `"libretro": ["Set Name", ...]` on the system.
 - **Steam's CDN** for installed Steam games.
 
+**Title screens and screenshots** come from the same places: libretro's `Named_Titles` and
+`Named_Snaps` (matched like the covers), ES-DE's `titlescreens` and `screenshots`, and Skyscraper's
+`screenshots`, and `romi scrape` gets them along with the covers, kept in `titles/` and `snaps/`
+under each system's cache folder. The details pane shows them beside the cover when it's wide
+enough, taking turns every five seconds; when it isn't, the cover, title screen and screenshot
+take turns in its place, starting from the cover each time you move to another game. `romi info` gives their paths (`title_screen` and `screenshot`
+in JSON). Set `"art": { "screens": false }` to stick to covers.
+
 Covers show at the top of the details pane (and on the "now playing" screen). romi asks the
 terminal what it supports at startup: Kitty graphics in Ghostty/kitty, Sixel or iTerm2 elsewhere,
-colored half-blocks as a last resort. Images are decoded on a background thread, so holding the
+colored half-blocks as a last resort. Images are decoded on background threads, so holding the
 d-pad through a long list never stutters. Turn covers off with `"art": { "show": false }`.
 
 Set `"art": { "online": false }` to only use what's already on disk. The art belongs to its

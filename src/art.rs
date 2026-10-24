@@ -1,11 +1,12 @@
-//! Box art: finding what's already on disk, and `romi scrape` for the rest.
+//! Box art, title screens and screenshots: finding what's already on disk, and `romi scrape` for
+//! the rest.
 //!
-//! Lookup order: a path set in the config, romi's own cache, ES-DE's downloaded_media, the
-//! Skyscraper cache, then Steam's library cache. Only the cache is written to; the others are
-//! read in place.
+//! Lookup order: a path set in the config (covers only), romi's own cache, ES-DE's
+//! downloaded_media, the Skyscraper cache, then Steam's library cache (covers only). Only the
+//! cache is written to; the others are read in place.
 //!
-//! Online sources need no keys: libretro's thumbnail server (RetroArch's box art, named after
-//! No-Intro/Redump/MAME titles) and Steam's CDN. Art is fetched on the user's machine and cached
+//! Online sources need no keys: libretro's thumbnail server (RetroArch's box art, title screens
+//! and screenshots, named after No-Intro/Redump/MAME titles) and Steam's CDN. Art is fetched on the user's machine and cached
 //! under `~/.cache/romi/art`; none of it ships with romi.
 
 use crate::config::{self, Config, expand_path};
@@ -74,6 +75,68 @@ pub fn default_skyscraper(id: &str) -> String {
     .to_string()
 }
 
+/// What a picture of a game shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Kind {
+    Cover,
+    /// The title screen.
+    Title,
+    /// A screenshot of it being played.
+    Snap,
+}
+
+impl Kind {
+    /// The kinds `romi scrape` fetches and the TUI shows.
+    pub fn wanted(cfg: &Config) -> &'static [Kind] {
+        if cfg.art.screens { &[Kind::Cover, Kind::Title, Kind::Snap] } else { &[Kind::Cover] }
+    }
+
+    /// The folder on libretro's thumbnail server.
+    fn libretro_dir(self) -> &'static str {
+        match self {
+            Kind::Cover => "Named_Boxarts",
+            Kind::Title => "Named_Titles",
+            Kind::Snap => "Named_Snaps",
+        }
+    }
+
+    /// ES-DE's downloaded_media folders for it, best first.
+    fn esde_dirs(self) -> &'static [&'static str] {
+        match self {
+            Kind::Cover => &["covers", "3dboxes"],
+            Kind::Title => &["titlescreens"],
+            Kind::Snap => &["screenshots"],
+        }
+    }
+
+    /// Skyscraper's cache folder for it, if it keeps one.
+    fn skyscraper_dir(self) -> Option<&'static str> {
+        match self {
+            Kind::Cover => Some("covers"),
+            Kind::Title => None,
+            Kind::Snap => Some("screenshots"),
+        }
+    }
+
+    /// romi's cache keeps covers loose in a system's folder and the others in subfolders.
+    fn cache_dir(self) -> Option<&'static str> {
+        match self {
+            Kind::Cover => None,
+            Kind::Title => Some("titles"),
+            Kind::Snap => Some("snaps"),
+        }
+    }
+
+    /// For people: "covers", "titles", "snaps".
+    pub fn plural(self) -> &'static str {
+        match self {
+            Kind::Cover => "covers",
+            Kind::Title => "titles",
+            Kind::Snap => "snaps",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Manual,
@@ -88,7 +151,7 @@ pub struct Finder {
     esde: Option<PathBuf>,
     skyscraper: Option<PathBuf>,
     steam: Option<PathBuf>,
-    sky_index: HashMap<String, HashMap<String, PathBuf>>,
+    sky_index: HashMap<(String, &'static str), HashMap<String, PathBuf>>,
 }
 
 impl Finder {
@@ -101,28 +164,36 @@ impl Finder {
         }
     }
 
+    /// A game's cover.
     pub fn find(&mut self, sys: &System, game: &Game) -> Option<(PathBuf, Source)> {
-        if let Some(p) = game.art.manual.as_ref().filter(|p| p.is_file()) {
+        self.find_kind(sys, game, Kind::Cover)
+    }
+
+    pub fn find_kind(&mut self, sys: &System, game: &Game, kind: Kind) -> Option<(PathBuf, Source)> {
+        if let Some(p) = game.art.manual.as_ref().filter(|p| kind == Kind::Cover && p.is_file()) {
             return Some((p.clone(), Source::Manual));
         }
         // Art scraped before a game's discs were merged is still under the first disc's key.
         let keys = std::iter::once(&game.key).chain(&game.disc_keys);
-        if let Some(p) = keys.map(|k| cache_stem_for(sys, k)).find_map(|stem| existing_image(&stem)) {
+        if let Some(p) = keys.map(|k| cache_stem_for(sys, k, kind)).find_map(|stem| existing_image(&stem)) {
             return Some((p, Source::Cache));
         }
         if let (Some(root), Some(path)) = (&self.esde, &game.path) {
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-            for kind in ["covers", "3dboxes"] {
-                if let Some(p) = existing_image(&root.join(&sys.esde).join(kind).join(&*stem)) {
+            for dir in kind.esde_dirs() {
+                if let Some(p) = existing_image(&root.join(&sys.esde).join(dir).join(&*stem)) {
                     return Some((p, Source::EsDe));
                 }
             }
         }
-        if let Some(path) = &game.path {
+        if let (Some(path), Some(dir)) = (&game.path, kind.skyscraper_dir()) {
             let file = path.file_name().unwrap_or_default().to_string_lossy();
-            if let Some(p) = self.skyscraper_index(&sys.skyscraper).get(&*file) {
+            if let Some(p) = self.skyscraper_index(&sys.skyscraper, dir).get(&*file) {
                 return Some((p.clone(), Source::Skyscraper));
             }
+        }
+        if kind != Kind::Cover {
+            return None;
         }
         if let (Some(cache), Some(appid)) = (&self.steam, &game.art.appid) {
             let p = cache.join(appid).join("library_600x900.jpg");
@@ -133,21 +204,22 @@ impl Finder {
         None
     }
 
-    /// Skyscraper names covers by a content hash; `quickid.xml` maps file paths to those hashes.
-    /// The paths may come from another machine (a handheld's SD card), so match on file name.
-    fn skyscraper_index(&mut self, platform: &str) -> &HashMap<String, PathBuf> {
+    /// Skyscraper names its images by a content hash, the same for a game's cover and
+    /// screenshot; `quickid.xml` maps file paths to those hashes. The paths may come from another
+    /// machine (a handheld's SD card), so match on file name.
+    fn skyscraper_index(&mut self, platform: &str, kind_dir: &'static str) -> &HashMap<String, PathBuf> {
         let root = self.skyscraper.clone();
-        self.sky_index.entry(platform.to_string()).or_insert_with(|| {
+        self.sky_index.entry((platform.to_string(), kind_dir)).or_insert_with(|| {
             let mut index = HashMap::new();
             let Some(dir) = root.map(|r| r.join(platform)) else { return index };
             let Ok(xml) = std::fs::read_to_string(dir.join("quickid.xml")) else { return index };
             let Ok(doc) = roxmltree::Document::parse(&xml) else { return index };
             for node in doc.descendants().filter(|n| n.has_tag_name("quickid")) {
                 let (Some(path), Some(id)) = (node.attribute("filepath"), node.attribute("id")) else { continue };
-                let cover = dir.join("covers/screenscraper").join(id);
-                if cover.is_file() {
+                let image = dir.join(kind_dir).join("screenscraper").join(id);
+                if image.is_file() {
                     let name = Path::new(path).file_name().unwrap_or_default().to_string_lossy().into_owned();
-                    index.insert(name, cover);
+                    index.insert(name, image);
                 }
             }
             index
@@ -168,30 +240,35 @@ fn with_ext(stem: &Path, ext: &str) -> PathBuf {
 }
 
 /// Where the scraper stores art for a game, minus the image extension.
-fn cache_stem(sys: &System, game: &Game) -> PathBuf {
-    cache_stem_for(sys, &game.key)
+fn cache_stem(sys: &System, game: &Game, kind: Kind) -> PathBuf {
+    cache_stem_for(sys, &game.key, kind)
 }
 
-fn cache_stem_for(sys: &System, key: &str) -> PathBuf {
+fn cache_stem_for(sys: &System, key: &str, kind: Kind) -> PathBuf {
     let (_, rest) = key.split_once(':').unwrap_or(("", key));
-    config::cache_dir().join("art").join(&sys.id).join(rest.replace('/', "__"))
+    let mut dir = config::cache_dir().join("art").join(&sys.id);
+    if let Some(sub) = kind.cache_dir() {
+        dir.push(sub);
+    }
+    dir.join(rest.replace('/', "__"))
 }
 
 // ---- libretro thumbnail sets ----
 
-/// One libretro thumbnail set's file names (without `.png`).
+/// The file names (without `.png`) in one folder of a libretro thumbnail set.
 struct Listing {
     set: String,
+    kind: Kind,
     titles: TitleIndex,
 }
 
 impl Listing {
-    fn new(set: String, names: Vec<String>) -> Listing {
-        Listing { set, titles: TitleIndex::new(names) }
+    fn new(set: String, kind: Kind, names: Vec<String>) -> Listing {
+        Listing { set, kind, titles: TitleIndex::new(names) }
     }
 
     fn url(&self, name: &str) -> String {
-        format!("{LIBRETRO}/{}/Named_Boxarts/{}.png", encode(&self.set), encode(name))
+        format!("{LIBRETRO}/{}/{}/{}.png", encode(&self.set), self.kind.libretro_dir(), encode(name))
     }
 }
 
@@ -259,17 +336,21 @@ fn get(agent: &ureq::Agent, url: &str, limit: u64) -> Result<Option<Vec<u8>>> {
     }
 }
 
-/// A set's file names, from a week-old-at-most local copy of its directory listing.
-fn listing(agent: &ureq::Agent, set: &str) -> Result<Listing> {
-    let cached = config::cache_dir().join("libretro").join(format!("{set}.txt"));
+/// A set's file names for one kind, from a week-old-at-most local copy of its directory listing.
+fn listing(agent: &ureq::Agent, set: &str, kind: Kind) -> Result<Listing> {
+    let file = match kind {
+        Kind::Cover => format!("{set}.txt"),
+        _ => format!("{set} - {}.txt", kind.libretro_dir()),
+    };
+    let cached = config::cache_dir().join("libretro").join(file);
     let fresh = std::fs::metadata(&cached)
         .and_then(|m| m.modified())
         .is_ok_and(|t| t.elapsed().unwrap_or(LISTING_MAX_AGE) < LISTING_MAX_AGE);
     if fresh {
         let text = std::fs::read_to_string(&cached)?;
-        return Ok(Listing::new(set.to_string(), text.lines().map(String::from).collect()));
+        return Ok(Listing::new(set.to_string(), kind, text.lines().map(String::from).collect()));
     }
-    let html = get(agent, &format!("{LIBRETRO}/{}/Named_Boxarts/", encode(set)), 64 << 20)
+    let html = get(agent, &format!("{LIBRETRO}/{}/{}/", encode(set), kind.libretro_dir()), 64 << 20)
         .with_context(|| format!("listing {set}"))?
         .with_context(|| format!("no thumbnail set named \"{set}\" on {LIBRETRO}"))?;
     let html = String::from_utf8_lossy(&html);
@@ -284,7 +365,7 @@ fn listing(agent: &ureq::Agent, set: &str) -> Result<Listing> {
         std::fs::create_dir_all(dir)?;
     }
     std::fs::write(&cached, names.join("\n"))?;
-    Ok(Listing::new(set.to_string(), names))
+    Ok(Listing::new(set.to_string(), kind, names))
 }
 
 struct Job {
@@ -320,100 +401,133 @@ struct Tally {
     missing: Vec<String>,
 }
 
-/// `romi scrape [system...]`: reports art already on disk and downloads what it can find.
+/// `romi scrape [system...]`: reports art already on disk and downloads what it can find:
+/// covers, and title screens and screenshots unless `art.screens` is off.
 pub fn scrape(cfg: &Config, lib: &Library, only: &[String]) -> Result<()> {
     let agent = agent();
     let mut finder = Finder::new(cfg);
     let mut out = std::io::stdout().lock();
     // Progress overwrites its own line on a terminal; piped output gets plain lines.
     let (clear_start, clear_end) = if out.is_terminal() { ("\r", "\x1b[K") } else { ("", "") };
-    let mut total = Tally::default();
-    let mut listings: HashMap<String, Option<Listing>> = HashMap::new();
+    let kinds = Kind::wanted(cfg);
+    let mut totals: Vec<Tally> = kinds.iter().map(|_| Tally::default()).collect();
+    let mut listings: HashMap<(String, Kind), Option<Listing>> = HashMap::new();
 
     for sys in &lib.systems {
         if !only.is_empty() && !only.contains(&sys.id) {
             continue;
         }
-        let mut tally = Tally::default();
-        let mut jobs = Vec::new();
-        let mut unmatched = Vec::new();
-
-        for &g in &sys.games {
-            let game = &lib.games[g];
-            if finder.find(sys, game).is_some() {
-                tally.local += 1;
-            } else if !cfg.art.online {
-                unmatched.push(g);
-            } else if let Some(appid) = &game.art.appid {
-                jobs.push((
-                    g,
-                    Job { url: format!("{STEAM_CDN}/{appid}/library_600x900.jpg"), dest_stem: cache_stem(sys, game) },
-                ));
-            } else {
-                unmatched.push(g);
+        let mut line = format!("  {:<24} {:>4} games", sys.name, sys.games.len());
+        for (&kind, total) in kinds.iter().zip(&mut totals) {
+            let tally = scrape_system(cfg, lib, sys, kind, &agent, &mut finder, &mut listings, &mut out)?;
+            line.push_str(&format!("   {:>4} {}", tally.local + tally.downloaded, kind.plural()));
+            if tally.downloaded > 0 {
+                line.push_str(&format!(" (+{})", tally.downloaded));
             }
-        }
-
-        if cfg.art.online && !unmatched.is_empty() && !sys.libretro.is_empty() {
-            for set in &sys.libretro {
-                if !listings.contains_key(set) {
-                    let l = match listing(&agent, set) {
-                        Ok(l) => Some(l),
-                        Err(e) => {
-                            writeln!(out, "  ! {e:#}")?;
-                            None
-                        }
-                    };
-                    listings.insert(set.clone(), l);
-                }
-            }
-            let sets: Vec<&Listing> = sys.libretro.iter().filter_map(|s| listings[s].as_ref()).collect();
-            unmatched.retain(|&g| {
-                let game = &lib.games[g];
-                let Some(title) = &game.art.title else { return true };
-                match best_match(title, &sets) {
-                    Some((l, name)) => {
-                        jobs.push((g, Job { url: l.url(name), dest_stem: cache_stem(sys, game) }));
-                        false
-                    }
-                    None => true,
-                }
-            });
-        }
-
-        let (not_found, failed) = run_jobs(&agent, &jobs, &sys.name);
-        tally.downloaded = jobs.len() - not_found.len() - failed.len();
-        tally.failed = failed.len();
-        tally.missing = unmatched.iter().chain(&not_found).chain(&failed).map(|&g| lib.games[g].name.clone()).collect();
-        tally.missing.sort();
-
-        let mut line = format!("  {:<24} {:>4} games   {:>4} on disk", sys.name, sys.games.len(), tally.local);
-        if tally.downloaded > 0 {
-            line.push_str(&format!("   {:>4} downloaded", tally.downloaded));
-        }
-        if !tally.missing.is_empty() {
-            line.push_str(&format!("   {:>4} missing", tally.missing.len()));
+            total.local += tally.local;
+            total.downloaded += tally.downloaded;
+            total.failed += tally.failed;
+            total.missing.extend(tally.missing.into_iter().map(|n| format!("{}: {n}", sys.name)));
         }
         writeln!(out, "{clear_start}{line}{clear_end}")?;
-
-        total.local += tally.local;
-        total.downloaded += tally.downloaded;
-        total.failed += tally.failed;
-        total.missing.extend(tally.missing.into_iter().map(|n| format!("{}: {n}", sys.name)));
     }
 
-    writeln!(out, "\n{} on disk, {} downloaded, {} without art", total.local, total.downloaded, total.missing.len())?;
-    if !total.missing.is_empty() {
+    // Covers are what's missed most; title screens and screenshots just show when they're there.
+    let covers = &totals[0];
+    writeln!(
+        out,
+        "\n{} on disk, {} downloaded, {} without art",
+        covers.local,
+        covers.downloaded,
+        covers.missing.len()
+    )?;
+    for (kind, t) in kinds.iter().zip(&totals).skip(1) {
+        writeln!(
+            out,
+            "{} {}: {} on disk, {} downloaded",
+            t.local + t.downloaded,
+            kind.plural(),
+            t.local,
+            t.downloaded
+        )?;
+    }
+    if !covers.missing.is_empty() {
         writeln!(out, "\nno art found for:")?;
-        for m in &total.missing {
+        for m in &covers.missing {
             writeln!(out, "  {m}")?;
         }
         writeln!(out, "\nset \"art\": \"/path/to/image.png\" on a game or override to fill these in by hand.")?;
     }
-    if total.failed > 0 {
-        writeln!(out, "{} downloads failed; run again to retry.", total.failed)?;
+    let failed: usize = totals.iter().map(|t| t.failed).sum();
+    if failed > 0 {
+        writeln!(out, "{failed} downloads failed; run again to retry.")?;
     }
     Ok(())
+}
+
+/// Finds or downloads one kind of picture for a system's games.
+#[allow(clippy::too_many_arguments)]
+fn scrape_system(
+    cfg: &Config,
+    lib: &Library,
+    sys: &System,
+    kind: Kind,
+    agent: &ureq::Agent,
+    finder: &mut Finder,
+    listings: &mut HashMap<(String, Kind), Option<Listing>>,
+    out: &mut impl Write,
+) -> Result<Tally> {
+    let mut tally = Tally::default();
+    let mut jobs = Vec::new();
+    let mut unmatched = Vec::new();
+
+    for &g in &sys.games {
+        let game = &lib.games[g];
+        if finder.find_kind(sys, game, kind).is_some() {
+            tally.local += 1;
+        } else if !cfg.art.online {
+            unmatched.push(g);
+        } else if let (Kind::Cover, Some(appid)) = (kind, &game.art.appid) {
+            let url = format!("{STEAM_CDN}/{appid}/library_600x900.jpg");
+            jobs.push((g, Job { url, dest_stem: cache_stem(sys, game, kind) }));
+        } else {
+            unmatched.push(g);
+        }
+    }
+
+    if cfg.art.online && !unmatched.is_empty() && !sys.libretro.is_empty() {
+        for set in &sys.libretro {
+            if let std::collections::hash_map::Entry::Vacant(slot) = listings.entry((set.clone(), kind)) {
+                let l = match listing(agent, set, kind) {
+                    Ok(l) => Some(l),
+                    Err(e) => {
+                        writeln!(out, "  ! {e:#}")?;
+                        None
+                    }
+                };
+                slot.insert(l);
+            }
+        }
+        let sets: Vec<&Listing> = sys.libretro.iter().filter_map(|s| listings[&(s.clone(), kind)].as_ref()).collect();
+        unmatched.retain(|&g| {
+            let game = &lib.games[g];
+            let Some(title) = &game.art.title else { return true };
+            match best_match(title, &sets) {
+                Some((l, name)) => {
+                    jobs.push((g, Job { url: l.url(name), dest_stem: cache_stem(sys, game, kind) }));
+                    false
+                }
+                None => true,
+            }
+        });
+    }
+
+    let (not_found, failed) = run_jobs(agent, &jobs, &format!("{} {}", sys.name, kind.plural()));
+    tally.downloaded = jobs.len() - not_found.len() - failed.len();
+    tally.failed = failed.len();
+    tally.missing = unmatched.iter().chain(&not_found).chain(&failed).map(|&g| lib.games[g].name.clone()).collect();
+    tally.missing.sort();
+    Ok(tally)
 }
 
 /// Downloads in parallel. Returns the games the server had no image for, and those that failed.

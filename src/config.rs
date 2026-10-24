@@ -404,6 +404,9 @@ pub struct ArtConfig {
     pub online: bool,
     /// Show covers in the details pane (Kitty/Sixel/iTerm2 graphics, or half-blocks elsewhere).
     pub show: bool,
+    /// Title screens and screenshots too: `romi scrape` gets them, and the details pane shows
+    /// them beside the cover or in turn with it.
+    pub screens: bool,
 }
 
 impl Default for ArtConfig {
@@ -413,6 +416,7 @@ impl Default for ArtConfig {
             skyscraper_cache: Some("~/.skyscraper/cache".into()),
             online: true,
             show: true,
+            screens: true,
         }
     }
 }

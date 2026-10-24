@@ -198,6 +198,8 @@ pub struct App {
     pub grid_cols: usize,
     /// The grid's first visible row, kept between frames so it scrolls like the list.
     pub grid_top: usize,
+    /// The game the details pane's pictures are for, and since when: they take turns from then.
+    pub art_since: Option<(usize, Instant)>,
     term_focused: bool,
     cooldown_until: Option<Instant>,
     /// Remembered game selection per view, so hopping between systems doesn't lose your place.
@@ -246,6 +248,7 @@ impl App {
             page: 10,
             grid_cols: 0,
             grid_top: 0,
+            art_since: None,
             term_focused: true,
             cooldown_until: None,
             positions: HashMap::new(),

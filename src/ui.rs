@@ -1,6 +1,7 @@
 //! Drawing. Only terminal palette colors and modifiers are used, so romi follows your theme.
 
 use crate::app::{App, Level, OSK, PadState, Pane, ViewKind};
+use crate::art::Kind;
 use crate::cover::Cover;
 use crate::filter::ROWS as FILTER_ROWS;
 use crate::sort::Sort;
@@ -11,6 +12,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, BorderType, Borders, Clear, List, ListItem, Padding, Paragraph, Wrap};
 use ratatui_image::Image;
+use std::time::{Duration, Instant};
 
 const DETAILS_MIN_WIDTH: u16 = 110;
 
@@ -366,6 +368,65 @@ fn draw_cover(f: &mut Frame, app: &mut App, game: usize, area: Rect) -> u16 {
     }
 }
 
+/// How long the details pane shows each picture before the next.
+const ART_EVERY: Duration = Duration::from_secs(5);
+/// A screen beside the cover needs at least this many columns to be worth showing.
+const SIDE_MIN_WIDTH: u16 = 20;
+
+/// The details pane's pictures. With room beside the cover, a title screen or screenshot goes
+/// there, taking turns when there are both. Without, they take turns with the cover itself,
+/// starting with the cover whenever the selection changes. Returns the rows used, like draw_cover.
+fn draw_art(f: &mut Frame, app: &mut App, game: usize, area: Rect) -> u16 {
+    let Some(covers) = app.covers.as_mut() else { return 0 };
+    let screens: Vec<Kind> = Kind::wanted(&app.cfg)
+        .iter()
+        .copied()
+        .filter(|&k| k != Kind::Cover && covers.path_kind(&app.lib, game, k).is_some())
+        .collect();
+    if screens.is_empty() {
+        return draw_cover(f, app, game, area);
+    }
+    let since = match app.art_since {
+        Some((g, at)) if g == game => at,
+        _ => {
+            app.art_since = Some((game, Instant::now()));
+            Instant::now()
+        }
+    };
+    let turn = (since.elapsed().as_secs() / ART_EVERY.as_secs()) as usize;
+    let has_cover = covers.path(&app.lib, game).is_some();
+
+    // Room for a cover of about 3 by 4, and whatever's left beside it for a screen.
+    let (font_w, font_h) = covers.font_size();
+    let cover_w = (u32::from(area.height) * u32::from(font_h) * 3 / (4 * u32::from(font_w))) as u16;
+    let side_w = area.width.saturating_sub(cover_w + 1);
+    // Beside the cover, the screens take turns there; otherwise everything takes turns in `area`.
+    let beside = has_cover && side_w >= SIDE_MIN_WIDTH;
+    let (screen_area, turns) = if beside {
+        (Rect { x: area.x + cover_w + 1, width: side_w, ..area }, screens)
+    } else {
+        (area, if has_cover { [vec![Kind::Cover], screens].concat() } else { screens })
+    };
+    let kind = turns[turn % turns.len()];
+    let screen_size = Size::new(screen_area.width, screen_area.height);
+    // Ask for the next screen now, so it's ready when its turn comes.
+    let next = turns[(turn + 1) % turns.len()];
+    if next != kind && next != Kind::Cover {
+        let _ = covers.get_kind(&app.lib, game, next, screen_size);
+    }
+    if kind != Kind::Cover
+        && let Cover::Ready(proto) = covers.get_kind(&app.lib, game, kind, screen_size)
+    {
+        draw_image(f, proto, screen_area, false);
+    }
+    if beside {
+        draw_cover(f, app, game, Rect { width: cover_w, ..area });
+    } else if kind == Kind::Cover {
+        draw_cover(f, app, game, area);
+    }
+    area.height
+}
+
 /// Draws a rendered cover centered across `area`, and centered or resting on its bottom edge.
 fn draw_image(f: &mut Frame, proto: &ratatui_image::protocol::Protocol, area: Rect, bottom: bool) {
     let s = proto.size();
@@ -487,7 +548,7 @@ fn draw_details(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
 
     // Box art is roughly square; terminal cells are about twice as tall as wide.
     let art_h = (inner.height * 11 / 20).min(inner.width * 3 / 5);
-    let used = if art_h >= 4 { draw_cover(f, app, g, Rect { height: art_h, ..inner }) } else { 0 };
+    let used = if art_h >= 4 { draw_art(f, app, g, Rect { height: art_h, ..inner }) } else { 0 };
     let text_area = if used > 0 {
         Rect { y: inner.y + used + 1, height: inner.height.saturating_sub(used + 1), ..inner }
     } else {

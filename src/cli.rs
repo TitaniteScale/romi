@@ -1,5 +1,6 @@
 //! The command line: `romi check`, `list`, `info` and `scrape`, plus the flags they replaced.
 
+use crate::art::Kind;
 use crate::config::{self, Config, LaunchMode};
 use crate::filter::Filter;
 use crate::hooks::Hooks;
@@ -472,6 +473,10 @@ struct GameJson<'a> {
     last_played: Option<u64>,
     /// Box art found on disk.
     art: Option<String>,
+    /// The title screen found on disk.
+    title_screen: Option<String>,
+    /// A screenshot found on disk.
+    screenshot: Option<String>,
     meta: &'a Meta,
 }
 
@@ -493,6 +498,8 @@ impl<'a> GameJson<'a> {
             playtime_secs: state.playtime.get(&game.key).copied().unwrap_or(0),
             last_played: state.last_played.get(&game.key).copied(),
             art: finder.find(system, game).map(|(p, _)| p.to_string_lossy().into_owned()),
+            title_screen: finder.find_kind(system, game, Kind::Title).map(|(p, _)| p.to_string_lossy().into_owned()),
+            screenshot: finder.find_kind(system, game, Kind::Snap).map(|(p, _)| p.to_string_lossy().into_owned()),
             meta: &game.meta,
         }
     }
@@ -575,6 +582,8 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
         ),
         ("command", Some(game.launch.command.clone())),
         ("art", record.art.as_deref().map(tilde)),
+        ("title", record.title_screen.as_deref().map(tilde)),
+        ("screenshot", record.screenshot.as_deref().map(tilde)),
     ] {
         if let Some(value) = value {
             println!("  {label:<10} {value}");

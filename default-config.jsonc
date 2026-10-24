@@ -199,6 +199,8 @@
     "online": true,
     // Covers in the details pane. Uses Kitty/Sixel/iTerm2 graphics when the terminal has them
     // (Ghostty, kitty, WezTerm, foot...), colored half-blocks otherwise.
-    "show": true
+    "show": true,
+    // Title screens and screenshots too: scraped with the covers, and shown in turn with them.
+    "screens": true
   }
 }
