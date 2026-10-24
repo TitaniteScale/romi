@@ -36,7 +36,7 @@ def test_pick_an_emulator_from_the_game_menu(start, sandbox):
     romi = start()
     romi.keys("o")
     romi.wait_for("Emulator: true")
-    romi.keys("jj\r")
+    romi.keys("jjj\r")
     romi.wait_for("Emulator: Other")
     assert jsonc(sandbox.root / "overrides.jsonc")["overrides"][KEY] == {
         "emulator": "Other", "command": "echo other {rom}", "mode": "terminal",

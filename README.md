@@ -27,7 +27,7 @@ for machine-readable output.
 ```
 romi list --system snes --genre rpg        # filters combine: --system (repeatable), --genre,
 romi list --players 2 --decade 90s --json  # --players, --decade, --favorites, --played, --unplayed,
-                                           # --hidden (include hidden games)
+                                           # --tag NAME, --hidden (include hidden games)
 romi info "super metroid"
 romi info metroid --system gba --json
 romi play "super metroid" --dry-run         # the command, cwd and env it would run
@@ -66,7 +66,7 @@ first of those that matches anything, and if that's more than one game it lists 
 guessing. `--system` narrows the search.
 
 **JSON**: `list --json` prints an array of games and `info --json` prints one. Each has `key`,
-`name`, `system` (the id), `system_name`, `hidden`, `emulator` (the one picked in the game's
+`name`, `system` (the id), `system_name`, `hidden`, `tags` (yours, in name order), `emulator` (the one picked in the game's
 menu, or null for the system's default), `path` (null for scripts, ports and Steam; the first disc
 of a multi-disc game), `discs` (every disc, in order, for a multi-disc game; otherwise empty), `favorite`,
 `playtime_secs`, `last_played` (Unix time or null), `art` (a path or null), and `meta` with
@@ -151,9 +151,9 @@ before adding it to `games.jsonc`, which your config includes. `--print` shows i
 | `r`               | X               | random game                                     |
 | `d`               |                 | toggle details pane                             |
 | `/`               | Select          | fuzzy search everything                         |
-| `F`               | R3              | filter by genre, players, decade, played        |
+| `F`               | R3              | filter by genre, players, decade, played, tag   |
 | `s`               | (menu)          | sort: name, last played, most played, year      |
-| `o`               | Start → game…   | the selected game's menu: favorite, hide, emulator |
+| `o`               | Start → game…   | the selected game's menu: favorite, hide, tags, emulator |
 | `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, details, show hidden, reload, quit |
 | `ctrl-r`          |                 | reload config                                   |
 | `q`               |                 | quit                                            |
@@ -167,6 +167,12 @@ wherever you left off.
 **Hiding** a game (from its menu) takes it out of every list and search. Start → Show hidden games
 lists them again, dimmed, so you can unhide them from the same menu. `romi play` still finds
 hidden games, and `romi list --hidden` includes them.
+
+**Tags** are your own collections, like "couch co-op" or "backlog". In a game's menu, Tags lists
+them with a tick on the game's; A ticks or unticks one, and New tag names another (typed, or with
+the on-screen keyboard: ✓ saves). Each tag shows in the systems pane as a collection (`#`), and
+the filter has a Tag row, so "backlog + 2 players" works too. A tag goes when its last game
+leaves it. Tags are kept in `state.json` with your favorites; `romi list --tag backlog` lists one.
 
 **Emulators**: when a system's games can run in something else you have installed (ParaLLEl N64
 next to Mupen64Plus-Next, mGBA's standalone app next to its core), the game's menu has an
@@ -275,7 +281,7 @@ override for the game goes under the playlist's name or disc 1's. If a folder al
 `.m3u`, the discs it lists are left to it. Note that RetroArch names save files after what it
 launched, so saves made by booting a disc directly are under that disc's name.
 
-State (favorites, recents, play time, last selection, sort orders) lives in `~/.local/state/romi/state.json`.
+State (favorites, recents, play time, last selection, sort orders, tags) lives in `~/.local/state/romi/state.json`.
 
 ## Game info and filters
 
@@ -291,7 +297,7 @@ folded into one short list ("Shoot'em Up / Horizontal" and "Shmup" both become "
 The TUI starts instantly and fills database info in a moment later; `romi check` reports coverage.
 
 The filter (Start → Filter, `F`, or R3) narrows every view at once by genre, minimum players,
-decade, and played/not yet. Systems with no matches hide while it's on, so "Fighting + 2+ players"
+decade, played/not yet, and your tags. Systems with no matches hide while it's on, so "Fighting + 2+ players"
 becomes one cross-system list. Up/down picks a row, left/right changes it, and the list updates
 as you go.
 
@@ -354,7 +360,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/art.rs`      | box art lookup and `romi scrape` (libretro thumbnails, Steam CDN) |
 | `src/cover.rs`    | showing covers: background decode/resize, small render cache     |
 | `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
-| `src/filter.rs`   | filtering by genre, players, decade, played                      |
+| `src/filter.rs`   | filtering by genre, players, decade, played, tag                 |
 | `src/sort.rs`     | sort orders for systems and favorites                            |
 | `src/overrides.rs`| saving changes made in the menus to `overrides.jsonc`            |
 | `src/emulators.rs`| the other emulators a game can run with, for its menu and `info` |

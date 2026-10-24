@@ -40,6 +40,11 @@ pub enum MenuItem {
     Favorite,
     Hide,
     Emulator,
+    /// Opens the game's tags.
+    Tags,
+    /// One of your tags (by its place in name order), ticked when the game has it.
+    Tag(usize),
+    NewTag,
 }
 
 /// An open menu. Everything that would otherwise need a keyboard is in one.
@@ -47,6 +52,8 @@ pub struct Menu {
     /// Whose menu: the selected game's, or None for the main menu.
     pub game: Option<usize>,
     pub selected: usize,
+    /// The game's tags rather than its menu.
+    pub tags: bool,
 }
 
 /// On-screen keyboard for searching with a controller.
@@ -68,6 +75,8 @@ pub enum Pane {
 pub enum ViewKind {
     Favorites,
     Recent,
+    /// One of your tags, as a collection.
+    Tag(String),
     System(usize),
 }
 
@@ -163,6 +172,8 @@ pub struct App {
     pub menu: Option<Menu>,
     /// List hidden games too (dimmed), so they can be brought back.
     pub show_hidden: bool,
+    /// A new tag's name while it's being typed, in the game's tags.
+    pub tag_name: Option<String>,
     /// The other emulators for each system, found the first time one of its games' menus opens.
     emulators: Emulators,
     /// Cursor (row, column) while the on-screen keyboard is open.
@@ -214,6 +225,7 @@ impl App {
             covers: None,
             menu: None,
             show_hidden: false,
+            tag_name: None,
             emulators: Emulators::default(),
             osk: None,
             flash: None,
@@ -231,7 +243,7 @@ impl App {
             matcher: SkimMatcherV2::default(),
         };
         app.load_metadata();
-        app.filter_options = filter::Options::from(&app.lib);
+        app.filter_options = filter::Options::from(&app.lib, &app.state);
         app.rebuild_views();
         let (mut sys, mut game) = (app.state.selected_system.clone(), app.state.selected_game.clone());
         if app.cfg.start_on == config::StartOn::LastPlayed
@@ -282,6 +294,14 @@ impl App {
         if !recent.is_empty() {
             views.push(View { kind: ViewKind::Recent, id: "@recent".into(), name: "Recent".into(), games: recent });
         }
+        for (tag, keys) in &self.state.tags {
+            let id = format!("#{tag}");
+            let mut games = resolve(keys);
+            self.sort_for(&id, true).apply(&self.lib, &self.state, &mut games);
+            if !games.is_empty() {
+                views.push(View { kind: ViewKind::Tag(tag.clone()), id, name: tag.clone(), games });
+            }
+        }
         for (i, s) in self.lib.systems.iter().enumerate() {
             let mut games: Vec<usize> = s.games.iter().copied().filter(keep).collect();
             self.sort_for(&s.id, false).apply(&self.lib, &self.state, &mut games);
@@ -302,7 +322,7 @@ impl App {
         let view = self.views.get(self.view).filter(|_| self.search.is_none())?;
         match view.kind {
             ViewKind::Recent => None,
-            ViewKind::Favorites => Some(self.sort_for(&view.id, true)),
+            ViewKind::Favorites | ViewKind::Tag(_) => Some(self.sort_for(&view.id, true)),
             ViewKind::System(_) => Some(self.sort_for(&view.id, false)),
         }
     }
@@ -310,7 +330,7 @@ impl App {
     /// Switches the current view to its next sort order, and remembers it.
     fn cycle_sort(&mut self) {
         let Some(view) = self.views.get(self.view) else { return };
-        let favorites = view.kind == ViewKind::Favorites;
+        let favorites = matches!(view.kind, ViewKind::Favorites | ViewKind::Tag(_));
         if view.kind == ViewKind::Recent {
             self.set_status(Level::Info, "Recent is always newest first");
             return;
@@ -497,6 +517,18 @@ impl App {
             self.reload();
             return;
         }
+        if let Some(name) = &mut self.tag_name {
+            match k.code {
+                KeyCode::Enter => self.save_tag_name(),
+                KeyCode::Esc => self.cancel_tag_name(),
+                KeyCode::Backspace => {
+                    name.pop();
+                }
+                KeyCode::Char(c) if !ctrl => name.push(c),
+                _ => {}
+            }
+            return;
+        }
         if self.filter_panel.is_some() {
             let op = match k.code {
                 KeyCode::Up | KeyCode::Char('k') => Op::Up,
@@ -620,6 +652,10 @@ impl App {
     }
 
     fn apply(&mut self, op: Op) {
+        // The on-screen keyboard is up while a tag is named, over the game's tags.
+        if self.tag_name.is_some() {
+            return self.osk_op(op);
+        }
         if self.filter_panel.is_some() {
             return self.filter_op(op);
         }
@@ -677,11 +713,11 @@ impl App {
             Op::ToggleDetails => self.show_details = !self.show_details,
             Op::NextLetter => self.jump_letter(true),
             Op::PrevLetter => self.jump_letter(false),
-            Op::Menu => self.menu = Some(Menu { game: None, selected: 0 }),
+            Op::Menu => self.menu = Some(Menu { game: None, selected: 0, tags: false }),
             Op::GameMenu => {
                 if let Some(g) = self.selected_game() {
                     self.emulators.find(&self.cfg, &self.lib, g);
-                    self.menu = Some(Menu { game: Some(g), selected: 0 });
+                    self.menu = Some(Menu { game: Some(g), selected: 0, tags: false });
                 }
             }
             Op::Filter => self.filter_panel = Some(0),
@@ -701,6 +737,19 @@ impl App {
         self.state = State::update(|s| added = s.toggle_favorite(&key));
         let name = self.lib.games[g].name.clone();
         self.set_status(Level::Info, if added { format!("★ {name}") } else { format!("Unfavorited {name}") });
+        if self.search.is_none() {
+            self.rebuild_keeping_selection();
+        }
+    }
+
+    /// Tags or untags a game. Tags live in state.json, and each shows as a collection.
+    fn toggle_tag(&mut self, g: usize, tag: &str) {
+        let key = self.lib.games[g].key.clone();
+        let mut added = false;
+        self.state = State::update(|s| added = s.toggle_tag(&key, tag));
+        self.filter_options = filter::Options::from(&self.lib, &self.state);
+        let name = &self.lib.games[g].name;
+        self.set_status(Level::Info, if added { format!("{name}: #{tag}") } else { format!("{name}: no #{tag}") });
         if self.search.is_none() {
             self.rebuild_keeping_selection();
         }
@@ -785,9 +834,13 @@ impl App {
     /// What the open menu offers, in order.
     pub fn menu_items(&self) -> Vec<MenuItem> {
         use MenuItem::*;
-        match self.menu.as_ref().and_then(|m| m.game) {
-            Some(g) if self.emulator_options(g).len() > 1 => vec![Favorite, Hide, Emulator],
-            Some(_) => vec![Favorite, Hide],
+        let menu = self.menu.as_ref();
+        if menu.is_some_and(|m| m.tags) {
+            return (0..self.state.tags.len()).map(Tag).chain([NewTag]).collect();
+        }
+        match menu.and_then(|m| m.game) {
+            Some(g) if self.emulator_options(g).len() > 1 => vec![Favorite, Hide, Tags, Emulator],
+            Some(_) => vec![Favorite, Hide, Tags],
             None => {
                 let mut items = Vec::new();
                 if self.selected_game().is_some() {
@@ -826,6 +879,19 @@ impl App {
             MenuItem::Favorite => "Favorite".into(),
             MenuItem::Hide if game.is_some_and(|g| g.hidden) => "Unhide".into(),
             MenuItem::Hide => "Hide".into(),
+            MenuItem::Tags => match game.map(|g| self.state.tags_of(&g.key)) {
+                Some(tags) if !tags.is_empty() => format!("Tags: {}", tags.join(", ")),
+                _ => "Tags…".into(),
+            },
+            MenuItem::Tag(i) => {
+                let tag = self.state.tags.keys().nth(i).map_or("", String::as_str);
+                let on = game.is_some_and(|g| self.state.has_tag(&g.key, tag));
+                format!("{} {tag}", if on { "✓" } else { " " })
+            }
+            MenuItem::NewTag => match &self.tag_name {
+                Some(name) => format!("+ {name}█"),
+                None => "+ New tag…".into(),
+            },
             MenuItem::Emulator => {
                 let g = self.menu.as_ref().and_then(|m| m.game);
                 let options = g.map(|g| self.emulator_options(g)).unwrap_or_default();
@@ -842,9 +908,17 @@ impl App {
         match op {
             Op::Up => menu.selected = (menu.selected + n - 1) % n,
             Op::Down => menu.selected = (menu.selected + 1) % n,
+            // From the tags, back to the game's menu.
+            Op::Back if menu.tags => {
+                menu.tags = false;
+                let at = self.menu_items().iter().position(|&i| i == MenuItem::Tags).unwrap_or(0);
+                if let Some(menu) = &mut self.menu {
+                    menu.selected = at;
+                }
+            }
             Op::Back | Op::Menu => self.menu = None,
             Op::Confirm => {
-                let (game, selected) = (menu.game, menu.selected);
+                let (game, selected, tags) = (menu.game, menu.selected, menu.tags);
                 self.menu = None;
                 let Some(&item) = items.get(selected) else { return };
                 match item {
@@ -854,7 +928,7 @@ impl App {
                     // Stays open, so A again tries the next order.
                     MenuItem::Sort => {
                         self.cycle_sort();
-                        self.menu = Some(Menu { game, selected });
+                        self.menu = Some(Menu { game, selected, tags: false });
                     }
                     MenuItem::Random => self.apply(Op::Random),
                     MenuItem::Details => self.apply(Op::ToggleDetails),
@@ -874,12 +948,26 @@ impl App {
                             self.toggle_hidden(g);
                         }
                     }
+                    MenuItem::Tags => self.menu = Some(Menu { game, selected: 0, tags: true }),
+                    MenuItem::Tag(i) => {
+                        if let (Some(g), Some(tag)) = (game, self.state.tags.keys().nth(i).cloned()) {
+                            self.toggle_tag(g, &tag);
+                            // Untagging the last game removes the tag, and the row with it.
+                            let n = self.state.tags.len() + 1;
+                            self.menu = Some(Menu { game, selected: selected.min(n - 1), tags });
+                        }
+                    }
+                    MenuItem::NewTag => {
+                        self.menu = Some(Menu { game, selected, tags });
+                        self.tag_name = Some(String::new());
+                        self.osk = Some((0, 0));
+                    }
                     // Stays open, like Sort.
                     MenuItem::Emulator => {
                         if let Some(g) = game {
                             self.cycle_emulator(g);
                         }
-                        self.menu = Some(Menu { game, selected });
+                        self.menu = Some(Menu { game, selected, tags: false });
                     }
                 }
             }
@@ -932,10 +1020,12 @@ impl App {
             Op::Right => self.osk = Some((row, (col + 1) % cols)),
             Op::Random => self.edit_query(None),
             Op::Favorite => self.edit_query(Some(' ')),
+            Op::Back | Op::Menu | Op::Search if self.tag_name.is_some() => self.cancel_tag_name(),
             Op::Back | Op::Menu | Op::Search => self.close_osk(),
             Op::Confirm => match OSK[row][col] {
                 "␣" => self.edit_query(Some(' ')),
                 "⌫" => self.edit_query(None),
+                "✓" if self.tag_name.is_some() => self.save_tag_name(),
                 "✓" => self.close_osk(),
                 key => self.edit_query(key.chars().next().map(|c| c.to_ascii_lowercase())),
             },
@@ -943,8 +1033,17 @@ impl App {
         }
     }
 
-    /// Types a character into the search, or deletes one with `None`.
+    /// Types a character into the search (or a new tag's name), or deletes one with `None`.
     fn edit_query(&mut self, c: Option<char>) {
+        if let Some(name) = &mut self.tag_name {
+            match c {
+                Some(c) => name.push(c),
+                None => {
+                    name.pop();
+                }
+            }
+            return;
+        }
         let Some(s) = &mut self.search else { return };
         match c {
             Some(c) => s.query.push(c),
@@ -953,6 +1052,28 @@ impl App {
             }
         }
         self.update_search();
+    }
+
+    /// Tags the menu's game with the name typed (an existing tag if it matches one in any case),
+    /// and leaves the cursor on it.
+    fn save_tag_name(&mut self) {
+        let (Some(name), Some(g)) = (self.tag_name.take(), self.menu.as_ref().and_then(|m| m.game)) else { return };
+        self.osk = None;
+        let tag = self.state.tag_named(&name);
+        if tag.is_empty() {
+            return;
+        }
+        if !self.state.has_tag(&self.lib.games[g].key, &tag) {
+            self.toggle_tag(g, &tag);
+        }
+        if let Some(menu) = &mut self.menu {
+            menu.selected = self.state.tags.keys().position(|t| *t == tag).unwrap_or(0);
+        }
+    }
+
+    fn cancel_tag_name(&mut self) {
+        self.tag_name = None;
+        self.osk = None;
     }
 
     fn close_osk(&mut self) {
@@ -1065,7 +1186,7 @@ impl App {
         if let Some(found) = self.metadata.as_ref().and_then(|rx| rx.try_recv().ok()) {
             self.metadata = None;
             crate::meta::apply(&mut self.lib, found);
-            self.filter_options = filter::Options::from(&self.lib);
+            self.filter_options = filter::Options::from(&self.lib, &self.state);
             self.rebuild_keeping_selection();
         }
         let Some(run) = &mut self.running else { return };
@@ -1110,7 +1231,7 @@ impl App {
                 }
                 self.cfg = cfg;
                 self.load_metadata();
-                self.filter_options = filter::Options::from(&self.lib);
+                self.filter_options = filter::Options::from(&self.lib, &self.state);
                 self.end_search();
                 self.rebuild_keeping_selection();
                 self.set_status(Level::Info, format!("Reloaded: {} games", self.lib.games.len()));

@@ -3,7 +3,7 @@
 use crate::sort::Sort;
 use rustix::fs::{FlockOperation, flock};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,6 +23,8 @@ pub struct State {
     pub selected_game: Option<String>,
     /// How each view is sorted, by view id, when it isn't the default.
     pub sort: HashMap<String, Sort>,
+    /// Your own tags, each with its games in the order they were tagged.
+    pub tags: BTreeMap<String, Vec<String>>,
 }
 
 impl State {
@@ -91,9 +93,44 @@ impl State {
         *self.playtime.entry(key.to_string()).or_default() += secs;
     }
 
+    pub fn has_tag(&self, key: &str, tag: &str) -> bool {
+        self.tags.get(tag).is_some_and(|keys| keys.iter().any(|k| k == key))
+    }
+
+    /// A game's tags, in name order.
+    pub fn tags_of(&self, key: &str) -> Vec<&str> {
+        self.tags.iter().filter(|(_, keys)| keys.iter().any(|k| k == key)).map(|(t, _)| t.as_str()).collect()
+    }
+
+    /// The tag `name` means: an existing one in any case, or `name` trimmed as a new one.
+    pub fn tag_named(&self, name: &str) -> String {
+        let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+        self.tags.keys().find(|t| t.eq_ignore_ascii_case(&name)).cloned().unwrap_or(name)
+    }
+
+    /// Tags or untags a game, returning whether it's tagged now. A tag with no games left goes.
+    pub fn toggle_tag(&mut self, key: &str, tag: &str) -> bool {
+        let keys = self.tags.entry(tag.to_string()).or_default();
+        let added = match keys.iter().position(|k| k == key) {
+            Some(i) => {
+                keys.remove(i);
+                false
+            }
+            None => {
+                keys.push(key.to_string());
+                true
+            }
+        };
+        if keys.is_empty() {
+            self.tags.remove(tag);
+        }
+        added
+    }
+
     /// Whether anything is remembered about `key`.
     pub fn mentions(&self, key: &str) -> bool {
-        self.is_favorite(key)
+        self.tags.values().any(|keys| keys.iter().any(|k| k == key))
+            || self.is_favorite(key)
             || self.recent.iter().any(|k| k == key)
             || self.playtime.contains_key(key)
             || self.last_played.contains_key(key)
@@ -128,6 +165,14 @@ impl State {
         if self.selected_game.as_deref() == Some(from) {
             self.selected_game = Some(to.to_string());
         }
+        for keys in self.tags.values_mut() {
+            if let Some(i) = keys.iter().position(|k| k == from) {
+                keys.remove(i);
+                if !keys.iter().any(|k| k == to) {
+                    keys.insert(i, to.to_string());
+                }
+            }
+        }
     }
 }
 
@@ -149,6 +194,7 @@ mod tests {
             selected_system: None,
             selected_game: Some("psx:a (Disc 2).chd".into()),
             sort: HashMap::new(),
+            tags: [("backlog".into(), vec!["psx:a (Disc 2).chd".into()])].into(),
         };
         assert!(s.mentions("psx:a (Disc 2).chd"));
         s.rename_key("psx:a (Disc 2).chd", "psx:a.m3u");
@@ -158,6 +204,21 @@ mod tests {
         assert_eq!(s.playtime["psx:a.m3u"], 90);
         assert_eq!(s.last_played["psx:a.m3u"], 200);
         assert_eq!(s.selected_game.as_deref(), Some("psx:a.m3u"));
+        assert_eq!(s.tags["backlog"], ["psx:a.m3u"]);
+    }
+
+    #[test]
+    fn tags_come_and_go() {
+        let mut s = State::default();
+        let tag = s.tag_named("  couch   co-op ");
+        assert_eq!(tag, "couch co-op");
+        assert!(s.toggle_tag("snes:a.sfc", &tag));
+        assert_eq!(s.tag_named("Couch Co-op"), "couch co-op");
+        assert!(s.toggle_tag("gba:b.gba", "couch co-op"));
+        assert_eq!(s.tags_of("gba:b.gba"), ["couch co-op"]);
+        assert!(!s.toggle_tag("snes:a.sfc", "couch co-op"));
+        assert!(!s.toggle_tag("gba:b.gba", "couch co-op"));
+        assert!(s.tags.is_empty());
     }
 
     #[test]

@@ -84,6 +84,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
 
     draw_header(f, app, &theme, header);
+    let mut osk_area = None;
     if app.running.is_some() {
         draw_playing(f, app, &theme, body);
     } else if app.views.is_empty() {
@@ -91,7 +92,8 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else {
         let details = app.show_details && body.width >= DETAILS_MIN_WIDTH;
         // Sized from real systems only, so it doesn't jump when Favorites/Recent appear.
-        let longest = app.lib.systems.iter().map(|s| s.name.chars().count() as u16).max().unwrap_or(0);
+        // Systems and your tags' collections.
+        let longest = app.views.iter().map(|v| v.name.chars().count() as u16).max().unwrap_or(0);
         let sys_width = longest.max("Favorites".len() as u16) + 12;
         let mut cols = vec![Constraint::Length(sys_width.min(32).min(body.width / 3)), Constraint::Min(30)];
         if details {
@@ -103,15 +105,17 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         if details {
             draw_details(f, app, &theme, areas[2]);
         }
-        if app.osk.is_some() {
-            draw_osk(f, app, &theme, areas[1]);
-        }
         if let Some(letter) = app.flash() {
             draw_flash(f, &theme, areas[1], letter);
         }
+        osk_area = Some(areas[1]);
     }
     if app.menu.is_some() {
         draw_menu(f, app, &theme, body);
+    }
+    // After the menu, since naming a tag brings it up over the menu.
+    if let (Some(area), Some(_)) = (osk_area, app.osk) {
+        draw_osk(f, app, &theme, area);
     }
     if app.filter_panel.is_some() {
         draw_filter(f, app, &theme, body);
@@ -176,10 +180,13 @@ fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 /// The on-screen keyboard, docked at the bottom of the games pane so results stay visible above.
 fn draw_osk(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let Some((row, col)) = app.osk else { return };
-    let query = app.search.as_ref().map(|s| s.query.as_str()).unwrap_or_default();
+    let (title, prompt, query) = match &app.tag_name {
+        Some(name) => (" New tag ", " # ", name.as_str()),
+        None => (" Search ", " / ", app.search.as_ref().map(|s| s.query.as_str()).unwrap_or_default()),
+    };
     let mut lines = vec![
         Line::from(vec![
-            Span::styled(" / ", Style::new().fg(theme.accent).bold()),
+            Span::styled(prompt, Style::new().fg(theme.accent).bold()),
             Span::raw(query.to_string()),
             Span::styled("█", Style::new().fg(theme.accent)),
         ]),
@@ -196,7 +203,7 @@ fn draw_osk(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let w = (OSK[0].len() as u16 * 3 + 4).min(area.width);
     let rect = Rect::new(area.x + (area.width - w) / 2, (area.y + area.height).saturating_sub(h + 1).max(area.y), w, h);
     f.render_widget(Clear, rect);
-    f.render_widget(Paragraph::new(lines).block(theme.block(" Search ", true)), rect);
+    f.render_widget(Paragraph::new(lines).block(theme.block(title, true)), rect);
 }
 
 fn draw_flash(f: &mut Frame, theme: &Theme, area: Rect, letter: &str) {
@@ -241,6 +248,7 @@ fn draw_systems(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             let (icon, problem) = match &v.kind {
                 ViewKind::Favorites => ("★ ", false),
                 ViewKind::Recent => ("◷ ", false),
+                ViewKind::Tag(_) => ("# ", false),
                 ViewKind::System(i) => ("  ", app.lib.systems[*i].problem.is_some()),
             };
             let count = format!("{:>3} ", v.games.len());
@@ -268,7 +276,8 @@ fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         (None, None) => String::new(),
     };
     // Only orders other than the usual one are worth a label.
-    let usual = matches!(app.current_view().map(|v| &v.kind), Some(ViewKind::Favorites)).then_some(Sort::Added);
+    let ordered = matches!(app.current_view().map(|v| &v.kind), Some(ViewKind::Favorites | ViewKind::Tag(_)));
+    let usual = ordered.then_some(Sort::Added);
     if let Some(sort) = app.sort().filter(|&s| s != usual.unwrap_or(Sort::Name)) {
         title.push_str(&format!(" · by {}", sort.label()));
     }
@@ -476,6 +485,15 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             hints(&[("←/→", "change"), ("↑/↓", "row"), (back, "done")])
         } else {
             hints(&[("←/→", "change"), ("↑/↓", "row"), ("esc", "done")])
+        };
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
+    if app.tag_name.is_some() {
+        let line = if pad {
+            hints(&[(ok, "type"), ("X", "delete"), ("Y", "space"), ("✓", "save"), (back, "cancel")])
+        } else {
+            hints(&[("enter", "save"), ("esc", "cancel")])
         };
         f.render_widget(Paragraph::new(line), area);
         return;

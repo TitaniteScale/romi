@@ -209,6 +209,9 @@ pub struct Filters {
     /// Only games never played from romi
     #[arg(long)]
     unplayed: bool,
+    /// Only games with this tag of yours
+    #[arg(long, add = ArgValueCompleter::new(complete_tags))]
+    tag: Option<String>,
     /// Include games hidden from romi's menus
     #[arg(long)]
     hidden: bool,
@@ -275,6 +278,16 @@ fn complete_genres(current: &OsStr) -> Vec<CompletionCandidate> {
         .map(|(g, n)| (g, format!("{n} game{}", if n == 1 { "" } else { "s" })))
         .collect();
     candidates(current, genres.iter().map(|(g, n)| (g.as_str(), n.as_str())))
+}
+
+fn complete_tags(current: &OsStr) -> Vec<CompletionCandidate> {
+    let state = State::load();
+    let tags: Vec<(String, String)> = state
+        .tags
+        .iter()
+        .map(|(t, keys)| (t.clone(), format!("{} game{}", keys.len(), if keys.len() == 1 { "" } else { "s" })))
+        .collect();
+    candidates(current, tags.iter().map(|(t, n)| (t.as_str(), n.as_str())))
 }
 
 /// Parses the arguments, exiting on bad ones. Returns the command (None opens the TUI) and the
@@ -344,6 +357,7 @@ impl Filters {
             favorites: false,
             played: false,
             unplayed: false,
+            tag: None,
             hidden: false,
         }
     }
@@ -361,7 +375,11 @@ impl Filters {
             None => None,
         };
         let played = if self.played { Some(true) } else { self.unplayed.then_some(false) };
-        let filter = Filter { genre, players: self.players, decade: self.decade, played };
+        let tag = match &self.tag {
+            Some(t) => Some(find_tag(state, t)?),
+            None => None,
+        };
+        let filter = Filter { genre, players: self.players, decade: self.decade, played, tag };
         Ok(systems
             .iter()
             .flat_map(|&s| lib.systems[s].games.iter().copied())
@@ -380,6 +398,16 @@ fn find_system(lib: &Library, wanted: &str) -> Result<usize> {
     }
     let ids: Vec<&str> = lib.systems.iter().map(|s| s.id.as_str()).collect();
     fail(exit::USAGE, format!("no system called {wanted:?}; systems: {}", ids.join(", ")))
+}
+
+fn find_tag(state: &State, wanted: &str) -> Result<String> {
+    let tag = state.tag_named(wanted);
+    if state.tags.contains_key(&tag) {
+        return Ok(tag);
+    }
+    let names: Vec<&str> = state.tags.keys().map(String::as_str).collect();
+    let known = if names.is_empty() { "you have none yet".to_string() } else { format!("tags: {}", names.join(", ")) };
+    fail(exit::USAGE, format!("no tag {wanted:?}; {known}"))
 }
 
 fn find_genre(lib: &Library, wanted: &str) -> Result<String> {
@@ -427,6 +455,8 @@ struct GameJson<'a> {
     hidden: bool,
     /// The emulator picked in the game's menu; null when it runs the system's default.
     emulator: Option<&'a str>,
+    /// Your tags for it, in name order.
+    tags: Vec<&'a str>,
     playtime_secs: u64,
     /// Unix time.
     last_played: Option<u64>,
@@ -436,7 +466,7 @@ struct GameJson<'a> {
 }
 
 impl<'a> GameJson<'a> {
-    fn new(lib: &'a Library, g: usize, state: &State, finder: &mut art::Finder) -> GameJson<'a> {
+    fn new(lib: &'a Library, g: usize, state: &'a State, finder: &mut art::Finder) -> GameJson<'a> {
         let game = &lib.games[g];
         let system = lib.system_of(g);
         GameJson {
@@ -449,6 +479,7 @@ impl<'a> GameJson<'a> {
             favorite: state.is_favorite(&game.key),
             hidden: game.hidden,
             emulator: game.emulator.as_deref(),
+            tags: state.tags_of(&game.key),
             playtime_secs: state.playtime.get(&game.key).copied().unwrap_or(0),
             last_played: state.last_played.get(&game.key).copied(),
             art: finder.find(system, game).map(|(p, _)| p.to_string_lossy().into_owned()),
@@ -520,6 +551,7 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
         ("series", m.franchise.clone()),
         ("favorite", record.favorite.then(|| "yes".to_string())),
         ("hidden", record.hidden.then(|| "yes".to_string())),
+        ("tags", (!record.tags.is_empty()).then(|| record.tags.join(", "))),
         ("played", played),
         ("emulator", options.get(crate::emulators::current(game, &options)).map(|e| e.name.clone())),
         (

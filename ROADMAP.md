@@ -82,10 +82,10 @@ Built in this order, one commit each:
 ✓ The same system definitions let `romi check` suggest fixes: another installed emulator for a system
 that can't launch, folders that aren't in the config yet, and systems with no emulator installed.
 
-## 3. Managing the library from inside romi
+## 3. Managing the library from inside romi ✓
 
-Most of these need a place to save changes made in the TUI: `state.json`, or the generated config from
-phase 2.
+Changes made in the TUI are saved in `state.json` (sort orders, tags) or in `overrides.jsonc`, a file
+the config includes (hidden games, emulator picks). All done.
 
 - ✓ **Multi-disc games as one entry.** "Mr. Bones (Disc 1)" and "(Disc 2)" become one game, launched
   through a generated `.m3u` so the emulator can swap discs.
@@ -95,7 +95,7 @@ phase 2.
 - ✓ **Hide a game** with the controller.
 - ✓ **Alternate emulators**: several commands per system, ES-DE style (Beetle PSX or DuckStation, say),
   with one picked per game from a menu. ES-DE's labelled commands provide these for free.
-- **Your own tags and collections**, like "couch co-op" or "backlog". Assign them with the controller
+- ✓ **Your own tags and collections**, like "couch co-op" or "backlog". Assign them with the controller
   and filter by them.
 
 ## 4. Couch mode, hooks and status
