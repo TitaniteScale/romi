@@ -1634,6 +1634,7 @@ dependencies = [
  "ratatui",
  "ratatui-image",
  "roxmltree",
+ "rustix 1.1.5",
  "serde",
  "serde_json",
  "shell-words",

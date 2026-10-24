@@ -14,6 +14,7 @@ json_comments = "0.2.2"
 ratatui = "0.30"
 ratatui-image = { version = "11.1.0", default-features = false, features = ["crossterm"] }
 roxmltree = "0.21.1"
+rustix = { version = "1.1.5", features = ["event"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 shell-words = "1.1.1"

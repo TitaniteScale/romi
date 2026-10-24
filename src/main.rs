@@ -139,10 +139,13 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     let mut app = App::new(cfg, cfg_path);
     let mut terminal = ratatui::init();
     // Ask the terminal what image protocol it speaks; this has to happen before reading events.
-    if app.cfg.art.show
-        && let Ok(picker) = ratatui_image::picker::Picker::from_query_stdio()
-    {
-        app.covers = Some(cover::Covers::new(picker, &app.cfg));
+    if app.cfg.art.show {
+        let picker = if terminal_answers() {
+            ratatui_image::picker::Picker::from_query_stdio().ok()
+        } else {
+            Some(ratatui_image::picker::Picker::halfblocks())
+        };
+        app.covers = picker.map(|p| cover::Covers::new(p, &app.cfg));
     }
     // Terminals that don't understand the query may have echoed part of it. Nothing is drawn yet,
     // so wiping the screen keeps it in sync with ratatui's (empty) buffer.
@@ -153,6 +156,37 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     ratatui::restore();
     app.save_selection();
     result
+}
+
+/// Asks the terminal for a status report and waits for the reply. The image-support query reads
+/// stdin on a thread that outlives its own timeout, so on a terminal that never answers, that
+/// thread would swallow the first keypress. Asking first means the query only runs if it can finish.
+fn terminal_answers() -> bool {
+    use rustix::event::{PollFd, PollFlags, Timespec, poll};
+    let mut out = stdout();
+    if out.write_all(b"\x1b[5n").and_then(|()| out.flush()).is_err() {
+        return false;
+    }
+    let stdin = std::io::stdin();
+    let deadline = Instant::now() + Duration::from_secs(1);
+    // The reply is `ESC [ 0 n`. Read it a byte at a time, straight from the fd, so nothing after
+    // it is taken from the event reader.
+    let mut byte = [0u8];
+    loop {
+        let Ok(left) = Timespec::try_from(deadline.saturating_duration_since(Instant::now())) else {
+            return false;
+        };
+        let mut fds = [PollFd::new(&stdin, PollFlags::IN)];
+        match poll(&mut fds, Some(&left)) {
+            Ok(n) if n > 0 => {}
+            _ => return false,
+        }
+        match rustix::io::read(&stdin, &mut byte) {
+            Ok(1) if byte[0] == b'n' => return true,
+            Ok(1) => {}
+            _ => return false,
+        }
+    }
 }
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, rx: &Receiver<PadEvent>) -> Result<()> {
