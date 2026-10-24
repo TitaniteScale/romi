@@ -151,6 +151,21 @@ d-pad through a long list never stutters. Turn covers off with `"art": { "show":
 Set `"art": { "online": false }` to only use what's already on disk. The art belongs to its
 publishers: romi fetches and caches it on your machine and never ships any.
 
+## Development
+
+```
+cargo test                                    # unit tests
+python -m venv .venv && .venv/bin/pip install -r e2e/requirements.txt
+.venv/bin/pytest e2e                          # the real binary, driven in a fake terminal
+.venv/bin/python e2e/drive.py 100 30 keys:j shot   # print what the screen looks like
+```
+
+The end-to-end tests run romi in a pty with a small made-up library in a temporary home folder, so
+your own config and state are never touched (`drive.py --real` uses yours). They type keys, press
+buttons on a virtual gamepad, and read the screen with [pyte](https://github.com/selectel/pyte). The
+controller tests need write access to `/dev/uinput` and are skipped without it. CI runs rustfmt,
+clippy, the unit tests and the end-to-end tests on every push.
+
 ## Code map
 
 | File              | What's in it                                                     |
@@ -169,3 +184,5 @@ publishers: romi fetches and caches it on your machine and never ships any.
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
 | `src/main.rs`     | CLI, event loop, handing the terminal to `terminal`-mode commands |
+| `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
+| `e2e/test_tui.py` | end-to-end tests                                                 |

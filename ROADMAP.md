@@ -16,16 +16,16 @@ included.
 - **Game info:** genre for 358 games, year for 310, player count for 320 and a description for 203.
   You can filter by genre, players, decade and whether you've played it.
 
-## 0. Groundwork
+## 0. Groundwork ✓
 
-Small things that make everything after them easier to build and check.
+Small things that make everything after them easier to build and check. All done.
 
-- **CI**: `cargo test`, clippy and rustfmt on every push.
-- **Commit the test harness.** `drive.py` runs romi in a fake terminal with a virtual uinput gamepad,
-  presses keys and buttons, and prints the screen. Keeping it in the repo lets anyone, coding agents
-  included, check a change to the TUI.
-- **Startup quirk:** if a terminal never answers the image-support query, romi loses the first
-  keypress. Every real terminal answers, so this has only shown up in testing. A timeout would fix it.
+- ✓ **CI**: rustfmt, clippy, the unit tests and the end-to-end tests on every push.
+- ✓ **The test harness is in the repo.** `e2e/drive.py` runs romi in a fake terminal with a virtual
+  uinput gamepad, presses keys and buttons, and reads the screen. The tests in `e2e/` use it with a
+  made-up library, and anyone, coding agents included, can use it to check a change to the TUI.
+- ✓ **Startup quirk:** if a terminal never answered the image-support query, romi lost the first
+  keypress. romi now checks that the terminal answers before asking.
 
 ## 1. A real CLI
 

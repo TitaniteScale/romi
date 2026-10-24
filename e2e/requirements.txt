@@ -1,0 +1,4 @@
+pyte
+pytest
+# Only for the controller tests, which also need write access to /dev/uinput.
+evdev

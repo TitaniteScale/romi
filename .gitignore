@@ -2,3 +2,8 @@
 
 # Personal notes and scratch scripts, not part of romi
 /notes/
+
+# Python venv and caches for the e2e tests
+/.venv/
+__pycache__/
+.pytest_cache/

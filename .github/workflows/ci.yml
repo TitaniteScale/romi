@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal --component rustfmt,clippy && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: End-to-end tests
+        # The controller tests skip here: the runner can't create virtual gamepads.
+        run: |
+          pip install -r e2e/requirements.txt
+          pytest e2e

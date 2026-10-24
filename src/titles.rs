@@ -122,7 +122,7 @@ mod tests {
             Some("Dungeons _ Dragons_ Shadow over Mystara (USA 960619)")
         );
         // Databases keep the real characters.
-        assert_eq!(matched("Rockman Battle & Fighters", &["Rockman - Battle & Fighters (Japan)"]).is_some(), true);
+        assert!(matched("Rockman Battle & Fighters", &["Rockman - Battle & Fighters (Japan)"]).is_some());
     }
 
     #[test]
