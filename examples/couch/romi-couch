@@ -1,0 +1,9 @@
+#!/bin/sh
+# romi in couch mode: full screen in a Ghostty window of its own, with a big font. The window's
+# class, romi.couch, is what the Hyprland example matches to give it its own workspace.
+# Arguments go to romi. ROMI_FONT_SIZE changes the font size; romi shows the details pane and box
+# art from 110 columns, which 18 gives on a 1920-pixel-wide screen.
+exec ghostty --class=romi.couch --title=romi \
+  --font-size="${ROMI_FONT_SIZE:-18}" --fullscreen=true --window-decoration=none \
+  --background-opacity=1 --confirm-close-surface=false \
+  -e romi "$@"

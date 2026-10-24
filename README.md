@@ -136,6 +136,26 @@ and `--mode` change that. In a folder with one program and some scripts (setup, 
 program is picked; if it's still unclear, romi lists the candidates. It shows the entry and asks
 before adding it to `games.jsonc`, which your config includes. `--print` shows it without writing.
 
+## Couch mode
+
+romi full screen on the TV, opened from the couch with the controller's Guide button. The pieces
+are in [`examples/couch`](examples/couch):
+
+- **`romi-couch`** starts romi in a Ghostty window of its own: full screen, no decorations, a big
+  font (`ROMI_FONT_SIZE`, 18 by default, which leaves room for box art on a 1920-pixel-wide screen),
+  and the class `romi.couch` so the compositor can tell it apart. Put it on your PATH: `install -m755 examples/couch/romi-couch ~/.local/bin/`.
+- **`hyprland.lua`** (Hyprland 0.55+'s Lua config) gives that window workspace 10, and binds
+  SUPER+SHIFT+G and F13 to go there, starting romi if it isn't running. Games started from romi open
+  over it on the same workspace, and focus goes back to romi when they exit. An optional rule sends
+  slow starters (RetroArch, Steam games) there too, so they don't land wherever you looked while
+  they loaded.
+- **`xremap.yml`** turns the Guide button into F13. romi's menu is still on Start. xremap grabs
+  the device it remaps, though, which can keep romi and emulators from reading the controller
+  themselves; check that they still do.
+
+Hooks fit in here too: `"on_launch": "playerctl pause"` stops the music while you play, and
+`"start_on": "last_played"` picks up where you left off.
+
 ## Controls
 
 | Keyboard          | Controller      | Does                                            |

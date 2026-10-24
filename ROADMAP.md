@@ -98,17 +98,14 @@ the config includes (hidden games, emulator picks). All done.
 - ✓ **Your own tags and collections**, like "couch co-op" or "backlog". Assign them with the controller
   and filter by them.
 
-## 4. Couch mode, hooks and status
+## 4. Couch mode and hooks ✓
 
 - ✓ **Hooks**: `on_launch` and `on_exit` commands, either global or per system, with the same placeholders
   as launch commands. Use them to move a game to its own workspace, pause music, or set the CPU
   governor.
-- **Couch mode**: a Hyprland keybind, or the controller's Guide button (through xremap), opens romi in
+- ✓ **Couch mode**: a Hyprland keybind, or the controller's Guide button (through xremap), opens romi in
   fullscreen Ghostty with a big font. Give romi its own workspace and add window rules for games, so a
-  game no longer ends up on the wrong workspace. This is mostly docs and example configs, plus the
-  hooks above.
-- **Waybar module**: a short script on top of `romi status --json` (phase 1) showing what's playing
-  and for how long.
+  game no longer ends up on the wrong workspace. This is docs and example configs in `examples/couch`.
 
 ## 5. Looks
 
@@ -172,3 +169,5 @@ Smaller items that fit between phases.
   hit-or-miss. ScreenScraper and TheGamesDB need keys.
 - **SteamGridDB** (free key) for covers on PC ports and pinball tables.
 - **An AUR package.**
+- **A waybar module**, if it turns out to be wanted: games usually run full screen, hiding the bar, so
+  it's not planned. `romi status --json` already has what one needs.

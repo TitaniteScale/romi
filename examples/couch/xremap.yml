@@ -1,0 +1,15 @@
+# The controller's Guide button opens romi's couch mode: xremap turns it into F13, which the
+# Hyprland example binds. Merge into your xremap config, with your controller's name (romi shows
+# it in its header while it's connected).
+#
+# Careful: xremap grabs the devices it reads, so other programs stop getting their input directly.
+# That includes romi and emulators that read the controller themselves, and xremap passes on
+# buttons, not sticks. Check that romi and a game still see the controller before relying on it.
+# Point xremap at the controller by name or by its /dev/input/by-id path, not /dev/input/eventN,
+# whose number changes between boots.
+modmap:
+  - name: Guide opens romi
+    device:
+      only: Your Controller Name
+    remap:
+      BTN_MODE: KEY_F13
