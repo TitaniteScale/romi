@@ -35,6 +35,7 @@ pub enum MenuItem {
     Sort,
     Random,
     Details,
+    Grid,
     ShowHidden,
     Reload,
     Quit,
@@ -151,6 +152,7 @@ enum Op {
     Filter,
     Sort,
     GameMenu,
+    ToggleGrid,
 }
 
 pub struct App {
@@ -190,8 +192,12 @@ pub struct App {
     pub quit: bool,
     pub systems_list: ListState,
     pub games_list: ListState,
-    /// Visible rows in the games list, set while drawing; used for paging.
+    /// Games on one screen of the list or grid, set while drawing; used for paging.
     pub page: usize,
+    /// Games per row of the cover grid, set while drawing; 0 in the list.
+    pub grid_cols: usize,
+    /// The grid's first visible row, kept between frames so it scrolls like the list.
+    pub grid_top: usize,
     term_focused: bool,
     cooldown_until: Option<Instant>,
     /// Remembered game selection per view, so hopping between systems doesn't lose your place.
@@ -238,6 +244,8 @@ impl App {
             systems_list: ListState::default(),
             games_list: ListState::default(),
             page: 10,
+            grid_cols: 0,
+            grid_top: 0,
             term_focused: true,
             cooldown_until: None,
             positions: HashMap::new(),
@@ -617,6 +625,7 @@ impl App {
             KeyCode::Char('F') => Op::Filter,
             KeyCode::Char('s') => Op::Sort,
             KeyCode::Char('o') => Op::GameMenu,
+            KeyCode::Char('v') => Op::ToggleGrid,
             _ => return,
         };
         self.apply(op);
@@ -647,6 +656,7 @@ impl App {
                     PadAction::Menu => Op::Menu,
                     PadAction::Search => Op::Search,
                     PadAction::Filter => Op::Filter,
+                    PadAction::ToggleGrid => Op::ToggleGrid,
                 });
             }
         }
@@ -667,7 +677,15 @@ impl App {
             return self.osk_op(op);
         }
         let page = self.page.max(1) as isize;
+        // In the cover grid, up and down go a row at a time, and left and right a cover, until
+        // left runs out of row and goes to the systems, as in the list.
+        let grid = self.grid_cols.max(1) as isize;
+        let in_grid = self.state.grid && self.grid_cols > 0 && (self.focus == Pane::Games || self.search.is_some());
         match op {
+            Op::Up if in_grid => self.move_cursor(-grid),
+            Op::Down if in_grid => self.move_cursor(grid),
+            Op::Left if in_grid && !self.game.is_multiple_of(self.grid_cols) => self.move_cursor(-1),
+            Op::Right if in_grid => self.move_cursor(1),
             Op::Up => self.move_cursor(-1),
             Op::Down => self.move_cursor(1),
             Op::PageUp => self.move_cursor(-page),
@@ -712,6 +730,11 @@ impl App {
                 }
             }
             Op::ToggleDetails => self.show_details = !self.show_details,
+            Op::ToggleGrid => {
+                let grid = !self.state.grid;
+                self.state = State::update(|s| s.grid = grid);
+                self.grid_top = 0;
+            }
             Op::NextLetter => self.jump_letter(true),
             Op::PrevLetter => self.jump_letter(false),
             Op::Menu => self.menu = Some(Menu { game: None, selected: 0, tags: false }),
@@ -847,7 +870,7 @@ impl App {
                 if self.selected_game().is_some() {
                     items.push(Game);
                 }
-                items.extend([Search, Filter, Sort, Random, Details]);
+                items.extend([Search, Filter, Sort, Random, Grid, Details]);
                 if self.lib.games.iter().any(|g| g.hidden) {
                     items.push(ShowHidden);
                 }
@@ -868,6 +891,8 @@ impl App {
                 None => "Sort: newest first".into(),
             },
             MenuItem::Random => "Random game".into(),
+            MenuItem::Grid if self.state.grid => "List view".into(),
+            MenuItem::Grid => "Cover grid".into(),
             MenuItem::Details if self.show_details => "Hide details".into(),
             MenuItem::Details => "Show details".into(),
             MenuItem::ShowHidden if self.show_hidden => "Hide hidden games".into(),
@@ -932,6 +957,7 @@ impl App {
                         self.menu = Some(Menu { game, selected, tags: false });
                     }
                     MenuItem::Random => self.apply(Op::Random),
+                    MenuItem::Grid => self.apply(Op::ToggleGrid),
                     MenuItem::Details => self.apply(Op::ToggleDetails),
                     MenuItem::ShowHidden => {
                         self.show_hidden = !self.show_hidden;

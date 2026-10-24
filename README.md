@@ -175,13 +175,20 @@ Hooks fit in here too: `"on_launch": "playerctl pause"` stops the music while yo
 | `f`               | Y               | favorite                                        |
 | `r`               | X               | random game                                     |
 | `d`               |                 | toggle details pane                             |
+| `v`               | L3              | cover grid / list                               |
 | `/`               | Select          | fuzzy search everything                         |
 | `F`               | R3              | filter by genre, players, decade, played, tag   |
 | `s`               | (menu)          | sort: name, last played, most played, year      |
 | `o`               | Start → game…   | the selected game's menu: favorite, hide, tags, emulator |
-| `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, details, show hidden, reload, quit |
+| `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, cover grid, details, show hidden, reload, quit |
 | `ctrl-r`          |                 | reload config                                   |
 | `q`               |                 | quit                                            |
+
+**The cover grid** (`v`, L3, or Start → Cover grid) shows the games as box art with their names
+underneath, in place of the list and the details pane; the selected game's system, year and genre
+are under the grid. The d-pad moves around it, left from the first column goes to the systems as
+in the list, and everything else (search, filters, sorting, letter jumps) works the same. Games
+without art get a box naming their system. romi remembers which view you left it in.
 
 **Sorting** is remembered per system. Favorites can also go in the order you added them (their
 default), and Recent is always newest first. Sorted by year, LT/RT jump between years instead of
@@ -413,7 +420,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/ui.rs`       | ratatui drawing                                                  |
 | `src/state.rs`    | favorites, history, play time                                    |
 | `src/art.rs`      | box art lookup and `romi scrape` (libretro thumbnails, Steam CDN) |
-| `src/cover.rs`    | showing covers: background decode/resize, small render cache     |
+| `src/cover.rs`    | showing covers: decoding and resizing on worker threads, a render cache |
 | `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
 | `src/filter.rs`   | filtering by genre, players, decade, played, tag                 |
 | `src/sort.rs`     | sort orders for systems and favorites                            |

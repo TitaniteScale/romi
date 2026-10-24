@@ -31,6 +31,7 @@ pub enum PadAction {
     Menu,
     Search,
     Filter,
+    ToggleGrid,
 }
 
 #[derive(Debug)]
@@ -67,6 +68,7 @@ fn map_button(b: Button, swap_confirm: bool) -> Option<PadAction> {
         Button::RightTrigger2 => NextLetter,
         Button::Select => Search,
         Button::RightThumb => Filter,
+        Button::LeftThumb => ToggleGrid,
         _ => return None,
     })
 }

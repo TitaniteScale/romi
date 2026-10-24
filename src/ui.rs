@@ -79,6 +79,9 @@ pub fn parse_color(s: &str) -> Option<Color> {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
+    if let Some(c) = &mut app.covers {
+        c.begin_frame();
+    }
     let theme = Theme::from(app);
     let [header, body, footer] =
         Layout::vertical([Constraint::Length(1), Constraint::Min(3), Constraint::Length(1)]).areas(f.area());
@@ -90,7 +93,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     } else if app.views.is_empty() {
         draw_empty(f, app, &theme, body);
     } else {
-        let details = app.show_details && body.width >= DETAILS_MIN_WIDTH;
+        // The cover grid takes the place of the list and the details.
+        let grid = app.state.grid;
+        let details = !grid && app.show_details && body.width >= DETAILS_MIN_WIDTH;
         // Sized from real systems only, so it doesn't jump when Favorites/Recent appear.
         // Systems and your tags' collections.
         let longest = app.views.iter().map(|v| v.name.chars().count() as u16).max().unwrap_or(0);
@@ -101,7 +106,11 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
         let areas = Layout::horizontal(cols).split(body);
         draw_systems(f, app, &theme, areas[0]);
-        draw_games(f, app, &theme, areas[1]);
+        if grid {
+            draw_grid(f, app, &theme, areas[1]);
+        } else {
+            draw_games(f, app, &theme, areas[1]);
+        }
         if details {
             draw_details(f, app, &theme, areas[2]);
         }
@@ -265,11 +274,8 @@ fn draw_systems(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     f.render_stateful_widget(list, area, &mut app.systems_list);
 }
 
-fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
-    let focused = app.focus == Pane::Games || app.search.is_some();
-    // Pseudo views and search mix systems, so label each row with its system.
-    let mixed = app.search.is_some() || !matches!(app.current_view().map(|v| &v.kind), Some(ViewKind::System(_)));
-    let ids = app.list().to_vec();
+/// The games pane's title: the view (or search), its order when unusual, and the filter.
+fn games_title(app: &App) -> String {
     let mut title = match (&app.search, app.current_view()) {
         (Some(s), _) => format!(" Search · {}", s.results.len()),
         (None, Some(v)) => format!(" {}", v.name),
@@ -285,12 +291,22 @@ fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         title.push_str(&format!(" · {label}"));
     }
     title.push(' ');
+    title
+}
+
+fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let focused = app.focus == Pane::Games || app.search.is_some();
+    // Pseudo views and search mix systems, so label each row with its system.
+    let mixed = app.search.is_some() || !matches!(app.current_view().map(|v| &v.kind), Some(ViewKind::System(_)));
+    let ids = app.list().to_vec();
+    let title = games_title(app);
     let position = if ids.is_empty() { String::new() } else { format!(" {}/{} ", app.game + 1, ids.len()) };
     let block = theme
         .block(title, focused)
         .title_bottom(Line::from(Span::styled(position, Style::new().dim())).right_aligned());
     let inner = block.inner(area);
     app.page = inner.height.saturating_sub(1) as usize;
+    app.grid_cols = 0;
 
     if ids.is_empty() {
         let msg = if app.search.is_some() { "No matches" } else { "Nothing here yet" };
@@ -342,15 +358,125 @@ fn draw_cover(f: &mut Frame, app: &mut App, game: usize, area: Rect) -> u16 {
     let Some(covers) = app.covers.as_mut() else { return 0 };
     match covers.get(&app.lib, game, Size::new(area.width, area.height)) {
         Cover::Ready(proto) => {
-            let s = proto.size();
-            let (w, h) = (s.width.min(area.width), s.height.min(area.height));
-            let rect = Rect::new(area.x + (area.width - w) / 2, area.y + (area.height - h) / 2, w, h);
-            f.render_widget(Image::new(proto), rect);
+            draw_image(f, proto, area, false);
             area.height
         }
         Cover::Loading => area.height,
         Cover::None => 0,
     }
+}
+
+/// Draws a rendered cover centered across `area`, and centered or resting on its bottom edge.
+fn draw_image(f: &mut Frame, proto: &ratatui_image::protocol::Protocol, area: Rect, bottom: bool) {
+    let s = proto.size();
+    let (w, h) = (s.width.min(area.width), s.height.min(area.height));
+    let y = if bottom { area.y + area.height - h } else { area.y + (area.height - h) / 2 };
+    f.render_widget(Image::new(proto), Rect::new(area.x + (area.width - w) / 2, y, w, h));
+}
+
+/// Covers in the grid are about this wide, in cells; the columns share out what's left over.
+const GRID_COVER_WIDTH: u16 = 16;
+
+/// The games as a grid of covers, each with its name underneath. Games without art get an
+/// empty box with their system's name instead. The selected one is framed, and its details sit under the grid.
+fn draw_grid(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let focused = app.focus == Pane::Games || app.search.is_some();
+    let ids = app.list().to_vec();
+    let position = if ids.is_empty() { String::new() } else { format!(" {}/{} ", app.game + 1, ids.len()) };
+    let mut block = theme
+        .block(games_title(app), focused)
+        .title_bottom(Line::from(Span::styled(position, Style::new().dim())).right_aligned());
+    if let Some(g) = app.selected_game() {
+        block = block.title_bottom(grid_caption(app, g, theme));
+    }
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+    if ids.is_empty() {
+        let msg = if app.search.is_some() { "No matches" } else { "Nothing here yet" };
+        f.render_widget(Paragraph::new(msg).dim(), inner);
+        app.grid_cols = 0;
+        return;
+    }
+
+    // Each cell: a frame line, the cover, the name, a frame line; and a frame column either side.
+    let cols = (inner.width / (GRID_COVER_WIDTH + 2)).max(1);
+    let cell_w = inner.width / cols;
+    let cover_w = cell_w.saturating_sub(2).max(1);
+    // Box art is about 3 wide by 4 tall; cells are about twice as tall as wide.
+    let (font_w, font_h) = app.covers.as_ref().map_or((1, 2), |c| c.font_size());
+    let cover_h = (u32::from(cover_w) * u32::from(font_w) * 4 / (3 * u32::from(font_h))).clamp(2, 40) as u16;
+    let cell_h = cover_h + 3;
+    let rows = (inner.height / cell_h).max(1) as usize;
+    let cols = cols as usize;
+    app.grid_cols = cols;
+    app.page = rows * cols;
+
+    let row = app.game / cols;
+    if row < app.grid_top {
+        app.grid_top = row;
+    } else if row >= app.grid_top + rows {
+        app.grid_top = row + 1 - rows;
+    }
+    app.grid_top = app.grid_top.min(ids.len().div_ceil(cols).saturating_sub(rows));
+
+    // Spread whatever width is left over between the columns.
+    let spare = inner.width - cell_w * cols as u16;
+    let first = app.grid_top * cols;
+    for (i, &g) in ids.iter().enumerate().skip(first).take(rows * cols) {
+        let (r, c) = ((i - first) / cols, (i - first) % cols);
+        let x = inner.x + c as u16 * cell_w + spare / 2;
+        let cell = Rect::new(x, inner.y + r as u16 * cell_h, cell_w, cell_h);
+        let selected = i == app.game;
+        if selected {
+            let frame = Block::bordered().border_type(BorderType::Rounded).border_style(if focused {
+                Style::new().fg(theme.accent)
+            } else {
+                Style::new().dim()
+            });
+            f.render_widget(frame, cell);
+        }
+        let art = Rect::new(cell.x + 1, cell.y + 1, cover_w, cover_h);
+        let game = &app.lib.games[g];
+        let fav = app.state.is_favorite(&game.key);
+        let name = format!("{}{}", if fav { "★ " } else { "" }, game.name);
+        let mut label = Style::new();
+        if selected {
+            label = label.fg(theme.accent).bold();
+        }
+        if game.hidden {
+            label = label.dim().italic();
+        }
+        let label_area = Rect::new(art.x, art.y + cover_h, cover_w, 1);
+        f.render_widget(Paragraph::new(truncate(&name, cover_w as usize)).style(label).centered(), label_area);
+
+        let cover = app.covers.as_mut().map(|c| c.get(&app.lib, g, Size::new(cover_w, cover_h)));
+        match cover {
+            Some(Cover::Ready(proto)) => draw_image(f, proto, art, true),
+            Some(Cover::Loading) => {}
+            // No art: a box the size of a cover, saying what system the game is for.
+            _ => {
+                let boxed = Block::bordered().border_type(BorderType::Rounded).border_style(Style::new().dim());
+                let text = Paragraph::new(game.system.clone())
+                    .centered()
+                    .wrap(Wrap { trim: true })
+                    .block(boxed.padding(Padding::vertical(cover_h.saturating_sub(4) / 2)))
+                    .dim();
+                f.render_widget(text, art);
+            }
+        }
+    }
+}
+
+/// A line about the selected game for under the grid, which has no room for its details.
+fn grid_caption(app: &App, g: usize, theme: &Theme) -> Line<'static> {
+    let game = &app.lib.games[g];
+    let mut parts = vec![game.system.clone()];
+    parts.extend(game.meta.year.map(|y| y.to_string()));
+    parts.extend(game.meta.genres.first().cloned());
+    Line::from(vec![
+        Span::styled(format!(" {}", game.name), Style::new().fg(theme.accent).bold()),
+        Span::styled(format!(" · {} ", parts.join(" · ")), Style::new().dim()),
+    ])
 }
 
 fn draw_details(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {

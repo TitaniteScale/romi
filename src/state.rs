@@ -25,6 +25,8 @@ pub struct State {
     pub sort: HashMap<String, Sort>,
     /// Your own tags, each with its games in the order they were tagged.
     pub tags: BTreeMap<String, Vec<String>>,
+    /// Games shown as a grid of covers rather than a list.
+    pub grid: bool,
 }
 
 impl State {
@@ -195,6 +197,7 @@ mod tests {
             selected_game: Some("psx:a (Disc 2).chd".into()),
             sort: HashMap::new(),
             tags: [("backlog".into(), vec!["psx:a (Disc 2).chd".into()])].into(),
+            grid: false,
         };
         assert!(s.mentions("psx:a (Disc 2).chd"));
         s.rename_key("psx:a (Disc 2).chd", "psx:a.m3u");

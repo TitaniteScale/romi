@@ -111,7 +111,7 @@ the config includes (hidden games, emulator picks). All done.
 
 ## 5. Looks
 
-- **Cover grid view**: a grid of box art in place of the list, toggled with a button. This is the
+- ✓ **Cover grid view**: a grid of box art in place of the list, toggled with a button. This is the
   screenshot moment in Ghostty.
 - **Title screens and screenshots**: the libretro thumbnail server has `Named_Titles` and `Named_Snaps`
   next to the box art, and needs no key either. Scrape them, and cycle through them in the details pane
