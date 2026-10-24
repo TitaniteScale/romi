@@ -21,7 +21,7 @@
   "arcade_db": "/usr/share/es-de/resources/MAME",
 
   // Where "bios" files listed on systems are looked for (each system's ROM folder is checked too).
-  // `romi --check` and the TUI flag systems whose BIOS is missing.
+  // `romi check` and the TUI flag systems whose BIOS is missing.
   "bios_dirs": ["~/.config/retroarch/system"],
 
   "vars": {
@@ -163,7 +163,7 @@
     "exclude": []
   },
 
-  // Box art, used by `romi --scrape`. Art already on disk (ES-DE, Skyscraper, Steam) is used in
+  // Box art, used by `romi scrape`. Art already on disk (ES-DE, Skyscraper, Steam) is used in
   // place; the rest is downloaded from libretro's thumbnail server and Steam's CDN into
   // ~/.cache/romi/art. Set "art": "/path/to/image.png" on any game or override to pick your own.
   // Systems search libretro thumbnail sets based on their id; set "libretro": ["Set Name", ...] on

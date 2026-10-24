@@ -238,7 +238,7 @@ pub struct ArtConfig {
     pub esde_media_dir: Option<String>,
     /// Skyscraper's cache folder; its covers are used as-is.
     pub skyscraper_cache: Option<String>,
-    /// Let `romi --scrape` download from libretro thumbnails and Steam's CDN.
+    /// Let `romi scrape` download from libretro thumbnails and Steam's CDN.
     pub online: bool,
     /// Show covers in the details pane (Kitty/Sixel/iTerm2 graphics, or half-blocks elsewhere).
     pub show: bool,

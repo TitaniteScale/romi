@@ -8,10 +8,10 @@ terminal's palette, so it matches whatever theme you're running.
 inside the TUI. See the [roadmap](ROADMAP.md).
 
 ```
-romi            # open the launcher
-romi --check    # what got found, and what looks broken (missing emulators/cores)
-romi --list     # every game as TSV: system, name, key (handy for rofi/fzf scripts)
-romi --scrape   # find box art on disk, download the rest (or: romi --scrape psx gba)
+romi           # open the launcher
+romi check     # what got found, and what looks broken (missing emulators/cores)
+romi list      # every game as TSV: system, name, key (handy for rofi/fzf scripts)
+romi scrape    # find box art on disk, download the rest (or: romi scrape psx gba)
 ```
 
 ## Install
@@ -86,7 +86,7 @@ run; see [`default-config.jsonc`](default-config.jsonc) for every option.
 **BIOS checks**: list a system's required files under `"bios"`, either one file or a list where any
 one will do. Relative names are looked up in `bios_dirs` (default `~/.config/retroarch/system`) and
 in the system's ROM folder. Absolute paths and `*` wildcards also work, e.g.
-`"~/.config/PCSX2/bios/*.bin"`. Missing ones show as `!` in `romi --check` and in the TUI.
+`"~/.config/PCSX2/bios/*.bin"`. Missing ones show as `!` in `romi check` and in the TUI.
 
 **Placeholders**: `{rom}` `{file}` `{name}` `{dir}` for ROMs, `{appid}` for Steam, plus anything in
 `vars`. Commands are split like a shell would (quotes work) and placeholders are filled in per
@@ -115,7 +115,7 @@ name, then by title. An exact match also gives box art lookups the precise name 
 Arcade genres come from a MAME category list (`metadata.arcade_categories`, e.g. a `catver.ini`
 from [progettosnaps](https://www.progettosnaps.net/catver/)). Genres from all these sources are
 folded into one short list ("Shoot'em Up / Horizontal" and "Shmup" both become "Shoot 'em up").
-The TUI starts instantly and fills database info in a moment later; `romi --check` reports coverage.
+The TUI starts instantly and fills database info in a moment later; `romi check` reports coverage.
 
 The filter (Start → Filter, `F`, or R3) narrows every view at once by genre, minimum players,
 decade, and played/not yet. Systems with no matches hide while it's on, so "Fighting + 2+ players"
@@ -124,7 +124,7 @@ as you go.
 
 ## Box art
 
-`romi --scrape` reports which games have art and downloads what it can. It's safe to rerun: only new
+`romi scrape` reports which games have art and downloads what it can. It's safe to rerun: only new
 matches are fetched. romi looks in this order, using local files where they are:
 
 1. `"art": "/path/to/image.png"` on a game entry or a system override
@@ -173,16 +173,16 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/config.rs`   | config structs, JSONC loading, `~` expansion, globbing           |
 | `src/library.rs`  | scanning ROM dirs, ES-DE gamelists, MAME names, name cleanup     |
 | `src/steam.rs`    | installed Steam games from `libraryfolders.vdf` + app manifests  |
-| `src/launch.rs`   | placeholder expansion, spawning, sanity checks for `--check`     |
+| `src/launch.rs`   | placeholder expansion, spawning, sanity checks for `romi check`  |
 | `src/gamepad.rs`  | controller thread: buttons → actions, hold-to-repeat             |
 | `src/app.rs`      | app state; keyboard and controller both become the same `Op`s    |
 | `src/ui.rs`       | ratatui drawing                                                  |
 | `src/state.rs`    | favorites, history, play time                                    |
-| `src/art.rs`      | box art lookup and `--scrape` (libretro thumbnails, Steam CDN)   |
+| `src/art.rs`      | box art lookup and `romi scrape` (libretro thumbnails, Steam CDN) |
 | `src/cover.rs`    | showing covers: background decode/resize, small render cache     |
 | `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
 | `src/main.rs`     | CLI, event loop, handing the terminal to `terminal`-mode commands |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
-| `e2e/test_tui.py` | end-to-end tests                                                 |
+| `e2e/test_*.py`   | end-to-end tests of the TUI and the CLI                          |

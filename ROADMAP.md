@@ -6,7 +6,7 @@ ones build on what the earlier ones put in place.
 ## Where things stand
 
 _As of 2026-10-22._ romi runs my whole library: 462 games across 22 systems, covering ROMs, shell
-scripts, pinball tables, native PC ports and Steam. Everything passes `romi --check`, BIOS files
+scripts, pinball tables, native PC ports and Steam. Everything passes `romi check`, BIOS files
 included.
 
 - **Works with just a controller:** a menu, search with an on-screen keyboard, jumping by letter,
@@ -37,9 +37,9 @@ Built in this order, one commit each:
 1. ✓ **Safe shared state.** Several romi processes can run at once (the TUI, `romi play`, a detached
    game's watcher). Every change to `state.json` now goes through one locked read-modify-write, and
    the TUI reloads state when its terminal regains focus.
-2. **Subcommands, using `clap`**: `romi list`, `romi info <game>`, `romi play <game>`, `romi random`,
-   `romi check`, `romi scrape`, `romi status`. The old `--check`/`--list`/`--scrape` flags stay as
-   aliases.
+2. ✓ **Subcommands, using `clap`**: `romi check`, `romi list` and `romi scrape` so far, with `info`,
+   `play`, `random` and `status` to come. The old `--check`/`--list`/`--scrape` flags still work, and
+   bad arguments exit with 64.
 3. **`list` and `info` with `--json`**, in a documented, stable shape. Game keys
    (`psx:Some Game (USA).chd`) are already stable, so they're the IDs. `list` takes the TUI's
    filters: `--system`, `--genre`, `--players`, `--decade`, `--favorites`, `--played`.

@@ -1,4 +1,4 @@
-//! Box art: finding what's already on disk, and `romi --scrape` for the rest.
+//! Box art: finding what's already on disk, and `romi scrape` for the rest.
 //!
 //! Lookup order: a path set in the config, romi's own cache, ES-DE's downloaded_media, the
 //! Skyscraper cache, then Steam's library cache. Only the cache is written to; the others are
@@ -314,7 +314,7 @@ struct Tally {
     missing: Vec<String>,
 }
 
-/// `romi --scrape [system...]`: reports art already on disk and downloads what it can find.
+/// `romi scrape [system...]`: reports art already on disk and downloads what it can find.
 pub fn scrape(cfg: &Config, lib: &Library, only: &[String]) -> Result<()> {
     let agent = agent();
     let mut finder = Finder::new(cfg);

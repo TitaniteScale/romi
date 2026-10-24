@@ -437,7 +437,7 @@ fn draw_empty(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Line::raw(""),
         Line::raw(format!("ROMs are read from {}", app.cfg.roms_dir)),
         Line::raw(format!("Edit {} and press ctrl-r", crate::app::tilde(&app.cfg_path))),
-        Line::raw("or run `romi --check` to see what's going on."),
+        Line::raw("or run `romi check` to see what's going on."),
     ];
     f.render_widget(Paragraph::new(lines).alignment(Alignment::Center).block(theme.block("", true)), area);
 }

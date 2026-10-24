@@ -14,6 +14,7 @@ mod ui;
 
 use anyhow::Result;
 use app::{App, TerminalJob};
+use clap::{Parser, Subcommand};
 use gamepad::{PadAction, PadEvent};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, DisableFocusChange, EnableFocusChange, Event, KeyEventKind};
@@ -26,19 +27,8 @@ use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
-const HELP: &str = "\
-romi - a terminal game launcher
-
-usage: romi [options]
-
-options:
-  --check          show what romi finds and anything that looks broken
-  --list           print every game as tab-separated system, name, key
-  --scrape [id..]  find box art on disk and download the rest (all systems, or just these ids)
-  --config <path>  use a different config file (or set ROMI_CONFIG)
-  -h, --help       show this help
-  -V, --version    show the version
-
+/// Shown under `romi --help`.
+const KEYS: &str = "\
 keys:
   j/k ↑/↓   move           h/l ←/→   switch pane      tab/[ ]   next/prev system
   enter     play           /         search           f         favorite
@@ -52,37 +42,65 @@ controller:
   searching: d-pad picks a key, A types, X deletes, Y space, B done
 ";
 
-fn main() -> Result<()> {
-    let mut args = std::env::args().skip(1);
-    let mut cfg_path = config::config_path();
-    let mut mode = "tui";
-    let mut only = Vec::new();
-    while let Some(a) = args.next() {
-        match a.as_str() {
-            "--check" => mode = "check",
-            "--list" => mode = "list",
-            "--scrape" => mode = "scrape",
-            id if mode == "scrape" && !id.starts_with('-') => only.push(id.to_string()),
-            "--config" => {
-                cfg_path = PathBuf::from(args.next().ok_or_else(|| anyhow::anyhow!("--config needs a path"))?)
-            }
-            "-h" | "--help" => {
-                print!("{HELP}");
-                return Ok(());
-            }
-            "-V" | "--version" => {
-                println!("romi {}", env!("CARGO_PKG_VERSION"));
-                return Ok(());
-            }
-            other => anyhow::bail!("unknown argument: {other} (try --help)"),
-        }
-    }
+/// Exit code for bad arguments (EX_USAGE), from the sysexits range romi uses for its own errors.
+const EXIT_USAGE: i32 = 64;
 
+/// romi - a terminal game launcher. Run with no command to open the launcher.
+#[derive(Parser)]
+#[command(version, after_help = KEYS)]
+struct Cli {
+    /// Use a different config file (or set ROMI_CONFIG)
+    #[arg(long, global = true, value_name = "PATH")]
+    config: Option<PathBuf>,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    // The flags romi had before subcommands, kept so existing scripts still work.
+    #[arg(long, hide = true, conflicts_with_all = ["list", "scrape"])]
+    check: bool,
+    #[arg(long, hide = true, conflicts_with = "scrape")]
+    list: bool,
+    #[arg(long, hide = true, num_args = 0.., value_name = "ID")]
+    scrape: Option<Vec<String>>,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Show what romi finds and anything that looks broken
+    Check,
+    /// Print every game as tab-separated system, name, key
+    List,
+    /// Find box art on disk and download the rest
+    Scrape {
+        /// Only these systems (ids from the config); all of them if none are given
+        #[arg(value_name = "ID")]
+        systems: Vec<String>,
+    },
+}
+
+fn main() -> Result<()> {
+    let cli = Cli::try_parse().unwrap_or_else(|e| exit_with(e));
+    let command = match (cli.command, cli.check, cli.list, cli.scrape) {
+        // clap can't declare a conflict between flags and a subcommand without also refusing
+        // global options like --config before the subcommand, so this one is checked here.
+        (Some(_), true, ..) | (Some(_), _, true, _) | (Some(_), .., Some(_)) => {
+            use clap::CommandFactory;
+            let msg = "--check, --list and --scrape can't be combined with a command";
+            exit_with(Cli::command().error(clap::error::ErrorKind::ArgumentConflict, msg))
+        }
+        (Some(c), ..) => Some(c),
+        (None, true, ..) => Some(Command::Check),
+        (None, _, true, _) => Some(Command::List),
+        (None, _, _, Some(systems)) => Some(Command::Scrape { systems }),
+        _ => None,
+    };
+    let cfg_path = cli.config.unwrap_or_else(config::config_path);
     let cfg = config::load(&cfg_path)?;
-    match mode {
-        "check" => check(&cfg, &cfg_path),
-        "scrape" => art::scrape(&cfg, &library::Library::load_complete(&cfg), &only),
-        "list" => {
+    match command {
+        Some(Command::Check) => check(&cfg, &cfg_path),
+        Some(Command::Scrape { systems }) => art::scrape(&cfg, &library::Library::load_complete(&cfg), &systems),
+        Some(Command::List) => {
             let lib = library::Library::load_complete(&cfg);
             let mut out = stdout().lock();
             for g in &lib.games {
@@ -90,8 +108,14 @@ fn main() -> Result<()> {
             }
             Ok(())
         }
-        _ => run(cfg, cfg_path),
+        None => run(cfg, cfg_path),
     }
+}
+
+/// Prints a parse error (or the help or version, which clap reports the same way) and exits.
+fn exit_with(e: clap::Error) -> ! {
+    let _ = e.print();
+    std::process::exit(if e.use_stderr() { EXIT_USAGE } else { 0 })
 }
 
 fn check(cfg: &config::Config, cfg_path: &std::path::Path) -> Result<()> {
@@ -262,5 +286,14 @@ fn wait_for_any_input(rx: &Receiver<PadEvent>) {
         if let Ok(PadEvent::Action(PadAction::Confirm | PadAction::Back | PadAction::Menu)) = rx.try_recv() {
             return;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn cli_is_well_formed() {
+        use clap::CommandFactory;
+        super::Cli::command().debug_assert();
     }
 }

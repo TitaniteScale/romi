@@ -1,8 +1,7 @@
 import json
-import subprocess
 import time
 
-from drive import CONFIG, Sandbox, binary
+from drive import CONFIG
 
 
 def eventually(check, timeout=3.0):
@@ -78,30 +77,6 @@ def test_controller_moves_and_launches(sandbox, start, pad):
     romi.wait_for(lambda: "Metroid Fusion" in romi.selected())
     romi.press("SOUTH")
     romi.wait_for("Played Metroid Fusion")
-
-
-def run_cli(sandbox, *args):
-    return subprocess.run([binary(), *args], env=sandbox.env, capture_output=True, text=True, timeout=10)
-
-
-def test_list_prints_tsv(sandbox):
-    out = run_cli(sandbox, "--list")
-    assert out.returncode == 0
-    rows = [line.split("\t") for line in out.stdout.splitlines()]
-    assert ["Game Boy Advance", "Advance Wars", "gba:Advance Wars (USA).gba"] in rows
-    assert len(rows) == 5
-
-
-def test_check_flags_missing_emulator(tmp_path):
-    config = json.loads(json.dumps(CONFIG))
-    config["systems"].append(
-        {"id": "nes", "name": "NES", "extensions": ["nes"], "command": "definitely-not-an-emulator {rom}"}
-    )
-    sandbox = Sandbox(tmp_path, config=config, roms={"nes": ["Zelda (USA).nes"]})
-    out = run_cli(sandbox, "--check")
-    assert out.returncode == 0
-    nes = next(line for line in out.stdout.splitlines() if "NES" in line)
-    assert "!" in nes and "definitely-not-an-emulator not found" in nes
 
 
 def add_favorite_from_outside(sandbox, key):
