@@ -4,6 +4,9 @@ A terminal game launcher. Browse ROMs, scripts, native ports and Steam games fro
 drive it with a keyboard or a controller, and launch from any terminal. It only uses your
 terminal's palette, so it matches whatever theme you're running.
 
+**Where it's going:** a scriptable CLI, `romi init` to set itself up, and eventually playing 2D games
+inside the TUI. See the [roadmap](ROADMAP.md).
+
 ```
 romi            # open the launcher
 romi --check    # what got found, and what looks broken (missing emulators/cores)
@@ -166,11 +169,3 @@ publishers: romi fetches and caches it on your machine and never ships any.
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
 | `src/main.rs`     | CLI, event loop, handing the terminal to `terminal`-mode commands |
-
-## Ideas for later
-
-- Match ROMs by CRC against RetroArch's `.rdb` databases for titles that names can't match
-- SteamGridDB (API key) for PC entries and Steam games with hashed CDN paths
-- Collections / custom lists, hiding games from inside the UI
-- Multiple commands per system to pick from (alternate emulators)
-- Per-game play-time sorting, "continue playing" on start
