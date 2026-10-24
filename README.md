@@ -10,6 +10,7 @@ inside the TUI. See the [roadmap](ROADMAP.md).
 ```
 romi           # open the launcher
 romi init      # find your ROMs and emulators and write a config for them
+romi add ~/Games/celeste   # add a native game, script or .desktop launcher
 romi check     # what got found, what looks broken, and what could fix it
 romi list      # every game as TSV: system, name, key (handy for rofi/fzf scripts)
 romi info chrono trigger   # everything romi knows about one game
@@ -116,6 +117,21 @@ systems you've set up in `config.json` take priority. `--print` shows the result
 `romi check` uses the same knowledge to suggest fixes: a system whose emulator is gone but which
 something else installed can run (with the command to use), folders with games that aren't in your
 config yet, and folders for systems you have no emulator for.
+
+### Adding a game that isn't a ROM
+
+```
+romi add ~/Games/sonic3air_game              # a folder: adds the one program in it
+romi add ~/Games/Celeste/Celeste.x86_64 --name Celeste
+romi add ~/scripts/update_mods.sh            # scripts get the terminal
+romi add ~/.local/share/applications/foo.desktop   # Flatpaks and anything else with a launcher
+```
+
+The entry runs the program from its own folder (native ports usually expect that) and is named
+after the folder or file; `--name`, `--system` (a system id, or any label for a group of its own)
+and `--mode` change that. In a folder with one program and some scripts (setup, build...), the
+program is picked; if it's still unclear, romi lists the candidates. It shows the entry and asks
+before adding it to `games.jsonc`, which your config includes. `--print` shows it without writing.
 
 ## Controls
 
@@ -285,6 +301,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
 | `src/init.rs`     | `romi init`: ES-DE's system list, finding emulators, writing init.jsonc |
+| `src/add.rs`      | `romi add`: guessing a game entry from a path, appending to games.jsonc |
 | `src/cli.rs`      | the command line: arguments, commands, completions, exit codes   |
 | `src/session.rs`  | recording a game's start and end, running games, background play |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |

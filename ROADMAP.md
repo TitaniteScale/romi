@@ -76,7 +76,8 @@ Built in this order, one commit each:
   stdout instead, and `--yes` skips the question.
 - **First run in the TUI**: when there's no config, walk through the same steps in a wizard that works
   with a controller, instead of writing the default.
-- **`romi add <path>`** adds one game, script or port to `"games"`, guessing `cwd` from the path.
+- ✓ **`romi add <path>`** adds a program, script, folder or `.desktop` launcher as a game, run from
+  its own folder, in a `games.jsonc` the config includes.
 
 ✓ The same system definitions let `romi check` suggest fixes: another installed emulator for a system
 that can't launch, folders that aren't in the config yet, and systems with no emulator installed.

@@ -198,12 +198,12 @@ def test_asks_before_writing(machine):
     assert not machine.config_path.exists()
 
 
-def test_other_includes_are_left_to_you(machine):
+def test_joins_an_existing_include_list(machine):
     machine.write_config(dict(CONFIG, include=["mine.jsonc"]))
     (machine.root / "mine.jsonc").write_text("{}")
     out = init(machine, "--yes")
-    assert out.returncode == 78
-    assert '"init.jsonc"' in out.stderr
+    assert out.returncode == 0, out.stderr
+    assert jsonc(machine.config_path.read_text())["include"] == ["mine.jsonc", "init.jsonc"]
 
 
 def test_builtin_systems_without_esde(machine):

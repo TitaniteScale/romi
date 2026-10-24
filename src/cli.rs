@@ -151,6 +151,26 @@ pub enum Command {
         #[arg(long, conflicts_with = "esde")]
         no_esde: bool,
     },
+    /// Add a program, script, folder or .desktop file as a game
+    Add {
+        /// What to add. A folder adds the one program in it
+        path: PathBuf,
+        /// What to call it (guessed from the file or folder name otherwise)
+        #[arg(long)]
+        name: Option<String>,
+        /// Where to list it: a system id, or any label for a group of its own [default: PC]
+        #[arg(long, value_name = "LABEL")]
+        system: Option<String>,
+        /// How to run it: wait, terminal (the default for scripts), or detach
+        #[arg(long, value_enum)]
+        mode: Option<LaunchMode>,
+        /// Print the entry instead of adding it
+        #[arg(long)]
+        print: bool,
+        /// Add it without asking
+        #[arg(long, short)]
+        yes: bool,
+    },
     /// Show the games running right now, started from the TUI or `romi play`
     Status {
         /// Print a JSON array instead
@@ -287,12 +307,17 @@ pub fn load_config(path: &Path) -> Result<Config> {
 
 pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
     // init works without a config (that's what it's for), so it mustn't make the default one.
-    if let Command::Init { roms, print, yes, esde, no_esde } = command {
-        return init(cfg_path, roms, print, yes, esde, no_esde);
+    match command {
+        Command::Init { roms, print, yes, esde, no_esde } => return init(cfg_path, roms, print, yes, esde, no_esde),
+        // add edits the config's text, so it reads the config itself.
+        Command::Add { path, name, system, mode, print, yes } => {
+            return add(cfg_path, &path, name, system, mode, print, yes);
+        }
+        _ => {}
     }
     let cfg = &load_config(cfg_path)?;
     match command {
-        Command::Init { .. } => unreachable!(),
+        Command::Init { .. } | Command::Add { .. } => unreachable!(),
         Command::Check => check(cfg, cfg_path),
         Command::List { filters, json } => list(cfg, &filters, json),
         Command::Info { game, system, json } => info(cfg, &game, system.as_deref(), json),
@@ -623,7 +648,112 @@ fn wait_for_game(child: &mut Child) -> std::io::Result<ExitStatus> {
     }
 }
 
-// ---- init ----
+// ---- init and add ----
+
+/// Asks before writing. False (after saying nothing was written) if the answer is no.
+fn confirm(question: &str, yes: bool) -> Result<bool> {
+    use std::io::IsTerminal;
+    if yes {
+        return Ok(true);
+    }
+    if !std::io::stdin().is_terminal() {
+        return fail(exit::USAGE, "pass --yes to write without asking, or --print to only show what would be written");
+    }
+    print!("{question} [Y/n] ");
+    stdout().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    if answer.trim().to_lowercase().starts_with('n') {
+        println!("Nothing written.");
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add(
+    cfg_path: &Path,
+    path: &Path,
+    name: Option<String>,
+    system: Option<String>,
+    mode: Option<LaunchMode>,
+    print: bool,
+    yes: bool,
+) -> Result<()> {
+    use crate::add::{GAMES_FILE, Refusal};
+    let Some((raw, own)) = crate::init::existing_config(cfg_path) else {
+        return fail(exit::CONFIG, format!("no config at {} yet; run `romi init` first", app::tilde(cfg_path)));
+    };
+    let cfg = load_config(cfg_path)?;
+    let shown = app::tilde(path);
+    let mut entry = match crate::add::entry_for(path, Some(&cfg)) {
+        Ok(entry) => entry,
+        Err(Refusal::Missing) => return fail(exit::NOT_FOUND, format!("{shown} doesn't exist")),
+        Err(Refusal::NothingToRun) => return fail(exit::NOT_FOUND, format!("nothing to run in {shown}")),
+        Err(Refusal::Several(programs)) => {
+            let msg = format!("{shown} has several programs; add the one to run:\n  {}", programs.join("\n  "));
+            return fail(exit::AMBIGUOUS, msg);
+        }
+        Err(Refusal::NotExecutable) => {
+            let msg = format!("{shown} isn't executable (`chmod +x` it first, or add it to config.json by hand)");
+            return fail(exit::USAGE, msg);
+        }
+        Err(Refusal::Rom { system, folder }) => {
+            let msg = format!("{shown} looks like a {system} game; put it in {} instead", app::tilde(&folder));
+            return fail(exit::USAGE, msg);
+        }
+        Err(Refusal::Windows) => {
+            let msg = "Windows programs need Wine or Proton; add one to config.json by hand, e.g. \"command\": \"wine game.exe\"";
+            return fail(exit::USAGE, msg);
+        }
+    };
+    if let Some(name) = name {
+        entry.name = name;
+    }
+    entry.system = system.filter(|s| s != "PC");
+    entry.mode = mode.or(entry.mode);
+    if cfg.games.iter().any(|g| g.name.eq_ignore_ascii_case(&entry.name)) {
+        return fail(
+            exit::USAGE,
+            format!("there's already a game called {:?}; pick another name with --name", entry.name),
+        );
+    }
+    if print {
+        println!("{}", entry.to_json());
+        return Ok(());
+    }
+
+    let games_path = cfg_path.parent().unwrap_or(Path::new(".")).join(GAMES_FILE);
+    let existing_games = std::fs::read_to_string(&games_path).ok();
+    let Some(games_text) = crate::add::append(existing_games.as_deref(), &entry) else {
+        let msg = format!(
+            "couldn't add to {} safely; add this to its games by hand:\n  {}",
+            app::tilde(&games_path),
+            entry.to_json()
+        );
+        return fail(exit::CONFIG, msg);
+    };
+    let Some(config_text) = crate::init::add_include(&raw, &own, GAMES_FILE, "Games added with `romi add`.") else {
+        let msg = format!(
+            "couldn't add \"{GAMES_FILE}\" to the \"include\" list in {}; add it by hand",
+            app::tilde(cfg_path)
+        );
+        return fail(exit::CONFIG, msg);
+    };
+    println!("{}\n  {}", app::tilde(&games_path), entry.to_json());
+    let also =
+        if config_text == raw { String::new() } else { format!(", and include it from {}", app::tilde(cfg_path)) };
+    if !confirm(&format!("\nAdd this to {GAMES_FILE}{also}?"), yes)? {
+        return Ok(());
+    }
+    std::fs::write(&games_path, games_text)?;
+    if config_text != raw {
+        std::fs::write(cfg_path, config_text)?;
+    }
+    load_config(cfg_path)?;
+    println!("Added {}. Try it with: romi play {}", entry.name, shell_words::quote(&entry.name));
+    Ok(())
+}
 
 fn init(
     cfg_path: &Path,
@@ -674,7 +804,12 @@ fn init(
 
     let include_path = cfg_path.parent().unwrap_or(Path::new(".")).join(crate::init::INCLUDE_FILE);
     let (main, plan) = match &existing {
-        Some((raw, cfg)) => match crate::init::add_include(raw, cfg) {
+        Some((raw, cfg)) => match crate::init::add_include(
+            raw,
+            cfg,
+            crate::init::INCLUDE_FILE,
+            "Systems found by `romi init`. Anything set in this file takes priority.",
+        ) {
             Some(text) if text == *raw => (None, format!("write {}", app::tilde(&include_path))),
             Some(text) => {
                 let plan = format!("write {} and include it from {}", app::tilde(&include_path), app::tilde(cfg_path));
@@ -682,9 +817,9 @@ fn init(
             }
             None => {
                 let msg = format!(
-                    "{} already includes other files; add \"{}\" to its \"include\" list, then run init again",
-                    app::tilde(cfg_path),
-                    crate::init::INCLUDE_FILE
+                    "couldn't add \"{}\" to the \"include\" list in {}; add it by hand, then run init again",
+                    crate::init::INCLUDE_FILE,
+                    app::tilde(cfg_path)
                 );
                 return fail(exit::CONFIG, msg);
             }
@@ -694,19 +829,8 @@ fn init(
             (Some(crate::init::fresh_config(&roms_dir)), plan)
         }
     };
-    if !yes {
-        use std::io::IsTerminal;
-        if !std::io::stdin().is_terminal() {
-            return fail(exit::USAGE, "pass --yes to write without asking, or --print to see the config");
-        }
-        print!("\nThis will {plan}. Go ahead? [Y/n] ");
-        stdout().flush()?;
-        let mut answer = String::new();
-        std::io::stdin().read_line(&mut answer)?;
-        if answer.trim().to_lowercase().starts_with('n') {
-            println!("Nothing written.");
-            return Ok(());
-        }
+    if !confirm(&format!("\nThis will {plan}. Go ahead?"), yes)? {
+        return Ok(());
     }
     if let Some(dir) = cfg_path.parent() {
         std::fs::create_dir_all(dir)?;

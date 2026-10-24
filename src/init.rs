@@ -705,20 +705,31 @@ pub fn fresh_config(roms_dir: &Path) -> String {
     out
 }
 
-/// Adds the include line to an existing config's text, keeping everything else as it is.
-/// None when the config already includes other files (editing that list by hand is safer).
-pub fn add_include(raw: &str, cfg: &Config) -> Option<String> {
-    if cfg.include.iter().any(|i| i == INCLUDE_FILE) {
+/// Adds `file` to an existing config's includes, keeping everything else in the text as it is:
+/// a new `"include"` line (with `comment` above it), or one more entry in the list that's there.
+/// None if the edit doesn't come out right, so it can be left to the person instead.
+pub fn add_include(raw: &str, cfg: &Config, file: &str, comment: &str) -> Option<String> {
+    if cfg.include.iter().any(|i| i == file) {
         return Some(raw.to_string());
     }
-    if !cfg.include.is_empty() {
-        return None;
-    }
-    let brace = opening_brace(raw)?;
-    let line = format!(
-        "\n  // Systems found by `romi init`. Anything set in this file takes priority.\n  \"include\": [\"{INCLUDE_FILE}\"],"
-    );
-    Some(format!("{}{line}{}", &raw[..=brace], &raw[brace + 1..]))
+    let q = serde_json::to_string(file).ok()?;
+    let edited = if cfg.include.is_empty() {
+        let brace = opening_brace(raw)?;
+        format!("{}\n  // {comment}\n  \"include\": [{q}],{}", &raw[..=brace], &raw[brace + 1..])
+    } else {
+        // The "include" key that isn't in a comment, then the end of its list.
+        let key = raw.match_indices("\"include\"").map(|(i, _)| i).find(|&i| {
+            let line_start = raw[..i].rfind('\n').map_or(0, |n| n + 1);
+            !raw[line_start..i].contains("//")
+        })?;
+        let end = key + raw[key..].find(']')?;
+        let before = raw[..end].trim_end();
+        format!("{before}, {q}{}", &raw[end..])
+    };
+    // Make sure the edit did exactly what was meant.
+    let mut expected = cfg.include.clone();
+    expected.push(file.to_string());
+    (config::parse(&edited).ok()?.include == expected).then_some(edited)
 }
 
 /// The byte offset of the `{` that opens the top-level object, skipping comments.
@@ -783,11 +794,23 @@ mod tests {
     fn include_goes_after_the_opening_brace() {
         let raw = "// a comment with a { brace\n/* and { another */\n{\n  \"roms_dir\": \"~/ROMs\"\n}\n";
         let cfg = config::parse(raw).unwrap();
-        let out = add_include(raw, &cfg).unwrap();
-        assert!(out.starts_with("// a comment with a { brace\n/* and { another */\n{\n  // Systems found"));
+        let out = add_include(raw, &cfg, INCLUDE_FILE, "Found by romi init.").unwrap();
+        assert!(out.starts_with("// a comment with a { brace\n/* and { another */\n{\n  // Found by romi init."));
         let cfg = config::parse(&out).unwrap();
         assert_eq!(cfg.include, [INCLUDE_FILE]);
-        assert_eq!(add_include(&out, &cfg).unwrap(), out);
+        assert_eq!(add_include(&out, &cfg, INCLUDE_FILE, "").unwrap(), out);
+        // A second file joins the list.
+        let out = add_include(&out, &cfg, "games.jsonc", "").unwrap();
+        assert_eq!(config::parse(&out).unwrap().include, [INCLUDE_FILE, "games.jsonc"]);
+    }
+
+    #[test]
+    fn include_list_edit_skips_commented_keys() {
+        let raw = "{\n  // \"include\": [\"old.jsonc\"],\n  \"include\": [\"a.jsonc\"]\n}\n";
+        let cfg = config::parse(raw).unwrap();
+        let out = add_include(raw, &cfg, "b.jsonc", "").unwrap();
+        assert!(out.contains("// \"include\": [\"old.jsonc\"],"));
+        assert_eq!(config::parse(&out).unwrap().include, ["a.jsonc", "b.jsonc"]);
     }
 
     #[test]

@@ -1,3 +1,4 @@
+mod add;
 mod app;
 mod art;
 mod cli;
