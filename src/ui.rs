@@ -1,6 +1,6 @@
 //! Drawing. Only terminal palette colors and modifiers are used, so romi follows your theme.
 
-use crate::app::{App, Level, MENU, OSK, PadState, Pane, ViewKind};
+use crate::app::{App, Level, OSK, PadState, Pane, ViewKind};
 use crate::cover::Cover;
 use crate::filter::ROWS as FILTER_ROWS;
 use crate::sort::Sort;
@@ -151,27 +151,25 @@ fn draw_filter(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 }
 
 fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    let Some(sel) = app.menu else { return };
-    let items: Vec<Line> = MENU
-        .iter()
+    let Some(menu) = &app.menu else { return };
+    const WIDTH: usize = 26;
+    let items: Vec<Line> = app
+        .menu_items()
+        .into_iter()
         .enumerate()
-        .map(|(i, &item)| {
-            let label = match item {
-                "Details pane" if app.show_details => "Hide details".into(),
-                "Details pane" => "Show details".into(),
-                "Sort" => match app.sort() {
-                    Some(sort) => format!("Sort: {}", sort.label()),
-                    None => "Sort: newest first".into(),
-                },
-                other => other.to_string(),
-            };
-            let style = if i == sel { theme.selected(true) } else { Style::new() };
-            Line::from(Span::styled(format!("  {label:<20}"), style))
+        .map(|(i, item)| {
+            let label = truncate(&app.menu_label(item), WIDTH);
+            let style = if i == menu.selected { theme.selected(true) } else { Style::new() };
+            Line::from(Span::styled(format!("  {label:<WIDTH$}"), style))
         })
         .collect();
-    let rect = centered(area, 28, items.len() as u16 + 4);
+    let rect = centered(area, WIDTH as u16 + 6, items.len() as u16 + 4);
     f.render_widget(Clear, rect);
-    let block = theme.block(" romi ", true).padding(Padding::vertical(1));
+    let title = match menu.game {
+        Some(g) => format!(" {} ", truncate(&app.lib.games[g].name, WIDTH)),
+        None => " romi ".into(),
+    };
+    let block = theme.block(title, true).padding(Padding::vertical(1));
     f.render_widget(Paragraph::new(items).block(block), rect);
 }
 
@@ -213,9 +211,9 @@ fn draw_header(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Span::styled(" romi", Style::new().fg(theme.accent).bold()),
         Span::styled(
             if app.filter.is_active() {
-                format!("  {} of {} games", app.filtered_count(), app.lib.games.len())
+                format!("  {} of {} games", app.filtered_count(), app.visible_count())
             } else {
-                format!("  {} games", app.lib.games.len())
+                format!("  {} games", app.visible_count())
             },
             Style::new().dim(),
         ),
@@ -303,7 +301,11 @@ fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             let name = truncate(&game.name, room);
             let mut spans = vec![
                 Span::styled(if fav { "★ " } else { "  " }, Style::new().fg(theme.accent)),
-                Span::raw(name.clone()),
+                if game.hidden {
+                    Span::styled(name.clone(), Style::new().dim().italic())
+                } else {
+                    Span::raw(name.clone())
+                },
             ];
             if let Some(sfx) = &game.suffix {
                 let left = room.saturating_sub(name.chars().count() + 2);
@@ -390,6 +392,9 @@ fn draw_details(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     }
     if let Some(&at) = app.state.last_played.get(&game.key) {
         lines.push(Line::from(vec![label("Last"), Span::raw(fmt_ago(now().saturating_sub(at)))]));
+    }
+    if game.hidden {
+        lines.push(Line::from(vec![label("Hidden"), Span::raw("yes (o to unhide)")]));
     }
     if !game.discs.is_empty() {
         lines.push(Line::from(vec![label("Discs"), Span::raw(game.discs.len().to_string())]));
@@ -533,6 +538,7 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             ("/", "search"),
             ("f", "fav"),
             ("r", "random"),
+            ("o", "game"),
             ("m", "menu"),
             ("q", "quit"),
         ])

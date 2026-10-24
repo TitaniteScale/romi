@@ -31,6 +31,9 @@ pub struct Config {
     pub controller: ControllerConfig,
     pub systems: Vec<SystemConfig>,
     pub games: Vec<GameConfig>,
+    /// Tweaks to any game (ROM, hand-added or Steam) by its key, as `romi list` shows it.
+    /// romi's menus write these to `overrides.jsonc`.
+    pub overrides: HashMap<String, Override>,
     pub steam: SteamConfig,
     pub art: ArtConfig,
     pub metadata: MetadataConfig,
@@ -59,6 +62,7 @@ pub struct Include {
     pub bios_dirs: Vec<String>,
     pub systems: Vec<SystemConfig>,
     pub games: Vec<GameConfig>,
+    pub overrides: HashMap<String, Override>,
 }
 
 impl Config {
@@ -81,6 +85,9 @@ impl Config {
                 self.games.push(game);
             }
         }
+        for (key, ov) in inc.overrides {
+            self.overrides.entry(key).or_insert(ov);
+        }
     }
 }
 
@@ -98,6 +105,7 @@ impl Default for Config {
             controller: ControllerConfig::default(),
             systems: Vec::new(),
             games: Vec::new(),
+            overrides: HashMap::new(),
             steam: SteamConfig::default(),
             art: ArtConfig::default(),
             metadata: MetadataConfig::default(),
@@ -199,22 +207,32 @@ fn bios_exists(file: &str, dirs: &[PathBuf]) -> bool {
     })
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Override {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<LaunchMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub env: HashMap<String, String>,
-    #[serde(default)]
+    /// In a system's overrides: not a game at all (a BIOS, a demo disc). In the top-level ones:
+    /// left out of lists until "Show hidden games", but still playable by name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub hidden: bool,
     /// Image to use instead of scraped art.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub art: Option<String>,
     /// Metadata that beats anything scraped, e.g. for filters: "Fighting", "Shoot 'em up / Puzzle".
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub genre: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub players: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub year: Option<u16>,
 }
 

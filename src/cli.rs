@@ -209,6 +209,9 @@ pub struct Filters {
     /// Only games never played from romi
     #[arg(long)]
     unplayed: bool,
+    /// Include games hidden from romi's menus
+    #[arg(long)]
+    hidden: bool,
 }
 
 fn parse_decade(s: &str) -> Result<u16, String> {
@@ -341,6 +344,7 @@ impl Filters {
             favorites: false,
             played: false,
             unplayed: false,
+            hidden: false,
         }
     }
 
@@ -363,6 +367,7 @@ impl Filters {
             .flat_map(|&s| lib.systems[s].games.iter().copied())
             .filter(|&g| filter.matches(&lib.games[g], state))
             .filter(|&g| !self.favorites || state.is_favorite(&lib.games[g].key))
+            .filter(|&g| self.hidden || !lib.games[g].hidden)
             .collect())
     }
 }
@@ -418,6 +423,8 @@ struct GameJson<'a> {
     /// Every disc of a multi-disc game, in order; empty otherwise.
     discs: Vec<String>,
     favorite: bool,
+    /// Hidden from lists in romi's menus; `list` leaves these out without `--hidden`.
+    hidden: bool,
     playtime_secs: u64,
     /// Unix time.
     last_played: Option<u64>,
@@ -438,6 +445,7 @@ impl<'a> GameJson<'a> {
             path: game.path.as_ref().map(|p| p.to_string_lossy().into_owned()),
             discs: game.discs.iter().map(|p| p.to_string_lossy().into_owned()).collect(),
             favorite: state.is_favorite(&game.key),
+            hidden: game.hidden,
             playtime_secs: state.playtime.get(&game.key).copied().unwrap_or(0),
             last_played: state.last_played.get(&game.key).copied(),
             art: finder.find(system, game).map(|(p, _)| p.to_string_lossy().into_owned()),
@@ -505,6 +513,7 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
         ("players", m.players.map(|n| n.to_string())),
         ("series", m.franchise.clone()),
         ("favorite", record.favorite.then(|| "yes".to_string())),
+        ("hidden", record.hidden.then(|| "yes".to_string())),
         ("played", played),
         ("command", Some(game.launch.command.clone())),
         ("art", record.art.as_deref().map(tilde)),

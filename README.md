@@ -26,7 +26,8 @@ for machine-readable output.
 
 ```
 romi list --system snes --genre rpg        # filters combine: --system (repeatable), --genre,
-romi list --players 2 --decade 90s --json  # --players, --decade, --favorites, --played, --unplayed
+romi list --players 2 --decade 90s --json  # --players, --decade, --favorites, --played, --unplayed,
+                                           # --hidden (include hidden games)
 romi info "super metroid"
 romi info metroid --system gba --json
 romi play "super metroid" --dry-run         # the command, cwd and env it would run
@@ -65,7 +66,7 @@ first of those that matches anything, and if that's more than one game it lists 
 guessing. `--system` narrows the search.
 
 **JSON**: `list --json` prints an array of games and `info --json` prints one. Each has `key`,
-`name`, `system` (the id), `system_name`, `path` (null for scripts, ports and Steam; the first disc
+`name`, `system` (the id), `system_name`, `hidden`, `path` (null for scripts, ports and Steam; the first disc
 of a multi-disc game), `discs` (every disc, in order, for a multi-disc game; otherwise empty), `favorite`,
 `playtime_secs`, `last_played` (Unix time or null), `art` (a path or null), and `meta` with
 `genres`, `year`, `players`, `developer`, `publisher`, `franchise` and `description`. New fields may
@@ -151,7 +152,8 @@ before adding it to `games.jsonc`, which your config includes. `--print` shows i
 | `/`               | Select          | fuzzy search everything                         |
 | `F`               | R3              | filter by genre, players, decade, played        |
 | `s`               | (menu)          | sort: name, last played, most played, year      |
-| `m`               | Start / Guide   | menu: search, filter, sort, random, details, reload, quit |
+| `o`               | Start → game…   | the selected game's menu: favorite, hide        |
+| `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, details, show hidden, reload, quit |
 | `ctrl-r`          |                 | reload config                                   |
 | `q`               |                 | quit                                            |
 
@@ -160,6 +162,10 @@ default), and Recent is always newest first. Sorted by year, LT/RT jump between 
 letters; sorted by play, they page. From the Start menu, A on Sort keeps trying the next order.
 Set `"start_on": "last_played"` to start on the last game you played, in its system, instead of
 wherever you left off.
+
+**Hiding** a game (from its menu) takes it out of every list and search. Start → Show hidden games
+lists them again, dimmed, so you can unhide them from the same menu. `romi play` still finds
+hidden games, and `romi list --hidden` includes them.
 
 Searching with a controller brings up an on-screen keyboard: the d-pad picks a key, A types, X
 deletes, Y adds a space, and B (or ✓) closes it, leaving the results to browse. B again leaves the
@@ -205,6 +211,20 @@ for every option.
   ],
 
   "steam": { "enabled": true, "exclude": ["Tabletop Simulator"] }
+}
+```
+
+**Overrides by game key**: the top-level `"overrides"` change any game, Steam and hand-added ones
+included, using its key from `romi list`. They take the same fields as a system's overrides and beat
+everything else. romi's menus write theirs (hidden games, so far) to `overrides.jsonc` next to the
+config, adding it to `"include"` the first time. romi rewrites that file whole, so keep your own
+overrides in config.json. Unlike `init.jsonc` it names your games, so think twice before putting it
+in a public dotfiles repository.
+
+```jsonc
+"overrides": {
+  "steam:1145360": { "hidden": true },
+  "game:Sonic 3 A.I.R.": { "genre": "Platform", "year": 2022 }
 }
 ```
 
@@ -319,6 +339,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/sort.rs`     | sort orders for systems and favorites                            |
+| `src/overrides.rs`| saving changes made in the menus to `overrides.jsonc`            |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
 | `src/init.rs`     | `romi init`: ES-DE's system list, finding emulators, writing init.jsonc |
 | `src/add.rs`      | `romi add`: guessing a game entry from a path, appending to games.jsonc |

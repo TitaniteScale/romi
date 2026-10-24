@@ -1,6 +1,6 @@
 //! Builds the game list from ROM folders, hand-added entries and Steam.
 
-use crate::config::{self, Config, SystemConfig, expand_path, glob_match, missing_bios};
+use crate::config::{self, Config, Override, SystemConfig, expand_path, glob_match, missing_bios};
 use crate::launch::{Launch, check_command};
 use crate::state::State;
 use crate::steam;
@@ -34,6 +34,35 @@ pub struct Game {
     pub discs: Vec<PathBuf>,
     /// The keys those discs had as games of their own, so old history and scripts still find it.
     pub disc_keys: Vec<String>,
+    /// Hidden from lists (from romi's menus or the config's top-level overrides).
+    pub hidden: bool,
+}
+
+impl Game {
+    /// Applies an override from the config's top-level `overrides`, which beats everything else.
+    fn apply(&mut self, ov: &Override) {
+        if let Some(name) = &ov.name {
+            self.name.clone_from(name);
+            self.sort_key = sort_key(name);
+        }
+        if let Some(command) = &ov.command {
+            self.launch.command.clone_from(command);
+        }
+        if let Some(mode) = ov.mode {
+            self.launch.mode = mode;
+        }
+        if let Some(cwd) = &ov.cwd {
+            self.launch.cwd = Some(cwd.clone());
+        }
+        self.launch.env.extend(ov.env.clone());
+        if let Some(art) = &ov.art {
+            self.art.manual = Some(expand_path(art));
+        }
+        let mut meta = configured_meta(None, ov.genre.as_deref(), ov.players, ov.year);
+        meta.fill(&self.meta);
+        self.meta = meta;
+        self.hidden = ov.hidden;
+    }
 }
 
 /// What box art lookups need to know about a game.
@@ -170,6 +199,11 @@ impl Library {
             }
         }
 
+        for game in &mut lib.games {
+            if let Some(ov) = cfg.overrides.get(&game.key) {
+                game.apply(ov);
+            }
+        }
         lib.systems.retain(|s| !s.games.is_empty());
         for sys in &mut lib.systems {
             let games = &lib.games;
@@ -386,6 +420,7 @@ impl Library {
             art,
             discs: Vec::new(),
             disc_keys: Vec::new(),
+            hidden: false,
         });
         self.systems[system].games.push(self.games.len() - 1);
         self.games.last_mut().expect("just pushed")

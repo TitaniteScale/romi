@@ -23,8 +23,29 @@ const STATUS_TTL: Duration = Duration::from_secs(6);
 /// How long the big letter stays up after a letter jump.
 const FLASH_TTL: Duration = Duration::from_millis(700);
 
-/// The controller menu (Start). Everything that would otherwise need a keyboard lives here.
-pub const MENU: &[&str] = &["Search", "Filter", "Sort", "Random game", "Details pane", "Reload config", "Quit romi"];
+/// An entry in a menu: the main one (Start), or the selected game's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MenuItem {
+    /// Opens the selected game's menu.
+    Game,
+    Search,
+    Filter,
+    Sort,
+    Random,
+    Details,
+    ShowHidden,
+    Reload,
+    Quit,
+    Favorite,
+    Hide,
+}
+
+/// An open menu. Everything that would otherwise need a keyboard is in one.
+pub struct Menu {
+    /// Whose menu: the selected game's, or None for the main menu.
+    pub game: Option<usize>,
+    pub selected: usize,
+}
 
 /// On-screen keyboard for searching with a controller.
 pub const OSK: [[&str; 13]; 3] = [
@@ -117,6 +138,7 @@ enum Op {
     Search,
     Filter,
     Sort,
+    GameMenu,
 }
 
 pub struct App {
@@ -136,8 +158,9 @@ pub struct App {
     pub terminal_job: Option<TerminalJob>,
     /// Box art, when enabled and the terminal could be queried.
     pub covers: Option<Covers>,
-    /// Selected item while the controller menu is open.
-    pub menu: Option<usize>,
+    pub menu: Option<Menu>,
+    /// List hidden games too (dimmed), so they can be brought back.
+    pub show_hidden: bool,
     /// Cursor (row, column) while the on-screen keyboard is open.
     pub osk: Option<(usize, usize)>,
     /// Letter (or year) shown briefly after jumping to it.
@@ -186,6 +209,7 @@ impl App {
             terminal_job: None,
             covers: None,
             menu: None,
+            show_hidden: false,
             osk: None,
             flash: None,
             metadata: None,
@@ -236,7 +260,7 @@ impl App {
     // ---- views & selection ----
 
     fn rebuild_views(&mut self) {
-        let keep = |g: &usize| self.filter.matches(&self.lib.games[*g], &self.state);
+        let keep = |g: &usize| self.visible(*g) && self.filter.matches(&self.lib.games[*g], &self.state);
         let resolve = |keys: &[String]| keys.iter().filter_map(|k| self.lib.find(k)).filter(keep).collect::<Vec<_>>();
         let mut views = Vec::new();
         let mut favs = resolve(&self.state.favorites);
@@ -486,7 +510,7 @@ impl App {
                 KeyCode::Up | KeyCode::Char('k') => Op::Up,
                 KeyCode::Down | KeyCode::Char('j') => Op::Down,
                 KeyCode::Enter => Op::Confirm,
-                KeyCode::Esc | KeyCode::Char('q' | 'm') => Op::Back,
+                KeyCode::Esc | KeyCode::Char('q' | 'm' | 'o') => Op::Back,
                 _ => return,
             };
             self.apply(op);
@@ -554,6 +578,7 @@ impl App {
             KeyCode::Char('m') => Op::Menu,
             KeyCode::Char('F') => Op::Filter,
             KeyCode::Char('s') => Op::Sort,
+            KeyCode::Char('o') => Op::GameMenu,
             _ => return,
         };
         self.apply(op);
@@ -634,17 +659,7 @@ impl App {
             }
             Op::Favorite => {
                 if let Some(g) = self.selected_game() {
-                    let key = self.lib.games[g].key.clone();
-                    let mut added = false;
-                    self.state = State::update(|s| added = s.toggle_favorite(&key));
-                    let name = self.lib.games[g].name.clone();
-                    self.set_status(
-                        Level::Info,
-                        if added { format!("★ {name}") } else { format!("Unfavorited {name}") },
-                    );
-                    if self.search.is_none() {
-                        self.rebuild_keeping_selection();
-                    }
+                    self.toggle_favorite(g);
                 }
             }
             Op::Random => {
@@ -657,7 +672,12 @@ impl App {
             Op::ToggleDetails => self.show_details = !self.show_details,
             Op::NextLetter => self.jump_letter(true),
             Op::PrevLetter => self.jump_letter(false),
-            Op::Menu => self.menu = Some(0),
+            Op::Menu => self.menu = Some(Menu { game: None, selected: 0 }),
+            Op::GameMenu => {
+                if let Some(g) = self.selected_game() {
+                    self.menu = Some(Menu { game: Some(g), selected: 0 });
+                }
+            }
             Op::Filter => self.filter_panel = Some(0),
             Op::Sort => self.cycle_sort(),
             Op::Search => {
@@ -669,27 +689,138 @@ impl App {
         }
     }
 
+    fn toggle_favorite(&mut self, g: usize) {
+        let key = self.lib.games[g].key.clone();
+        let mut added = false;
+        self.state = State::update(|s| added = s.toggle_favorite(&key));
+        let name = self.lib.games[g].name.clone();
+        self.set_status(Level::Info, if added { format!("★ {name}") } else { format!("Unfavorited {name}") });
+        if self.search.is_none() {
+            self.rebuild_keeping_selection();
+        }
+    }
+
+    /// Hides a game (or brings it back), saved in overrides.jsonc. The cursor stays where it was,
+    /// on whatever moved into the hidden game's place.
+    fn toggle_hidden(&mut self, g: usize) {
+        let (key, name, hide) = {
+            let game = &self.lib.games[g];
+            (game.key.clone(), game.name.clone(), !game.hidden)
+        };
+        if let Err(e) = crate::overrides::update(&self.cfg_path, &key, |ov| ov.hidden = hide) {
+            self.set_status(Level::Error, format!("Couldn't save: {e:#}"));
+            return;
+        }
+        self.lib.games[g].hidden = hide;
+        self.cfg.overrides.entry(key).or_default().hidden = hide;
+        if self.search.is_some() {
+            self.update_search();
+        } else {
+            let (view, at) = (self.views.get(self.view).map(|v| v.id.clone()), self.game);
+            self.rebuild_views();
+            self.select(view.as_deref(), None);
+            self.game = at.min(self.list().len().saturating_sub(1));
+        }
+        let text = if !hide {
+            format!("Unhid {name}")
+        } else if self.show_hidden {
+            format!("Hid {name}")
+        } else {
+            format!("Hid {name} (Show hidden games in the menu brings it back)")
+        };
+        self.set_status(Level::Info, text);
+    }
+
+    /// Whether a game shows in lists and search.
+    fn visible(&self, g: usize) -> bool {
+        self.show_hidden || !self.lib.games[g].hidden
+    }
+
+    /// What the open menu offers, in order.
+    pub fn menu_items(&self) -> Vec<MenuItem> {
+        use MenuItem::*;
+        match self.menu.as_ref().and_then(|m| m.game) {
+            Some(_) => vec![Favorite, Hide],
+            None => {
+                let mut items = Vec::new();
+                if self.selected_game().is_some() {
+                    items.push(Game);
+                }
+                items.extend([Search, Filter, Sort, Random, Details]);
+                if self.lib.games.iter().any(|g| g.hidden) {
+                    items.push(ShowHidden);
+                }
+                items.extend([Reload, Quit]);
+                items
+            }
+        }
+    }
+
+    pub fn menu_label(&self, item: MenuItem) -> String {
+        let game = self.menu.as_ref().and_then(|m| m.game).or(self.selected_game()).map(|g| &self.lib.games[g]);
+        match item {
+            MenuItem::Game => format!("{}…", game.map_or("Game", |g| g.name.as_str())),
+            MenuItem::Search => "Search".into(),
+            MenuItem::Filter => "Filter".into(),
+            MenuItem::Sort => match self.sort() {
+                Some(sort) => format!("Sort: {}", sort.label()),
+                None => "Sort: newest first".into(),
+            },
+            MenuItem::Random => "Random game".into(),
+            MenuItem::Details if self.show_details => "Hide details".into(),
+            MenuItem::Details => "Show details".into(),
+            MenuItem::ShowHidden if self.show_hidden => "Hide hidden games".into(),
+            MenuItem::ShowHidden => {
+                format!("Show hidden games ({})", self.lib.games.iter().filter(|g| g.hidden).count())
+            }
+            MenuItem::Reload => "Reload config".into(),
+            MenuItem::Quit => "Quit romi".into(),
+            MenuItem::Favorite if game.is_some_and(|g| self.state.is_favorite(&g.key)) => "Unfavorite".into(),
+            MenuItem::Favorite => "Favorite".into(),
+            MenuItem::Hide if game.is_some_and(|g| g.hidden) => "Unhide".into(),
+            MenuItem::Hide => "Hide".into(),
+        }
+    }
+
     fn menu_op(&mut self, op: Op) {
-        let Some(i) = self.menu else { return };
+        let items = self.menu_items();
+        let Some(menu) = &mut self.menu else { return };
+        let n = items.len().max(1);
         match op {
-            Op::Up => self.menu = Some((i + MENU.len() - 1) % MENU.len()),
-            Op::Down => self.menu = Some((i + 1) % MENU.len()),
+            Op::Up => menu.selected = (menu.selected + n - 1) % n,
+            Op::Down => menu.selected = (menu.selected + 1) % n,
             Op::Back | Op::Menu => self.menu = None,
             Op::Confirm => {
+                let (game, selected) = (menu.game, menu.selected);
                 self.menu = None;
-                match MENU[i] {
-                    "Search" => self.apply(Op::Search),
-                    "Filter" => self.apply(Op::Filter),
+                let Some(&item) = items.get(selected) else { return };
+                match item {
+                    MenuItem::Game => self.apply(Op::GameMenu),
+                    MenuItem::Search => self.apply(Op::Search),
+                    MenuItem::Filter => self.apply(Op::Filter),
                     // Stays open, so A again tries the next order.
-                    "Sort" => {
+                    MenuItem::Sort => {
                         self.cycle_sort();
-                        self.menu = Some(i);
+                        self.menu = Some(Menu { game, selected });
                     }
-                    "Random game" => self.apply(Op::Random),
-                    "Details pane" => self.apply(Op::ToggleDetails),
-                    "Reload config" => self.reload(),
-                    "Quit romi" => self.quit = true,
-                    _ => {}
+                    MenuItem::Random => self.apply(Op::Random),
+                    MenuItem::Details => self.apply(Op::ToggleDetails),
+                    MenuItem::ShowHidden => {
+                        self.show_hidden = !self.show_hidden;
+                        self.rebuild_keeping_selection();
+                    }
+                    MenuItem::Reload => self.reload(),
+                    MenuItem::Quit => self.quit = true,
+                    MenuItem::Favorite => {
+                        if let Some(g) = game {
+                            self.toggle_favorite(g);
+                        }
+                    }
+                    MenuItem::Hide => {
+                        if let Some(g) = game {
+                            self.toggle_hidden(g);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -717,9 +848,16 @@ impl App {
         }
     }
 
+    /// Games that show in lists: all of them, less hidden ones unless those are being shown.
+    pub fn visible_count(&self) -> usize {
+        (0..self.lib.games.len()).filter(|&g| self.visible(g)).count()
+    }
+
     /// Games matching the filter, out of all of them.
     pub fn filtered_count(&self) -> usize {
-        self.lib.games.iter().filter(|g| self.filter.matches(g, &self.state)).count()
+        (0..self.lib.games.len())
+            .filter(|&g| self.visible(g) && self.filter.matches(&self.lib.games[g], &self.state))
+            .count()
     }
 
     /// The on-screen keyboard: d-pad moves, A types, X deletes, Y adds a space, B or ✓ closes it
@@ -813,7 +951,7 @@ impl App {
             });
             scored.into_iter().map(|(_, i)| i).collect()
         };
-        results.retain(|&g| self.filter.matches(&self.lib.games[g], &self.state));
+        results.retain(|&g| self.visible(g) && self.filter.matches(&self.lib.games[g], &self.state));
         if let Some(s) = &mut self.search {
             s.results = results;
         }

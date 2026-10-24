@@ -92,7 +92,7 @@ phase 2.
 - ✓ **Sorting** by name, last played, most played or year. Available from the Start menu and a key, and
   remembered per system.
 - ✓ **Continue playing**: optionally start with the last game you played selected.
-- **Hide a game** with the controller.
+- ✓ **Hide a game** with the controller.
 - **Alternate emulators**: several commands per system, ES-DE style (Beetle PSX or DuckStation, say),
   with one picked per game from a menu. ES-DE's labelled commands provide these for free.
 - **Your own tags and collections**, like "couch co-op" or "backlog". Assign them with the controller

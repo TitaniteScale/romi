@@ -10,6 +10,7 @@ mod init;
 mod launch;
 mod library;
 mod meta;
+mod overrides;
 mod session;
 mod sort;
 mod state;
