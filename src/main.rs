@@ -5,6 +5,7 @@ mod config;
 mod cover;
 mod filter;
 mod gamepad;
+mod init;
 mod launch;
 mod library;
 mod meta;
@@ -32,10 +33,10 @@ use std::time::{Duration, Instant};
 fn main() {
     cli::complete();
     let (command, cfg_path) = cli::parse();
-    let result = load_config(&cfg_path).and_then(|cfg| match command {
-        Some(command) => cli::run(command, &cfg, &cfg_path),
-        None => run(cfg, cfg_path),
-    });
+    let result = match command {
+        Some(command) => cli::run(command, &cfg_path),
+        None => cli::load_config(&cfg_path).and_then(|cfg| run(cfg, cfg_path)),
+    };
     if let Err(e) = result {
         let code = match e.downcast_ref::<cli::Exit>() {
             Some(exit) => exit.code,
@@ -121,10 +122,6 @@ fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, rx: &Receiver<PadEv
         }
     }
     Ok(())
-}
-
-fn load_config(path: &std::path::Path) -> Result<config::Config> {
-    config::load(path).map_err(|e| cli::Exit { code: cli::exit::CONFIG, message: format!("{e:#}") }.into())
 }
 
 /// Hands the terminal to a command, then takes it back.

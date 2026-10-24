@@ -15,7 +15,7 @@ use serde::Serialize;
 use std::ffi::OsStr;
 use std::io::{Write, stdout};
 use std::os::unix::process::ExitStatusExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ExitStatus};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
@@ -131,6 +131,25 @@ pub enum Command {
         /// Print the outcome (or with --dry-run, the command) as JSON
         #[arg(long)]
         json: bool,
+    },
+    /// Find your ROM folders and emulators, and write a config for them
+    Init {
+        /// Where your ROM folders are (found automatically if not given)
+        #[arg(long, value_name = "DIR")]
+        roms: Option<PathBuf>,
+        /// Print the generated config instead of writing anything
+        #[arg(long)]
+        print: bool,
+        /// Write without asking
+        #[arg(long, short)]
+        yes: bool,
+        /// Folder with ES-DE's es_systems.xml and es_find_rules.xml (found automatically when
+        /// ES-DE is installed)
+        #[arg(long, value_name = "DIR")]
+        esde: Option<PathBuf>,
+        /// Use romi's built-in system list even if ES-DE is installed
+        #[arg(long, conflicts_with = "esde")]
+        no_esde: bool,
     },
     /// Show the games running right now, started from the TUI or `romi play`
     Status {
@@ -261,8 +280,19 @@ fn exit_with(e: clap::Error) -> ! {
     std::process::exit(if e.use_stderr() { exit::USAGE } else { 0 })
 }
 
-pub fn run(command: Command, cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
+/// Loads the config, writing the default one if there's none yet.
+pub fn load_config(path: &Path) -> Result<Config> {
+    config::load(path).or_else(|e| fail(exit::CONFIG, format!("{e:#}")))
+}
+
+pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
+    // init works without a config (that's what it's for), so it mustn't make the default one.
+    if let Command::Init { roms, print, yes, esde, no_esde } = command {
+        return init(cfg_path, roms, print, yes, esde, no_esde);
+    }
+    let cfg = &load_config(cfg_path)?;
     match command {
+        Command::Init { .. } => unreachable!(),
         Command::Check => check(cfg, cfg_path),
         Command::List { filters, json } => list(cfg, &filters, json),
         Command::Info { game, system, json } => info(cfg, &game, system.as_deref(), json),
@@ -593,6 +623,108 @@ fn wait_for_game(child: &mut Child) -> std::io::Result<ExitStatus> {
     }
 }
 
+// ---- init ----
+
+fn init(
+    cfg_path: &Path,
+    roms: Option<PathBuf>,
+    print: bool,
+    yes: bool,
+    esde: Option<PathBuf>,
+    no_esde: bool,
+) -> Result<()> {
+    let existing = crate::init::existing_config(cfg_path);
+    if cfg_path.exists() && existing.is_none() {
+        return fail(exit::CONFIG, format!("{} can't be read; fix it first", app::tilde(cfg_path)));
+    }
+    let catalog = if no_esde {
+        crate::init::Catalog::builtin()
+    } else {
+        match (crate::init::Catalog::esde(esde.as_deref()), &esde) {
+            (Some(c), _) => c,
+            (None, Some(dir)) => return fail(exit::USAGE, format!("no ES-DE system list in {}", dir.display())),
+            (None, None) => crate::init::Catalog::builtin(),
+        }
+    };
+    let existing_cfg = existing.as_ref().map(|(_, cfg)| cfg);
+    let Some(roms_dir) = crate::init::find_roms_dir(roms.as_deref(), existing_cfg) else {
+        return fail(exit::NOT_FOUND, "couldn't find your ROMs; say where with --roms DIR");
+    };
+    if !roms_dir.is_dir() {
+        return fail(exit::NOT_FOUND, format!("{} isn't a folder", roms_dir.display()));
+    }
+    let report = crate::init::scan(&catalog, &roms_dir, existing_cfg);
+    let generated = crate::init::render(&report);
+    if print {
+        eprint!("{}", crate::init::summary(&report));
+        print!("{generated}");
+        return Ok(());
+    }
+    print!("{}", crate::init::summary(&report));
+    let already_included =
+        existing.as_ref().is_some_and(|(_, cfg)| cfg.include.iter().any(|i| i == crate::init::INCLUDE_FILE));
+    if existing.is_some()
+        && !already_included
+        && !report.findings.iter().any(|f| matches!(f, crate::init::Finding::New { .. }))
+    {
+        println!("\nNothing new to add, so your config is unchanged.");
+        return Ok(());
+    }
+
+    let include_path = cfg_path.parent().unwrap_or(Path::new(".")).join(crate::init::INCLUDE_FILE);
+    let (main, plan) = match &existing {
+        Some((raw, cfg)) => match crate::init::add_include(raw, cfg) {
+            Some(text) if text == *raw => (None, format!("write {}", app::tilde(&include_path))),
+            Some(text) => {
+                let plan = format!("write {} and include it from {}", app::tilde(&include_path), app::tilde(cfg_path));
+                (Some(text), plan)
+            }
+            None => {
+                let msg = format!(
+                    "{} already includes other files; add \"{}\" to its \"include\" list, then run init again",
+                    app::tilde(cfg_path),
+                    crate::init::INCLUDE_FILE
+                );
+                return fail(exit::CONFIG, msg);
+            }
+        },
+        None => {
+            let plan = format!("write {} and a new {}", app::tilde(&include_path), app::tilde(cfg_path));
+            (Some(crate::init::fresh_config(&roms_dir)), plan)
+        }
+    };
+    if !yes {
+        use std::io::IsTerminal;
+        if !std::io::stdin().is_terminal() {
+            return fail(exit::USAGE, "pass --yes to write without asking, or --print to see the config");
+        }
+        print!("\nThis will {plan}. Go ahead? [Y/n] ");
+        stdout().flush()?;
+        let mut answer = String::new();
+        std::io::stdin().read_line(&mut answer)?;
+        if answer.trim().to_lowercase().starts_with('n') {
+            println!("Nothing written.");
+            return Ok(());
+        }
+    }
+    if let Some(dir) = cfg_path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    std::fs::write(&include_path, generated)?;
+    if let Some(text) = main {
+        std::fs::write(cfg_path, text)?;
+    }
+    // Catch anything that would stop romi from starting now, rather than the next time it does.
+    let cfg = load_config(cfg_path)?;
+    let lib = Library::load(&cfg);
+    println!(
+        "\nDone: {} games in {} systems. Run `romi` to browse them, or `romi check` for details.",
+        lib.games.len(),
+        lib.systems.len()
+    );
+    Ok(())
+}
+
 // ---- status ----
 
 fn status(json: bool) -> Result<()> {
@@ -631,21 +763,23 @@ fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
     println!("config  {}", app::tilde(cfg_path));
     println!("roms    {}\n", cfg.roms_dir);
     let roms = config::expand_path(&cfg.roms_dir);
+    let width = lib.systems.iter().map(|s| s.name.chars().count()).max().unwrap_or(0).max(24);
+    let games = |n: usize| format!("{n:>4} game{}", if n == 1 { " " } else { "s" });
     for sys in &cfg.systems {
         let dir = sys.dir.as_deref().unwrap_or(&sys.id);
         let (mark, detail) = match lib.systems.iter().find(|s| s.id == sys.id) {
             Some(s) => match &s.problem {
-                Some(p) => ("!", format!("{:>4} games  {p}", s.games.len())),
-                None => ("✓", format!("{:>4} games", s.games.len())),
+                Some(p) => ("!", format!("{}  {p}", games(s.games.len()))),
+                None => ("✓", games(s.games.len())),
             },
             None if !roms.join(dir).is_dir() && !config::expand_path(dir).is_dir() => ("-", "no folder".into()),
-            None => ("-", "   0 games".into()),
+            None => ("-", games(0)),
         };
-        println!("  {mark} {:<24} {detail}", sys.name);
+        println!("  {mark} {:<width$} {}", sys.name, detail.trim_end());
     }
     for s in &lib.systems {
         if !cfg.systems.iter().any(|c| c.id == s.id) {
-            println!("  ✓ {:<24} {:>4} games", s.name, s.games.len());
+            println!("  ✓ {:<width$} {}", s.name, games(s.games.len()).trim_end());
         }
     }
     if cfg.steam.enabled && steam::find_steam_dir(cfg.steam.dir.as_deref()).is_none() {

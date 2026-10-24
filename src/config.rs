@@ -28,6 +28,44 @@ pub struct Config {
     pub steam: SteamConfig,
     pub art: ArtConfig,
     pub metadata: MetadataConfig,
+    /// More config files whose systems, games and vars are added to this one's (see `Include`).
+    /// Relative paths are relative to this file's folder.
+    pub include: Vec<String>,
+}
+
+/// What an included file may contain. `romi init` writes its findings to one, so they stay
+/// apart from what you write by hand. Everything here only fills gaps: a system or var that the
+/// main config also defines is the main config's.
+#[derive(Debug, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Include {
+    pub vars: HashMap<String, String>,
+    pub bios_dirs: Vec<String>,
+    pub systems: Vec<SystemConfig>,
+    pub games: Vec<GameConfig>,
+}
+
+impl Config {
+    fn merge(&mut self, inc: Include) {
+        for (k, v) in inc.vars {
+            self.vars.entry(k).or_insert_with(|| expand_tilde(&v));
+        }
+        for dir in inc.bios_dirs {
+            if !self.bios_dirs.contains(&dir) {
+                self.bios_dirs.push(dir);
+            }
+        }
+        for sys in inc.systems {
+            if !self.systems.iter().any(|s| s.id == sys.id) {
+                self.systems.push(sys);
+            }
+        }
+        for game in inc.games {
+            if !self.games.iter().any(|g| g.name == game.name) {
+                self.games.push(game);
+            }
+        }
+    }
 }
 
 impl Default for Config {
@@ -45,6 +83,7 @@ impl Default for Config {
             steam: SteamConfig::default(),
             art: ArtConfig::default(),
             metadata: MetadataConfig::default(),
+            include: Vec::new(),
         }
     }
 }
@@ -100,7 +139,7 @@ pub struct SystemConfig {
     pub overrides: HashMap<String, Override>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum BiosFile {
     One(String),
@@ -312,7 +351,17 @@ pub fn load(path: &Path) -> Result<Config> {
             .with_context(|| format!("writing default config to {}", path.display()))?;
     }
     let raw = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
-    parse(&raw).with_context(|| format!("parsing {}", path.display()))
+    let mut cfg = parse(&raw).with_context(|| format!("parsing {}", path.display()))?;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    for inc in cfg.include.clone() {
+        let inc_path = dir.join(expand_path(&inc));
+        let raw = std::fs::read_to_string(&inc_path)
+            .with_context(|| format!("reading {} (included from {})", inc_path.display(), path.display()))?;
+        let stripped = json_comments::StripComments::new(raw.as_bytes());
+        let included = serde_json::from_reader(stripped).with_context(|| format!("parsing {}", inc_path.display()))?;
+        cfg.merge(included);
+    }
+    Ok(cfg)
 }
 
 pub fn parse(raw: &str) -> Result<Config> {
@@ -376,6 +425,45 @@ mod tests {
     fn default_config_parses() {
         let cfg = parse(DEFAULT_CONFIG).unwrap();
         assert!(!cfg.systems.is_empty());
+    }
+
+    #[test]
+    fn includes_fill_gaps_only() {
+        let dir = std::env::temp_dir().join(format!("romi-include-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let main = r#"{
+            "include": ["found.jsonc"],
+            "vars": { "cores": "/mine" },
+            "systems": [{ "id": "gba", "name": "Mine", "extensions": ["gba"], "command": "mgba {rom}" }]
+        }"#;
+        let found = r#"{
+            // written by romi init
+            "vars": { "cores": "/found", "extra": "/x" },
+            "bios_dirs": ["~/bios"],
+            "systems": [
+                { "id": "gba", "name": "Found", "extensions": ["gba"], "command": "other {rom}" },
+                { "id": "snes", "name": "SNES", "extensions": ["sfc"], "command": "snes9x {rom}" }
+            ]
+        }"#;
+        std::fs::write(dir.join("config.json"), main).unwrap();
+        std::fs::write(dir.join("found.jsonc"), found).unwrap();
+        let cfg = load(&dir.join("config.json")).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(cfg.vars["cores"], "/mine");
+        assert_eq!(cfg.vars["extra"], "/x");
+        assert!(cfg.bios_dirs.contains(&"~/bios".to_string()));
+        let names: Vec<&str> = cfg.systems.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["Mine", "SNES"]);
+    }
+
+    #[test]
+    fn missing_include_is_an_error() {
+        let dir = std::env::temp_dir().join(format!("romi-include-missing-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("config.json"), r#"{ "include": ["nope.jsonc"] }"#).unwrap();
+        let err = load(&dir.join("config.json")).unwrap_err();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(format!("{err:#}").contains("nope.jsonc"));
     }
 
     #[test]

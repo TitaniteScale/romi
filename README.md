@@ -9,6 +9,7 @@ inside the TUI. See the [roadmap](ROADMAP.md).
 
 ```
 romi           # open the launcher
+romi init      # find your ROMs and emulators and write a config for them
 romi check     # what got found, and what looks broken (missing emulators/cores)
 romi list      # every game as TSV: system, name, key (handy for rofi/fzf scripts)
 romi info chrono trigger   # everything romi knows about one game
@@ -86,7 +87,26 @@ appear; existing ones won't be renamed or removed.
 
 ```
 cargo install --path . --root ~/.local
+romi init
 ```
+
+`romi init` looks for your ROM folders (the one set in ES-DE, `~/ROMs`, `~/roms`,
+`~/Emulation/roms`, `~/RetroPie/roms`, or `--roms DIR`) and works out which system each folder is
+for, by its name or else by its file types. It then picks an emulator you have installed for each
+one. When ES-DE is installed it uses ES-DE's list of about 200 systems and their emulators,
+otherwise the systems in romi's default config. It shows what it found and asks before writing:
+
+```
+  + gba            Nintendo Game Boy Advance      30 games  mGBA
+  + gc             Nintendo GameCube              23 games  Dolphin (Standalone)
+  ! xbox360        Microsoft Xbox 360              3 games  no emulator installed (ES-DE knows: xenia)
+  ? notes          not a system romi knows
+```
+
+What it finds goes in `init.jsonc` next to your config, which your config includes. Rerun init
+after installing an emulator or adding a folder: it replaces `init.jsonc` and nothing else, and
+systems you've set up in `config.json` take priority. `--print` shows the result without writing;
+`--yes` skips the question.
 
 ## Controls
 
@@ -118,8 +138,12 @@ detached Steam game won't scroll the list behind it.
 
 ## Config
 
-`~/.config/romi/config.json` (or `$ROMI_CONFIG`). Comments are allowed. A default is written on first
-run; see [`default-config.jsonc`](default-config.jsonc) for every option.
+`~/.config/romi/config.json` (or `$ROMI_CONFIG`). Comments are allowed. `romi init` writes one for
+you; otherwise a default is written on first run. See [`default-config.jsonc`](default-config.jsonc)
+for every option.
+
+`"include": ["other.jsonc"]` adds the systems, games, vars and BIOS folders of other files
+(relative to the config's folder). Anything the main config defines itself wins.
 
 ```jsonc
 {
@@ -251,6 +275,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
+| `src/init.rs`     | `romi init`: ES-DE's system list, finding emulators, writing init.jsonc |
 | `src/cli.rs`      | the command line: arguments, commands, completions, exit codes   |
 | `src/session.rs`  | recording a game's start and end, running games, background play |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |

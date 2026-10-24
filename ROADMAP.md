@@ -59,22 +59,21 @@ Built in this order, one commit each:
 
 ## 2. `romi init`
 
-Today the first run writes a default config and leaves the rest to you. `romi init` should find what's
-on the machine and write a config that works.
+`romi init` finds what's on the machine and writes a config that works.
 
-- **Find ROM folders**: `~/ROMs`, `~/roms`, `~/Emulation/roms` (EmuDeck), `~/RetroPie/roms`, and the ROM
-  directory set in ES-DE. Work out each folder's system from its name, then from its file extensions.
-- **Find emulators**: programs on PATH, Flatpaks (`flatpak list --app`), and RetroArch cores in
-  `~/.config/retroarch/cores` and `/usr/lib/libretro`.
-- **Use ES-DE's system definitions when ES-DE is installed.** Its `es_systems.xml` describes about 195
-  systems, with their file extensions and a labelled command for each emulator. `es_find_rules.xml`
-  maps those commands to programs and Flatpaks. When ES-DE isn't there, fall back to a smaller table
-  built into romi.
-- **BIOS**: fill in `"bios"` for systems that need it and report what's missing, the way `romi check`
-  does.
-- **Never overwrite your config.** Generated systems go in their own file, which needs an `"include"`
-  option or a `config.d/` folder. Then `init` can be rerun to pick up new systems and emulators without
-  touching your edits. `--print` writes to stdout instead, and `--yes` skips the questions for scripts.
+- ✓ **Find ROM folders**: the one set in ES-DE, `~/ROMs`, `~/roms`, `~/Emulation/roms` (EmuDeck),
+  `~/RetroPie/roms`. Each folder's system comes from its name (including common alternates like `scd`
+  and `ps1`), or else from its file extensions.
+- ✓ **Find emulators**: ES-DE's find rules cover programs on PATH, Flatpaks, AppImages, and RetroArch
+  cores in all the usual places.
+- ✓ **Use ES-DE's system definitions when ES-DE is installed**: about 200 systems, each with a
+  labelled command per emulator. The first one that's installed wins, and the others are noted in the
+  generated file. Without ES-DE, the systems in romi's default config stand in.
+- ✓ **BIOS**: `"bios"` is filled in for the systems that need it, so `romi check` reports what's
+  missing.
+- ✓ **Never overwrite your config.** Generated systems go in `init.jsonc`, which the config includes
+  (`"include"` is a general option now). Rerunning init replaces only that file. `--print` writes to
+  stdout instead, and `--yes` skips the question.
 - **First run in the TUI**: when there's no config, walk through the same steps in a wizard that works
   with a controller, instead of writing the default.
 - **`romi add <path>`** adds one game, script or port to `"games"`, guessing `cwd` from the path.
