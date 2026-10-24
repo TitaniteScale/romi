@@ -89,9 +89,9 @@ phase 2.
 
 - ✓ **Multi-disc games as one entry.** "Mr. Bones (Disc 1)" and "(Disc 2)" become one game, launched
   through a generated `.m3u` so the emulator can swap discs.
-- **Sorting** by name, last played, most played or year. Available from the Start menu and a key, and
+- ✓ **Sorting** by name, last played, most played or year. Available from the Start menu and a key, and
   remembered per system.
-- **Continue playing**: optionally start with the last game you played selected.
+- ✓ **Continue playing**: optionally start with the last game you played selected.
 - **Hide a game** with the controller.
 - **Alternate emulators**: several commands per system, ES-DE style (Beetle PSX or DuckStation, say),
   with one picked per game from a menu. ES-DE's labelled commands provide these for free.

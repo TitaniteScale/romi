@@ -3,6 +3,7 @@
 use crate::app::{App, Level, MENU, OSK, PadState, Pane, ViewKind};
 use crate::cover::Cover;
 use crate::filter::ROWS as FILTER_ROWS;
+use crate::sort::Sort;
 use crate::state::now;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect, Size};
@@ -156,9 +157,13 @@ fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .enumerate()
         .map(|(i, &item)| {
             let label = match item {
-                "Details pane" if app.show_details => "Hide details",
-                "Details pane" => "Show details",
-                other => other,
+                "Details pane" if app.show_details => "Hide details".into(),
+                "Details pane" => "Show details".into(),
+                "Sort" => match app.sort() {
+                    Some(sort) => format!("Sort: {}", sort.label()),
+                    None => "Sort: newest first".into(),
+                },
+                other => other.to_string(),
             };
             let style = if i == sel { theme.selected(true) } else { Style::new() };
             Line::from(Span::styled(format!("  {label:<20}"), style))
@@ -196,7 +201,7 @@ fn draw_osk(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     f.render_widget(Paragraph::new(lines).block(theme.block(" Search ", true)), rect);
 }
 
-fn draw_flash(f: &mut Frame, theme: &Theme, area: Rect, letter: char) {
+fn draw_flash(f: &mut Frame, theme: &Theme, area: Rect, letter: &str) {
     let rect = centered(area, 9, 5);
     f.render_widget(Clear, rect);
     let text = Line::from(Span::styled(letter.to_string(), Style::new().fg(theme.accent).bold())).centered();
@@ -264,6 +269,11 @@ fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         (None, Some(v)) => format!(" {}", v.name),
         (None, None) => String::new(),
     };
+    // Only orders other than the usual one are worth a label.
+    let usual = matches!(app.current_view().map(|v| &v.kind), Some(ViewKind::Favorites)).then_some(Sort::Added);
+    if let Some(sort) = app.sort().filter(|&s| s != usual.unwrap_or(Sort::Name)) {
+        title.push_str(&format!(" · by {}", sort.label()));
+    }
     for label in app.filter.labels() {
         title.push_str(&format!(" · {label}"));
     }

@@ -11,6 +11,7 @@ mod launch;
 mod library;
 mod meta;
 mod session;
+mod sort;
 mod state;
 mod steam;
 mod titles;

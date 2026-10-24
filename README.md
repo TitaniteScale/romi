@@ -150,9 +150,16 @@ before adding it to `games.jsonc`, which your config includes. `--print` shows i
 | `d`               |                 | toggle details pane                             |
 | `/`               | Select          | fuzzy search everything                         |
 | `F`               | R3              | filter by genre, players, decade, played        |
-| `m`               | Start / Guide   | menu: search, filter, random, details, reload, quit |
+| `s`               | (menu)          | sort: name, last played, most played, year      |
+| `m`               | Start / Guide   | menu: search, filter, sort, random, details, reload, quit |
 | `ctrl-r`          |                 | reload config                                   |
 | `q`               |                 | quit                                            |
+
+**Sorting** is remembered per system. Favorites can also go in the order you added them (their
+default), and Recent is always newest first. Sorted by year, LT/RT jump between years instead of
+letters; sorted by play, they page. From the Start menu, A on Sort keeps trying the next order.
+Set `"start_on": "last_played"` to start on the last game you played, in its system, instead of
+wherever you left off.
 
 Searching with a controller brings up an on-screen keyboard: the d-pad picks a key, A types, X
 deletes, Y adds a space, and B (or ✓) closes it, leaving the results to browse. B again leaves the
@@ -231,7 +238,7 @@ override for the game goes under the playlist's name or disc 1's. If a folder al
 `.m3u`, the discs it lists are left to it. Note that RetroArch names save files after what it
 launched, so saves made by booting a disc directly are under that disc's name.
 
-State (favorites, recents, play time, last selection) lives in `~/.local/state/romi/state.json`.
+State (favorites, recents, play time, last selection, sort orders) lives in `~/.local/state/romi/state.json`.
 
 ## Game info and filters
 
@@ -311,6 +318,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/cover.rs`    | showing covers: background decode/resize, small render cache     |
 | `src/meta.rs`     | game info: RetroArch databases, Skyscraper, checksums, genres    |
 | `src/filter.rs`   | filtering by genre, players, decade, played                      |
+| `src/sort.rs`     | sort orders for systems and favorites                            |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
 | `src/init.rs`     | `romi init`: ES-DE's system list, finding emulators, writing init.jsonc |
 | `src/add.rs`      | `romi add`: guessing a game entry from a path, appending to games.jsonc |

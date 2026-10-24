@@ -25,6 +25,8 @@ pub struct Config {
     pub bios_dirs: Vec<String>,
     /// Extra `{placeholders}` usable in any command, cwd or env value.
     pub vars: HashMap<String, String>,
+    /// Which game is selected when romi starts.
+    pub start_on: StartOn,
     pub theme: Theme,
     pub controller: ControllerConfig,
     pub systems: Vec<SystemConfig>,
@@ -35,6 +37,16 @@ pub struct Config {
     /// More config files whose systems, games and vars are added to this one's (see `Include`).
     /// Relative paths are relative to this file's folder.
     pub include: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartOn {
+    /// Wherever you were when romi last closed.
+    #[default]
+    LastSelected,
+    /// The last game you played, in its system.
+    LastPlayed,
 }
 
 /// What an included file may contain. `romi init` writes its findings to one, so they stay
@@ -81,6 +93,7 @@ impl Default for Config {
             esde_dir: None,
             bios_dirs: vec!["~/.config/retroarch/system".into()],
             vars: HashMap::new(),
+            start_on: StartOn::default(),
             theme: Theme::default(),
             controller: ControllerConfig::default(),
             systems: Vec::new(),

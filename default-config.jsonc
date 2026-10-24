@@ -32,6 +32,10 @@
     "cores": "~/.config/retroarch/cores"
   },
 
+  // Where romi starts: "last_selected" (where you left off) or "last_played" (the last game you
+  // played, in its system).
+  "start_on": "last_selected",
+
   "theme": {
     // Terminal palette names keep romi in sync with your terminal theme:
     // black red green yellow blue magenta cyan white, the bright_* variants, or "default".

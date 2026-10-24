@@ -1,5 +1,6 @@
 //! Things romi remembers between runs: favorites, history, play time, last selection.
 
+use crate::sort::Sort;
 use rustix::fs::{FlockOperation, flock};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -20,6 +21,8 @@ pub struct State {
     pub last_played: HashMap<String, u64>,
     pub selected_system: Option<String>,
     pub selected_game: Option<String>,
+    /// How each view is sorted, by view id, when it isn't the default.
+    pub sort: HashMap<String, Sort>,
 }
 
 impl State {
@@ -145,6 +148,7 @@ mod tests {
             last_played: [("psx:a (Disc 2).chd".into(), 200), ("psx:a.m3u".into(), 100)].into(),
             selected_system: None,
             selected_game: Some("psx:a (Disc 2).chd".into()),
+            sort: HashMap::new(),
         };
         assert!(s.mentions("psx:a (Disc 2).chd"));
         s.rename_key("psx:a (Disc 2).chd", "psx:a.m3u");

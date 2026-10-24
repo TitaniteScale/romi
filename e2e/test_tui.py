@@ -104,3 +104,37 @@ def test_tui_picks_up_changes_when_focused(start, sandbox):
     romi.send("\x1b[O")  # focus lost
     romi.send("\x1b[I")  # and gained
     romi.wait_for("Favorites")
+
+
+def test_sorting_is_remembered_per_system(start, sandbox):
+    romi = start()
+    romi.keys("\t")
+    romi.wait_for(lambda: "Chrono Trigger" in romi.selected())
+    text = romi.text()
+    assert text.index("Chrono Trigger") < text.index("Super Metroid")
+    romi.keys("sss")
+    romi.wait_for("Super Nintendo · by year")
+    text = romi.text()
+    assert text.index("Super Metroid") < text.index("Chrono Trigger")
+    assert "Chrono Trigger" in romi.selected()
+    eventually(lambda: sandbox.state().get("sort") == {"snes": "year"})
+    romi.keys("s")
+    romi.wait_for(lambda: "by year" not in romi.text())
+    eventually(lambda: sandbox.state().get("sort") == {})
+
+
+def test_sorting_by_last_played(start, sandbox):
+    sandbox.write_state({"last_played": {"gba:Metroid Fusion (USA).gba": 1700000000}})
+    romi = start()
+    romi.keys("s")
+    romi.wait_for("Game Boy Advance · by last played")
+    text = romi.text()
+    assert text.index("Metroid Fusion") < text.index("Advance Wars")
+
+
+def test_start_on_last_played(start, sandbox):
+    sandbox.write_config(dict(CONFIG, start_on="last_played"))
+    sandbox.write_state({"recent": ["snes:Chrono Trigger (USA).sfc"], "selected_system": "gba",
+                         "selected_game": "gba:Metroid Fusion (USA).gba"})
+    romi = start()
+    assert "Chrono Trigger" in romi.selected()

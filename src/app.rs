@@ -7,6 +7,7 @@ use crate::gamepad::{PadAction, PadEvent};
 use crate::launch::Prepared;
 use crate::library::Library;
 use crate::session::Session;
+use crate::sort::Sort;
 use crate::state::State;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
@@ -23,7 +24,7 @@ const STATUS_TTL: Duration = Duration::from_secs(6);
 const FLASH_TTL: Duration = Duration::from_millis(700);
 
 /// The controller menu (Start). Everything that would otherwise need a keyboard lives here.
-pub const MENU: &[&str] = &["Search", "Filter", "Random game", "Details pane", "Reload config", "Quit romi"];
+pub const MENU: &[&str] = &["Search", "Filter", "Sort", "Random game", "Details pane", "Reload config", "Quit romi"];
 
 /// On-screen keyboard for searching with a controller.
 pub const OSK: [[&str; 13]; 3] = [
@@ -115,6 +116,7 @@ enum Op {
     Menu,
     Search,
     Filter,
+    Sort,
 }
 
 pub struct App {
@@ -138,8 +140,8 @@ pub struct App {
     pub menu: Option<usize>,
     /// Cursor (row, column) while the on-screen keyboard is open.
     pub osk: Option<(usize, usize)>,
-    /// Letter shown briefly after a letter jump.
-    flash: Option<(char, Instant)>,
+    /// Letter (or year) shown briefly after jumping to it.
+    flash: Option<(String, Instant)>,
     pub filter: Filter,
     pub filter_options: filter::Options,
     /// Selected row while the filter panel is open.
@@ -202,7 +204,13 @@ impl App {
         app.load_metadata();
         app.filter_options = filter::Options::from(&app.lib);
         app.rebuild_views();
-        let (sys, game) = (app.state.selected_system.clone(), app.state.selected_game.clone());
+        let (mut sys, mut game) = (app.state.selected_system.clone(), app.state.selected_game.clone());
+        if app.cfg.start_on == config::StartOn::LastPlayed
+            && let Some(g) = app.state.recent.first().and_then(|k| app.lib.find(k))
+        {
+            sys = Some(app.lib.system_of(g).id.clone());
+            game = Some(app.lib.games[g].key.clone());
+        }
         app.select(sys.as_deref(), game.as_deref());
         for w in std::mem::take(&mut app.lib.warnings) {
             app.set_status(Level::Warn, w);
@@ -231,7 +239,8 @@ impl App {
         let keep = |g: &usize| self.filter.matches(&self.lib.games[*g], &self.state);
         let resolve = |keys: &[String]| keys.iter().filter_map(|k| self.lib.find(k)).filter(keep).collect::<Vec<_>>();
         let mut views = Vec::new();
-        let favs = resolve(&self.state.favorites);
+        let mut favs = resolve(&self.state.favorites);
+        self.sort_for("@favorites", true).apply(&self.lib, &self.state, &mut favs);
         if !favs.is_empty() {
             views.push(View {
                 kind: ViewKind::Favorites,
@@ -245,13 +254,50 @@ impl App {
             views.push(View { kind: ViewKind::Recent, id: "@recent".into(), name: "Recent".into(), games: recent });
         }
         for (i, s) in self.lib.systems.iter().enumerate() {
-            let games: Vec<usize> = s.games.iter().copied().filter(keep).collect();
+            let mut games: Vec<usize> = s.games.iter().copied().filter(keep).collect();
+            self.sort_for(&s.id, false).apply(&self.lib, &self.state, &mut games);
             // While filtering, systems with nothing left would just be noise.
             if !games.is_empty() || !self.filter.is_active() {
                 views.push(View { kind: ViewKind::System(i), id: s.id.clone(), name: s.name.clone(), games });
             }
         }
         self.views = views;
+    }
+
+    fn sort_for(&self, view_id: &str, favorites: bool) -> Sort {
+        self.state.sort.get(view_id).copied().unwrap_or(Sort::options(favorites)[0])
+    }
+
+    /// How the games pane is sorted; None for Recent and search results, which have their own order.
+    pub fn sort(&self) -> Option<Sort> {
+        let view = self.views.get(self.view).filter(|_| self.search.is_none())?;
+        match view.kind {
+            ViewKind::Recent => None,
+            ViewKind::Favorites => Some(self.sort_for(&view.id, true)),
+            ViewKind::System(_) => Some(self.sort_for(&view.id, false)),
+        }
+    }
+
+    /// Switches the current view to its next sort order, and remembers it.
+    fn cycle_sort(&mut self) {
+        let Some(view) = self.views.get(self.view) else { return };
+        let favorites = view.kind == ViewKind::Favorites;
+        if view.kind == ViewKind::Recent {
+            self.set_status(Level::Info, "Recent is always newest first");
+            return;
+        }
+        let (id, next) = (view.id.clone(), self.sort_for(&view.id, favorites).next(favorites));
+        self.state = State::update(|s| {
+            if next == Sort::options(favorites)[0] {
+                s.sort.remove(&id);
+            } else {
+                s.sort.insert(id, next);
+            }
+        });
+        if self.search.is_none() {
+            self.rebuild_keeping_selection();
+        }
+        self.set_status(Level::Info, format!("Sorted by {}", next.label()));
     }
 
     /// Rebuilds views while keeping the cursor on the same system and game.
@@ -325,30 +371,39 @@ impl App {
         }
     }
 
-    /// The letter a game is filed under: first letter ignoring "The", or `#` for anything else.
-    fn letter(&self, g: usize) -> char {
+    /// The section a game is filed under: its year when sorted by year, otherwise the first
+    /// letter ignoring "The", or `#` for anything else.
+    fn letter(&self, g: usize) -> String {
+        if self.sort() == Some(Sort::Year) {
+            return self.lib.games[g].meta.year.map_or("?".into(), |y| y.to_string());
+        }
         match self.lib.games[g].sort_key.chars().find(|c| c.is_alphanumeric()) {
-            Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
-            _ => '#',
+            Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase().to_string(),
+            _ => "#".into(),
         }
     }
 
     /// Moves to the first game of the next letter, or back to the start of this one (then the
-    /// previous letter), like a phone's contact list.
+    /// previous letter), like a phone's contact list. Lists sorted by play have no sections, so
+    /// this pages through them instead.
     fn jump_letter(&mut self, forward: bool) {
         let list = self.list().to_vec();
         if list.is_empty() {
             return;
         }
         self.focus = Pane::Games;
+        if self.sort().is_some_and(|s| !s.has_sections()) {
+            let page = self.page.max(1) as isize;
+            return self.move_cursor(if forward { page } else { -page });
+        }
         let here = self.letter(list[self.game]);
-        let group_start = |end: usize, l: char| (0..=end).rev().take_while(|&i| self.letter(list[i]) == l).last();
+        let group_start = |end: usize, l: &str| (0..=end).rev().take_while(|&i| self.letter(list[i]) == l).last();
         let target = if forward {
             (self.game + 1..list.len()).find(|&i| self.letter(list[i]) != here)
         } else {
-            match group_start(self.game, here) {
+            match group_start(self.game, &here) {
                 Some(start) if start < self.game => Some(start),
-                Some(start) if start > 0 => group_start(start - 1, self.letter(list[start - 1])),
+                Some(start) if start > 0 => group_start(start - 1, &self.letter(list[start - 1])),
                 _ => None,
             }
         };
@@ -358,8 +413,8 @@ impl App {
         self.flash = Some((self.letter(list[self.game]), Instant::now()));
     }
 
-    pub fn flash(&self) -> Option<char> {
-        self.flash.filter(|(_, at)| at.elapsed() < FLASH_TTL).map(|(c, _)| c)
+    pub fn flash(&self) -> Option<&str> {
+        self.flash.as_ref().filter(|(_, at)| at.elapsed() < FLASH_TTL).map(|(s, _)| s.as_str())
     }
 
     // ---- status ----
@@ -498,6 +553,7 @@ impl App {
             KeyCode::Char('d') => Op::ToggleDetails,
             KeyCode::Char('m') => Op::Menu,
             KeyCode::Char('F') => Op::Filter,
+            KeyCode::Char('s') => Op::Sort,
             _ => return,
         };
         self.apply(op);
@@ -603,6 +659,7 @@ impl App {
             Op::PrevLetter => self.jump_letter(false),
             Op::Menu => self.menu = Some(0),
             Op::Filter => self.filter_panel = Some(0),
+            Op::Sort => self.cycle_sort(),
             Op::Search => {
                 if self.search.is_none() {
                     self.start_search();
@@ -623,6 +680,11 @@ impl App {
                 match MENU[i] {
                     "Search" => self.apply(Op::Search),
                     "Filter" => self.apply(Op::Filter),
+                    // Stays open, so A again tries the next order.
+                    "Sort" => {
+                        self.cycle_sort();
+                        self.menu = Some(i);
+                    }
                     "Random game" => self.apply(Op::Random),
                     "Details pane" => self.apply(Op::ToggleDetails),
                     "Reload config" => self.reload(),
