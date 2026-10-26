@@ -3,7 +3,7 @@
 
 use crate::config::Config;
 use crate::library::Library;
-use crate::ra::{Achievements, Cheevo, Info};
+use crate::ra::{Achievements, Cheevo, Info, Source};
 use std::sync::mpsc::Receiver;
 
 /// Which games the list shows, by how far along you are.
@@ -126,15 +126,29 @@ impl Screen {
     pub fn open_game(&mut self, cfg: &Config, ach: &Achievements, lib: &Library, game: usize) {
         let Some(info) = ach.games.get(&lib.games[game].key) else { return };
         let id = info.id;
-        let rx = crate::ra::credentials(cfg).map(|_| {
+        let spawn = |fetch: Box<dyn FnOnce() -> anyhow::Result<Vec<Cheevo>> + Send>| {
             let (tx, rx) = std::sync::mpsc::channel();
-            let cfg = cfg.clone();
             std::thread::spawn(move || {
-                let _ = tx.send(crate::ra::fetch_game(&cfg, id).map_err(|e| format!("{e:#}")));
+                let _ = tx.send(fetch().map_err(|e| format!("{e:#}")));
             });
             rx
-        });
-        self.open = Some(Open { game, cheevos: crate::ra::cached_game(id), error: None, top: 0, rx });
+        };
+        let (cheevos, rx) = match info.source {
+            Source::RetroAchievements => {
+                let cfg = cfg.clone();
+                let rx = crate::ra::credentials(&cfg).map(|_| spawn(Box::new(move || crate::ra::fetch_game(&cfg, id))));
+                (crate::ra::cached_game(id), rx)
+            }
+            // Steam's own cache has everything but how rare each is, which comes after.
+            Source::Steam => {
+                let dir = crate::steam::find_steam_dir(cfg.steam.dir.as_deref());
+                let local = dir.and_then(|d| crate::steam::achievements(&d, &id.to_string()));
+                let rx =
+                    local.clone().map(|list| spawn(Box::new(move || crate::steam::with_rarity(&id.to_string(), list))));
+                (local, rx)
+            }
+        };
+        self.open = Some(Open { game, cheevos, error: None, top: 0, rx });
     }
 
     /// Picks up a fetched game. Returns true if anything changed.
@@ -160,6 +174,7 @@ mod tests {
 
     fn info(earned: u32, total: u32, award: Option<&str>, supported: bool) -> Info {
         Info {
+            source: crate::ra::Source::RetroAchievements,
             id: 1,
             title: "X".into(),
             total,

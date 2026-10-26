@@ -451,7 +451,7 @@ fn list(cfg: &Config, filters: &Filters, json: bool) -> Result<()> {
     let mut out = stdout().lock();
     if json {
         let mut finder = art::Finder::new(cfg);
-        let ach = crate::ra::Achievements::cached(&lib);
+        let ach = crate::ra::Achievements::cached(cfg, &lib);
         let records: Vec<_> = games.iter().map(|&g| GameJson::new(&lib, g, &state, &ach, &mut finder)).collect();
         serde_json::to_writer_pretty(&mut out, &records)?;
         writeln!(out)?;
@@ -557,7 +557,7 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
     let g = resolve(&lib, query, system)?;
     let state = State::load();
     let mut finder = art::Finder::new(cfg);
-    let ach = crate::ra::Achievements::cached(&lib);
+    let ach = crate::ra::Achievements::cached(cfg, &lib);
     let record = GameJson::new(&lib, g, &state, &ach, &mut finder);
     if json {
         println!("{}", serde_json::to_string_pretty(&record)?);
@@ -1007,7 +1007,14 @@ fn print_suggestions(cfg: &Config, lib: &Library) {
 // ---- achievements ----
 
 fn achievements(cfg: &Config, json: bool) -> Result<()> {
-    if crate::ra::credentials(cfg).is_none() {
+    let lib = Library::load(cfg);
+    // Without RetroAchievements, Steam's own cache may still have something.
+    let ach = if crate::ra::credentials(cfg).is_some() {
+        crate::ra::Achievements::refresh(cfg, &lib).or_else(|e| fail(exit::UNAVAILABLE, format!("{e:#}")))?
+    } else {
+        crate::ra::Achievements::cached(cfg, &lib)
+    };
+    if ach.games.is_empty() && crate::ra::credentials(cfg).is_none() {
         let msg = format!(
             "RetroAchievements isn't set up: add \"retroachievements\": {{ \"username\": \"...\" }} to the config, \
              and put your web API key (retroachievements.org → Settings) in {} or RA_API_KEY",
@@ -1015,8 +1022,6 @@ fn achievements(cfg: &Config, json: bool) -> Result<()> {
         );
         return fail(exit::CONFIG, msg);
     }
-    let lib = Library::load(cfg);
-    let ach = crate::ra::Achievements::refresh(cfg, &lib).or_else(|e| fail(exit::UNAVAILABLE, format!("{e:#}")))?;
     // Games you've started first, furthest along first; then the rest by system and name.
     let mut games: Vec<(usize, &crate::ra::Info)> = lib
         .systems
@@ -1037,11 +1042,8 @@ fn achievements(cfg: &Config, json: bool) -> Result<()> {
     let points: u32 = ok.iter().map(|(_, a)| a.points).sum();
     let started = ok.iter().filter(|(_, a)| a.earned > 0).count();
     let mut out = stdout().lock();
-    writeln!(
-        out,
-        "{} of your games have achievements, worth {points} points; you've earned some in {started}.",
-        ok.len()
-    )?;
+    let points = if points > 0 { format!(", {points} RetroAchievements points") } else { String::new() };
+    writeln!(out, "{} of your games have achievements{points}; you've earned some in {started}.", ok.len())?;
     let row = |out: &mut std::io::StdoutLock, g: usize, text: String| {
         let game = &lib.games[g];
         writeln!(out, "  {:<20} {:<40} {text}", truncate(&game.system, 20), truncate(&game.name, 40))

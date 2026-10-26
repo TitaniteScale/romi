@@ -921,7 +921,13 @@ fn draw_cheevos(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         for c in cheevos.iter().skip(open.top) {
             let earned = c.earned_hardcore.as_ref().or(c.earned.as_ref());
             let mark = if earned.is_some() { Span::styled("✓ ", accent.bold()) } else { Span::raw("· ").dim() };
-            let mut notes = vec![format!("{} points", c.points), format!("{:.0}% of players", c.rarity * 100.0)];
+            let mut notes = Vec::new();
+            if c.points > 0 {
+                notes.push(format!("{} points", c.points));
+            }
+            if c.rarity >= 0.0 {
+                notes.push(format!("{:.0}% of players", c.rarity * 100.0));
+            }
             notes.extend(c.kind.as_ref().map(|k| k.replace('_', " ")));
             if let Some(when) = earned {
                 let mode = if c.earned_hardcore.is_some() { "hardcore, " } else { "" };
@@ -985,7 +991,9 @@ fn draw_cheevos(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 (Some(award), true) => award.replace('-', " "),
                 (None, true) => String::new(),
             };
-            let status = format!("{counts} {:>5} pts  {award:<AWARD$}", a.points);
+            let points =
+                if a.source == crate::ra::Source::Steam { " ".repeat(9) } else { format!("{:>5} pts", a.points) };
+            let status = format!("{counts} {points}  {award:<AWARD$}");
             let filled = (a.earned as usize * BAR).checked_div(a.total as usize).unwrap_or(0).min(BAR);
             let bar = format!("{}{}", "█".repeat(filled), "░".repeat(BAR - filled));
             let system = if system_w > 0 { format!("{:<w$}", game.system, w = system_w) } else { String::new() };
@@ -1000,6 +1008,25 @@ fn draw_cheevos(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         .collect();
     let mut state = ratatui::widgets::ListState::default().with_selected((!rows.is_empty()).then_some(screen.selected));
     f.render_stateful_widget(List::new(items).highlight_style(theme.selected(true)), list, &mut state);
+}
+
+/// A Unix time as a local date and time, like "2026-10-24 12:00:00".
+pub fn fmt_datetime(t: u64) -> String {
+    let tt = t as libc::time_t;
+    // SAFETY: localtime_r only writes the tm it's given.
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    if unsafe { libc::localtime_r(&tt, &mut tm) }.is_null() {
+        return String::new();
+    }
+    format!(
+        "{}-{:02}-{:02} {:02}:{:02}:{:02}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec
+    )
 }
 
 /// A Unix time as a local date, like "Oct 24, 2026".

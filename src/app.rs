@@ -292,7 +292,7 @@ impl App {
     /// Shows the cached RetroAchievements data, and refreshes it off the UI thread when
     /// RetroAchievements is set up (`tick` picks the result up).
     fn load_achievements(&mut self) {
-        self.achievements = crate::ra::Achievements::cached(&self.lib);
+        self.achievements = crate::ra::Achievements::cached(&self.cfg, &self.lib);
         if crate::ra::credentials(&self.cfg).is_none() {
             self.achievements_rx = None;
             return;

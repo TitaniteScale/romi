@@ -46,6 +46,10 @@ fn main() {
         None => cli::load_config(&cfg_path).and_then(|cfg| run(cfg, cfg_path)),
     };
     if let Err(e) = result {
+        // Output piped into something that stopped reading (`romi list | head`) isn't a problem.
+        if e.downcast_ref::<std::io::Error>().is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe) {
+            std::process::exit(0);
+        }
         let code = match e.downcast_ref::<cli::Exit>() {
             Some(exit) => exit.code,
             None => 1,

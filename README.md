@@ -335,6 +335,10 @@ system, Tab (or X) to a status (in progress, not started, finished, or needing a
 when, their points, how rare they are, and which are progression, win conditions or missable.
 They're fetched when you open the game and cached, so they show at once next time.
 
+**Steam achievements** show there too, with no setup: romi reads them from the Steam client's own
+cache (`appcache/stats`), which covers games played on this machine. Hidden ones stay hidden until
+earned, and how rare each is comes from Steam's public percentages when you open the game.
+
 The key goes in `~/.config/romi/retroachievements.key` (`chmod 600` it), or `"key_file"` says
 where; `RA_API_KEY` in the environment beats both. Keeping it out of `config.json` keeps it out of
 your dotfiles. The TUI refreshes your progress when it starts, and `romi achievements` refreshes it

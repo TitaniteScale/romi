@@ -23,10 +23,21 @@ const LIST_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
 /// Your progress comes back in pages of at most this many games.
 const PAGE: usize = 500;
 
-/// What RetroAchievements has for one of your games.
+/// Where a game's achievements come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Source {
+    RetroAchievements,
+    /// The Steam client's local cache, for games played on this machine.
+    Steam,
+}
+
+/// What RetroAchievements (or Steam) has for one of your games.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Info {
-    /// RetroAchievements' game id (retroachievements.org/game/<id>).
+    pub source: Source,
+    /// The game's id there: RetroAchievements' (retroachievements.org/game/<id>), or the Steam
+    /// app id.
     pub id: u64,
     pub title: String,
     /// How many achievements it has, and the points they're worth.
@@ -48,7 +59,10 @@ impl Info {
         if !self.supported {
             return format!("{} achievements, for another version of this ROM ({})", self.total, self.hashes_url());
         }
-        let mut s = format!("{}/{} achievements · {} points", self.earned, self.total, self.points);
+        let mut s = format!("{}/{} achievements", self.earned, self.total);
+        if self.source == Source::RetroAchievements {
+            s.push_str(&format!(" · {} points", self.points));
+        }
         if let Some(award) = &self.award {
             s.push_str(&format!(" · {}", award.replace('-', " ")));
         }
@@ -113,6 +127,9 @@ pub fn credentials(cfg: &Config) -> Option<(String, String)> {
 /// One achievement of a game, as the achievements screen shows it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Cheevo {
+    /// Its id where the source has one that matters (Steam's API name).
+    #[serde(default)]
+    pub key: String,
     pub title: String,
     pub description: String,
     pub points: u32,
@@ -121,7 +138,7 @@ pub struct Cheevo {
     /// When you earned it ("2026-10-24 12:00:00"), in either mode and in hardcore.
     pub earned: Option<String>,
     pub earned_hardcore: Option<String>,
-    /// The share of the game's players who have it, 0 to 1.
+    /// The share of the game's players who have it, 0 to 1; negative when it isn't known.
     pub rarity: f32,
 }
 
@@ -166,6 +183,7 @@ pub fn fetch_game(cfg: &Config, id: u64) -> Result<Vec<Cheevo>> {
     let cheevos: Vec<Cheevo> = list
         .into_iter()
         .map(|a| Cheevo {
+            key: a.id.to_string(),
             title: a.title,
             description: a.description,
             points: a.points,
@@ -239,15 +257,41 @@ fn progress_path() -> PathBuf {
 }
 
 impl Achievements {
-    /// From what's cached, without going online.
-    pub fn cached(lib: &Library) -> Achievements {
+    /// From what's cached, without going online: RetroAchievements' last refresh, and Steam's
+    /// own cache.
+    pub fn cached(cfg: &Config, lib: &Library) -> Achievements {
         let lists = consoles(lib).into_iter().filter_map(|c| Some((c, read_list(c)?))).collect();
         let progress = std::fs::read(progress_path())
             .ok()
             .and_then(|b| serde_json::from_slice::<Vec<Progress>>(&b).ok())
             .unwrap_or_default();
         let hashes = Hashes::load();
-        Achievements::matched(lib, &lists, &progress, |g| hashes.known(lib, g))
+        let mut ach = Achievements::matched(lib, &lists, &progress, |g| hashes.known(lib, g));
+        ach.add_steam(cfg, lib);
+        ach
+    }
+
+    /// Steam games' achievements, from what the Steam client caches.
+    fn add_steam(&mut self, cfg: &Config, lib: &Library) {
+        let Some(dir) = crate::steam::find_steam_dir(cfg.steam.dir.as_deref()) else { return };
+        for game in &lib.games {
+            let Some(appid) = &game.art.appid else { continue };
+            let Some(list) = crate::steam::achievements(&dir, appid) else { continue };
+            let earned = list.iter().filter(|c| c.earned.is_some()).count() as u32;
+            let total = list.len() as u32;
+            let info = Info {
+                source: Source::Steam,
+                id: appid.parse().unwrap_or(0),
+                title: game.name.clone(),
+                total,
+                points: 0,
+                earned,
+                earned_hardcore: 0,
+                award: (earned == total).then(|| "perfect".to_string()),
+                supported: true,
+            };
+            self.games.insert(game.key.clone(), info);
+        }
     }
 
     /// Fetches the game lists that are more than a week old, and your progress, then matches.
@@ -298,7 +342,9 @@ impl Achievements {
         let computed: HashMap<usize, String> =
             (0..lib.games.len()).filter_map(|g| Some((g, hashes.get(lib, g)?))).collect();
         hashes.save();
-        Ok(Achievements::matched(lib, &lists, &progress, |g| computed.get(&g).cloned()))
+        let mut ach = Achievements::matched(lib, &lists, &progress, |g| computed.get(&g).cloned());
+        ach.add_steam(cfg, lib);
+        Ok(ach)
     }
 
     /// Matches the library's games to RetroAchievements' lists, system by system: by hash where
@@ -346,6 +392,7 @@ impl Achievements {
                 let Some(l) = found else { continue };
                 let p = progress.get(&l.id);
                 let info = Info {
+                    source: Source::RetroAchievements,
                     id: l.id,
                     title: l.title.clone(),
                     total: l.num_achievements,
@@ -650,6 +697,7 @@ mod tests {
     #[test]
     fn summaries() {
         let info = Info {
+            source: Source::RetroAchievements,
             id: 1,
             title: "X".into(),
             total: 45,

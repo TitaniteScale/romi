@@ -134,3 +134,54 @@ def test_from_the_game_menu(start, sandbox):
     # Opened on one game, going back closes the screen.
     romi.keys("\x1b")
     romi.wait_for(lambda: "First Strike" not in romi.text() and "Systems" in romi.text())
+
+
+def kv(entries):
+    """Steam's binary KeyValues: (name, value) pairs; dicts nest, str and int are leaves."""
+    out = b""
+    for name, value in entries.items():
+        key = name.encode() + b"\0"
+        if isinstance(value, dict):
+            out += b"\0" + key + kv(value)
+        elif isinstance(value, int):
+            out += b"\x02" + key + value.to_bytes(4, "little", signed=True)
+        else:
+            out += b"\x01" + key + value.encode() + b"\0"
+    return out + b"\x08"
+
+
+def with_steam(sandbox):
+    steam = sandbox.root / "steam"
+    (steam / "steamapps").mkdir(parents=True)
+    (steam / "steamapps/appmanifest_4242.acf").write_text(
+        '"AppState"\n{\n\t"appid"\t\t"4242"\n\t"name"\t\t"Card Game"\n\t"StateFlags"\t\t"4"\n}\n')
+    stats = steam / "appcache/stats"
+    stats.mkdir(parents=True)
+    bits = {
+        "0": {"name": "ACH_A", "display": {"name": {"english": "First Hand"}, "desc": {"english": "Play a hand"}, "hidden": 0}},
+        "1": {"name": "ACH_B", "display": {"name": {"english": "Secret Ending"}, "desc": {"english": "See it"}, "hidden": 1}},
+        "2": {"name": "ACH_C", "display": {"name": {"english": "Full House"}, "desc": {"english": "Get one"}, "hidden": 0}},
+    }
+    (stats / "UserGameStatsSchema_4242.bin").write_bytes(
+        kv({"4242": {"stats": {"1": {"bits": bits, "type": "ACHIEVEMENTS"}}}}) + b"\x08")
+    (stats / "UserGameStats_7_4242.bin").write_bytes(
+        kv({"cache": {"crc": 1, "1": {"data": 0b001, "AchievementTimes": {"0": 1_700_000_000}}}}) + b"\x08")
+    config = json.loads(json.dumps(CONFIG))
+    config["steam"] = {"enabled": True, "dir": str(steam), "command": "true {appid}"}
+    sandbox.write_config(config)
+
+
+def test_steam_achievements_from_its_cache(start, sandbox):
+    with_steam(sandbox)
+    a = achievements(sandbox, "steam:4242")
+    assert (a["source"], a["earned"], a["total"], a["points"], a["award"]) == ("steam", 1, 3, 0, None)
+    # Without RetroAchievements set up, `romi achievements` still lists Steam's.
+    out = run_cli(sandbox, "achievements")
+    assert out.returncode == 0 and "Card Game" in out.stdout and "1/3 achievements" in out.stdout
+    romi = start()
+    romi.keys("A")
+    romi.wait_for("Card Game")
+    romi.keys("\r")
+    romi.wait_for("✓ First Hand")
+    # Hidden ones stay hidden until earned.
+    assert "Hidden achievement" in romi.text() and "Secret Ending" not in romi.text()
