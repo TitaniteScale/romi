@@ -125,12 +125,25 @@ What it finds goes in `init.jsonc` next to your config, which your config includ
 after installing an emulator or adding a folder: it replaces `init.jsonc` and nothing else, and
 systems you've set up in `config.json` take priority. The one exception: if your config's
 `roms_dir` no longer exists, init looks for your ROMs and points `roms_dir` at them. ROMs given
-with `--roms` somewhere other than `roms_dir` get full paths instead, leaving `roms_dir` as it is. `--print` shows the result without writing;
-`--yes` skips the question.
+with `--roms` somewhere other than `roms_dir` get full paths instead, leaving `roms_dir` as it is.
+`--print` shows the result without writing; `--yes` skips the question.
 
 `romi check` uses the same knowledge to suggest fixes: a system whose emulator is gone but which
 something else installed can run (with the command to use), folders with games that aren't in your
 config yet, and folders for systems you have no emulator for.
+
+It also reads the settings of the emulators your games use (RetroArch, PCSX2, Dolphin and melonDS,
+installed or as Flatpaks) and says what would get in the way: RetroAchievements turned off, not
+logged in, or logged in as someone other than the username in your config (when it's set), and no
+controller bound (when romi's controller support is on). It only reads those files; the fix is
+in the emulator, and `romi check` says where:
+
+```
+emulators
+  ✓ RetroArch  RetroAchievements is on, logged in as you
+  ! Dolphin    GameCube port 1 uses the keyboard, not a controller (Controllers → Port 1 → Configure)
+  ! melonDS    no controller buttons are bound (Config → Input and hotkeys)
+```
 
 ### Adding a game that isn't a ROM
 
@@ -349,6 +362,9 @@ where; `RA_API_KEY` in the environment beats both. Keeping it out of `config.jso
 your dotfiles. The TUI refreshes your progress when it starts, and `romi achievements` refreshes it
 and lists your games that have achievements.
 
+romi only shows achievements; the emulator earns them, so each one needs RetroAchievements turned
+on and your login. `romi check` tells you which aren't set up.
+
 Games are matched the way RetroArch does it, by hashing the ROM, for arcade sets (the set name) and
 cartridges (the ROM, minus a copier header, in N64's native byte order), so a game only shows
 achievements if your dump can earn them. When it can't but another version of the game can (often
@@ -482,6 +498,7 @@ clippy, the unit tests and the end-to-end tests on every push.
 | `src/filter.rs`   | filtering by genre, players, decade, played, tag                 |
 | `src/sort.rs`     | sort orders for systems and favorites                            |
 | `src/overrides.rs`| saving changes made in the menus to `overrides.jsonc`            |
+| `src/emucfg.rs`   | emulators' own settings: achievements, controllers               |
 | `src/emulators.rs`| the other emulators a game can run with, for its menu and `info` |
 | `src/titles.rs`   | matching titles against database names (art and metadata share it) |
 | `src/init.rs`     | `romi init`: ES-DE's system list, finding emulators, writing init.jsonc |

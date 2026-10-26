@@ -1234,6 +1234,16 @@ fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
             println!("  ✓ {:<width$} {}", s.name, games(s.games.len()).trim_end());
         }
     }
+    let emulators = crate::emucfg::check(cfg, &lib);
+    if !emulators.is_empty() {
+        let width = emulators.iter().map(|e| e.name.chars().count()).max().unwrap_or(0);
+        println!("\nemulators");
+        for e in &emulators {
+            for note in &e.notes {
+                println!("  {} {:<width$}  {}", if note.ok { "✓" } else { "!" }, e.name, note.text);
+            }
+        }
+    }
     print_suggestions(cfg, &lib);
     if cfg.steam.enabled && steam::find_steam_dir(cfg.steam.dir.as_deref()).is_none() {
         println!("\n  steam is enabled but no Steam install was found");

@@ -34,6 +34,41 @@ def test_check_flags_missing_emulator(tmp_path):
     assert "!" in nes and "definitely-not-an-emulator not found" in nes
 
 
+def test_check_reads_emulator_settings(tmp_path):
+    config = json.loads(json.dumps(CONFIG))
+    config["controller"]["enabled"] = True
+    config["retroachievements"] = {"username": "Me"}
+    config["systems"] += [
+        {"id": "nds", "name": "DS", "extensions": ["nds"], "command": "melonDS -f {rom}"},
+        {"id": "gc", "name": "GameCube", "extensions": ["rvz"], "command": "flatpak run org.DolphinEmu.dolphin-emu -e {rom}"},
+        {"id": "gb", "name": "Game Boy", "extensions": ["gb"], "command": "retroarch -L {cores}/x_libretro.so {rom}"},
+        # No games, so its emulator isn't looked at.
+        {"id": "ps2", "name": "PS2", "extensions": ["iso"], "command": "pcsx2-qt {rom}"},
+    ]
+    roms = {"nds": ["Kirby (USA).nds"], "gc": ["Pikmin (USA).rvz"], "gb": ["Tetris (World).gb"], "ps2": []}
+    sandbox = Sandbox(tmp_path, config=config, roms=roms)
+    melonds = sandbox.home / ".config/melonDS"
+    melonds.mkdir(parents=True)
+    (melonds / "melonDS.toml").write_text("[Instance0.Joystick]\nA = -1\nB = -1\n")
+    # The Flatpak keeps its settings in its own folder.
+    dolphin = sandbox.home / ".var/app/org.DolphinEmu.dolphin-emu/config/dolphin-emu"
+    dolphin.mkdir(parents=True)
+    (dolphin / "GCPadNew.ini").write_text("[GCPad1]\nDevice = SDL/0/Some Pad\n")
+    (dolphin / "RetroAchievements.ini").write_text("[Achievements]\nEnabled = True\nUsername = someone\nApiToken = t\n")
+    retroarch = sandbox.home / ".config/retroarch"
+    retroarch.mkdir(parents=True)
+    (retroarch / "retroarch.cfg").write_text('cheevos_enable = "true"\ncheevos_username = "me"\ncheevos_token = ""\n')
+    out = run_cli(sandbox, "check")
+    assert out.returncode == 0, out.stderr
+    lines = out.stdout.split("\nemulators\n")[1].split("\n\n")[0].splitlines()
+    assert lines == [
+        "  ! RetroArch          not logged in to RetroAchievements (Settings → Achievements)",
+        "  ! Dolphin (Flatpak)  logged in to RetroAchievements as someone, but romi shows Me's progress",
+        "  ✓ Dolphin (Flatpak)  a controller is on GameCube port 1",
+        "  ! melonDS            no controller buttons are bound (Config → Input and hotkeys)",
+    ]
+
+
 @pytest.mark.parametrize("args", [["scrape", "gba"], ["--scrape", "gba"]])
 def test_scrape_reports_missing_art(sandbox, args):
     # The sandbox config has "online": false, so this only looks on disk.

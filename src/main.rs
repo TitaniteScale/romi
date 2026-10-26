@@ -5,6 +5,7 @@ mod cheevos;
 mod cli;
 mod config;
 mod cover;
+mod emucfg;
 mod emulators;
 mod filter;
 mod gamepad;

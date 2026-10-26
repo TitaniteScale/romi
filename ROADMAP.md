@@ -84,6 +84,9 @@ Built in this order, one commit each:
 ✓ The same system definitions let `romi check` suggest fixes: another installed emulator for a system
 that can't launch, folders that aren't in the config yet, and systems with no emulator installed.
 
+✓ `romi check` also reads the emulators' own settings, and says when RetroAchievements is off or
+not logged in, or no controller is bound, in RetroArch, PCSX2, Dolphin or melonDS.
+
 ## 3. Managing the library from inside romi ✓
 
 Changes made in the TUI are saved in `state.json` (sort orders, tags) or in `overrides.jsonc`, a file
