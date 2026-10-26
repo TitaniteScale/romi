@@ -337,33 +337,40 @@ fn exit_with(e: clap::Error) -> ! {
     std::process::exit(if e.use_stderr() { exit::USAGE } else { 0 })
 }
 
-/// Loads the config, writing the default one if there's none yet.
+/// Loads the config. There's no default to fall back on: one that points at the wrong ROM folder
+/// only gets in the way of `romi init` finding the right one.
 pub fn load_config(path: &Path) -> Result<Config> {
+    if !path.exists() {
+        return fail(exit::CONFIG, format!("no config at {} yet; run `romi init` first", app::tilde(path)));
+    }
     config::load(path).or_else(|e| fail(exit::CONFIG, format!("{e:#}")))
 }
 
 pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
-    // init works without a config (that's what it's for), so it mustn't make the default one.
+    // init works without a config (that's what it's for).
     match command {
-        Command::Init { roms, print, yes, esde, no_esde } => return init(cfg_path, roms, print, yes, esde, no_esde),
+        Command::Init { roms, print, yes, esde, no_esde } => {
+            return init(cfg_path, roms, print, yes, esde, no_esde, false);
+        }
         // add edits the config's text, so it reads the config itself.
         Command::Add { path, name, system, mode, print, yes } => {
             return add(cfg_path, &path, name, system, mode, print, yes);
         }
         // guide only watches the controller.
         Command::Guide { command } => return crate::gamepad::run_on_guide(&command),
+        // status only reads the state folder.
+        Command::Status { json } => return status(json),
         _ => {}
     }
     let cfg = &load_config(cfg_path)?;
     match command {
-        Command::Init { .. } | Command::Add { .. } | Command::Guide { .. } => unreachable!(),
+        Command::Init { .. } | Command::Add { .. } | Command::Guide { .. } | Command::Status { .. } => unreachable!(),
         Command::Check => check(cfg, cfg_path),
         Command::List { filters, json } => list(cfg, &filters, json),
         Command::Info { game, system, json } => info(cfg, &game, system.as_deref(), json),
         Command::Play { game, system, mode, dry_run, json } => {
             play(cfg, cfg_path, &game, system.as_deref(), mode, dry_run, json)
         }
-        Command::Status { json } => status(json),
         Command::Stats { json } => stats(cfg, json),
         Command::Achievements { json } => achievements(cfg, json),
         Command::Scrape { systems } => art::scrape(cfg, &Library::load_complete(cfg), &systems),
@@ -877,6 +884,21 @@ fn add(
     Ok(())
 }
 
+/// `romi` with no config: sets one up as `romi init` does, before the launcher opens. False if
+/// nothing was written.
+pub fn first_run(cfg_path: &Path) -> Result<bool> {
+    use std::io::IsTerminal;
+    if cfg_path.exists() {
+        return Ok(true);
+    }
+    if !std::io::stdin().is_terminal() {
+        return load_config(cfg_path).map(|_| false);
+    }
+    println!("Welcome to romi! There's no config yet, so let's find your games and emulators.\n");
+    init(cfg_path, None, false, false, None, false, true)?;
+    Ok(cfg_path.exists())
+}
+
 fn init(
     cfg_path: &Path,
     roms: Option<PathBuf>,
@@ -884,6 +906,7 @@ fn init(
     yes: bool,
     esde: Option<PathBuf>,
     no_esde: bool,
+    first_run: bool,
 ) -> Result<()> {
     let existing = crate::init::existing_config(cfg_path);
     if cfg_path.exists() && existing.is_none() {
@@ -900,24 +923,53 @@ fn init(
         }
     };
     let existing_cfg = existing.as_ref().map(|(_, cfg)| cfg);
-    let Some(roms_dir) = crate::init::find_roms_dir(roms.as_deref(), existing_cfg) else {
-        return fail(exit::NOT_FOUND, "couldn't find your ROMs; say where with --roms DIR");
-    };
-    if !roms_dir.is_dir() {
-        return fail(exit::NOT_FOUND, format!("{} isn't a folder", roms_dir.display()));
+    if let Some(dir) = &roms
+        && !dir.is_dir()
+    {
+        return fail(exit::NOT_FOUND, format!("{} isn't a folder", dir.display()));
     }
-    let report = crate::init::scan(&catalog, &roms_dir, existing_cfg);
+    let found = crate::init::find_roms_dir(roms.as_deref(), existing_cfg);
+    let roms_dir = match &found {
+        Some(dir) => dir.clone(),
+        // A launcher with no ROMs is still one for Steam and for games added with `romi add`.
+        None if first_run => config::expand_path("~/ROMs"),
+        None => {
+            let configured = existing_cfg.map(|c| format!("{} (your roms_dir) isn't a folder, and ", c.roms_dir));
+            let msg = format!(
+                "{}couldn't find your ROMs in {}; say where with --roms DIR",
+                configured.unwrap_or_default(),
+                crate::init::usual_roms_dirs()
+            );
+            return fail(exit::NOT_FOUND, msg);
+        }
+    };
+    // The ROMs are somewhere other than the config says. If what it names is gone, point roms_dir
+    // at them; if not, it may hold your own systems, so the ones found here get full paths.
+    let configured = existing_cfg.map(|c| config::expand_path(&c.roms_dir));
+    let elsewhere = configured.as_ref().is_some_and(|c| *c != roms_dir);
+    let move_roms_dir = elsewhere && !configured.as_ref().is_some_and(|c| c.is_dir());
+    let mut report = crate::init::scan(&catalog, &roms_dir, existing_cfg);
+    report.absolute = elsewhere && !move_roms_dir;
     let generated = crate::init::render(&report);
     if print {
         eprint!("{}", crate::init::summary(&report));
         print!("{generated}");
         return Ok(());
     }
-    print!("{}", crate::init::summary(&report));
+    if found.is_some() {
+        print!("{}", crate::init::summary(&report));
+    } else {
+        println!(
+            "No ROM folders found in {}. romi will start with your Steam games and anything you add\n\
+             with `romi add`. Once you have ROMs, put them in ~/ROMs/<system> and run `romi init`.",
+            crate::init::usual_roms_dirs()
+        );
+    }
     let already_included =
         existing.as_ref().is_some_and(|(_, cfg)| cfg.include.iter().any(|i| i == crate::init::INCLUDE_FILE));
     if existing.is_some()
         && !already_included
+        && !move_roms_dir
         && !report.findings.iter().any(|f| matches!(f, crate::init::Finding::New { .. }))
     {
         println!("\nNothing new to add, so your config is unchanged.");
@@ -926,26 +978,37 @@ fn init(
 
     let include_path = cfg_path.parent().unwrap_or(Path::new(".")).join(crate::init::INCLUDE_FILE);
     let (main, plan) = match &existing {
-        Some((raw, cfg)) => match crate::init::add_include(
-            raw,
-            cfg,
-            crate::init::INCLUDE_FILE,
-            "Systems found by `romi init`. Anything set in this file takes priority.",
-        ) {
-            Some(text) if text == *raw => (None, format!("write {}", app::tilde(&include_path))),
-            Some(text) => {
-                let plan = format!("write {} and include it from {}", app::tilde(&include_path), app::tilde(cfg_path));
-                (Some(text), plan)
+        Some((raw, cfg)) => {
+            let shown = app::tilde(cfg_path);
+            let mut text = raw.clone();
+            let mut changes = Vec::new();
+            if move_roms_dir {
+                let dir = app::tilde(&roms_dir);
+                let Some(edited) = crate::init::set_roms_dir(&text, &dir) else {
+                    let msg =
+                        format!("couldn't set \"roms_dir\" to {dir:?} in {shown}; set it by hand, then run init again");
+                    return fail(exit::CONFIG, msg);
+                };
+                text = edited;
+                changes.push(format!("point roms_dir at {dir}"));
             }
-            None => {
+            let comment = "Systems found by `romi init`. Anything set in this file takes priority.";
+            let Some(edited) = crate::init::add_include(&text, cfg, crate::init::INCLUDE_FILE, comment) else {
                 let msg = format!(
-                    "couldn't add \"{}\" to the \"include\" list in {}; add it by hand, then run init again",
+                    "couldn't add \"{}\" to the \"include\" list in {shown}; add it by hand, then run init again",
                     crate::init::INCLUDE_FILE,
-                    app::tilde(cfg_path)
                 );
                 return fail(exit::CONFIG, msg);
+            };
+            if edited != text {
+                changes.insert(0, "include it".to_string());
             }
-        },
+            let mut plan = format!("write {}", app::tilde(&include_path));
+            if !changes.is_empty() {
+                plan += &format!(", and in {shown} {}", changes.join(" and "));
+            }
+            ((edited != *raw).then_some(edited), plan)
+        }
         None => {
             let plan = format!("write {} and a new {}", app::tilde(&include_path), app::tilde(cfg_path));
             (Some(crate::init::fresh_config(&roms_dir)), plan)
@@ -964,11 +1027,12 @@ fn init(
     // Catch anything that would stop romi from starting now, rather than the next time it does.
     let cfg = load_config(cfg_path)?;
     let lib = Library::load(&cfg);
-    println!(
-        "\nDone: {} games in {} systems. Run `romi` to browse them, or `romi check` for details.",
-        lib.games.len(),
-        lib.systems.len()
-    );
+    let done = format!("{} games in {} systems", lib.games.len(), lib.systems.len());
+    if first_run {
+        println!("\nDone: {done}. `romi check` shows what was found, and what could fix anything missing.");
+    } else {
+        println!("\nDone: {done}. Run `romi` to browse them, or `romi check` for details.");
+    }
     Ok(())
 }
 

@@ -407,18 +407,26 @@ pub struct Report {
     /// The `{cores}` folder, when any system uses it.
     pub cores: Option<PathBuf>,
     pub esde: bool,
+    /// Write each system's folder as a full path: the config's `roms_dir` is another folder.
+    pub absolute: bool,
 }
 
-/// Finds the ROM folder: the one given, the config's, the one set in ES-DE, or the first usual
-/// place that exists.
+/// Finds the ROM folder: the one given, the config's if it exists, the one set in ES-DE, or the
+/// first usual place that exists.
 pub fn find_roms_dir(given: Option<&Path>, existing: Option<&Config>) -> Option<PathBuf> {
     if let Some(dir) = given {
         return Some(dir.to_path_buf());
     }
-    if let Some(cfg) = existing {
-        return Some(expand_path(&cfg.roms_dir));
+    if let Some(dir) = existing.map(|cfg| expand_path(&cfg.roms_dir)).filter(|d| d.is_dir()) {
+        return Some(dir);
     }
     esde_roms_dir().or_else(|| ROM_DIRS.iter().map(|d| expand_path(d)).find(|d| d.is_dir()))
+}
+
+/// The usual places `find_roms_dir` looks, for saying where nothing was found.
+pub fn usual_roms_dirs() -> String {
+    let (last, rest) = ROM_DIRS.split_last().expect("there are usual places");
+    format!("{} or {last}", rest.join(", "))
 }
 
 /// ES-DE's ROMDirectory setting, when it's set (empty means ES-DE's default, `~/ROMs`).
@@ -477,7 +485,7 @@ pub fn scan(catalog: &Catalog, roms_dir: &Path, existing: Option<&Config>) -> Re
             Finding::New { def, games, run, others, guessed }
         })
         .collect();
-    Report { roms_dir: roms_dir.to_path_buf(), findings, cores: finder.cores, esde: catalog.esde }
+    Report { roms_dir: roms_dir.to_path_buf(), findings, cores: finder.cores, esde: catalog.esde, absolute: false }
 }
 
 /// The id of a system in the existing config that already covers this folder.
@@ -627,7 +635,9 @@ pub fn render(report: &Report) -> String {
         }
         out.push_str("    {\n");
         let _ = write!(out, "      \"id\": {}, \"name\": {}", q(&def.id), q(&def.name));
-        if def.folder != def.id {
+        if report.absolute {
+            let _ = write!(out, ", \"dir\": {}", q(&crate::app::tilde(&report.roms_dir.join(&def.folder))));
+        } else if def.folder != def.id {
             let _ = write!(out, ", \"dir\": {}", q(&def.folder));
         }
         if def.arcade {
@@ -743,10 +753,7 @@ pub fn add_include(raw: &str, cfg: &Config, file: &str, comment: &str) -> Option
         format!("{}\n  // {comment}\n  \"include\": [{q}],{}", &raw[..=brace], &raw[brace + 1..])
     } else {
         // The "include" key that isn't in a comment, then the end of its list.
-        let key = raw.match_indices("\"include\"").map(|(i, _)| i).find(|&i| {
-            let line_start = raw[..i].rfind('\n').map_or(0, |n| n + 1);
-            !raw[line_start..i].contains("//")
-        })?;
+        let key = key_outside_comment(raw, "include")?;
         let end = key + raw[key..].find(']')?;
         let before = raw[..end].trim_end();
         format!("{before}, {q}{}", &raw[end..])
@@ -755,6 +762,42 @@ pub fn add_include(raw: &str, cfg: &Config, file: &str, comment: &str) -> Option
     let mut expected = cfg.include.clone();
     expected.push(file.to_string());
     (config::parse(&edited).ok()?.include == expected).then_some(edited)
+}
+
+/// Points an existing config's `roms_dir` at `dir`, keeping everything else in the text as it is:
+/// the value where it's set, or a new line after the opening brace when it isn't. None if the
+/// edit doesn't come out right.
+pub fn set_roms_dir(raw: &str, dir: &str) -> Option<String> {
+    let q = serde_json::to_string(dir).ok()?;
+    let edited = match key_outside_comment(raw, "roms_dir") {
+        Some(key) => {
+            let after = key + "\"roms_dir\"".len();
+            let open = after + raw[after..].find('"')?;
+            if raw[after..open].trim() != ":" {
+                return None;
+            }
+            // The closing quote, skipping escaped ones.
+            let bytes = raw.as_bytes();
+            let mut close = open + 1;
+            while *bytes.get(close)? != b'"' {
+                close += if bytes[close] == b'\\' { 2 } else { 1 };
+            }
+            format!("{}{q}{}", &raw[..open], &raw[close + 1..])
+        }
+        None => {
+            let brace = opening_brace(raw)?;
+            format!("{}\n  \"roms_dir\": {q},{}", &raw[..=brace], &raw[brace + 1..])
+        }
+    };
+    (config::parse(&edited).ok()?.roms_dir == dir).then_some(edited)
+}
+
+/// Where `"key"` first appears outside a `//` comment.
+fn key_outside_comment(raw: &str, key: &str) -> Option<usize> {
+    raw.match_indices(&format!("\"{key}\"")).map(|(i, _)| i).find(|&i| {
+        let line_start = raw[..i].rfind('\n').map_or(0, |n| n + 1);
+        !raw[line_start..i].contains("//")
+    })
 }
 
 /// The byte offset of the `{` that opens the top-level object, skipping comments.
@@ -836,6 +879,16 @@ mod tests {
         let out = add_include(raw, &cfg, "b.jsonc", "").unwrap();
         assert!(out.contains("// \"include\": [\"old.jsonc\"],"));
         assert_eq!(config::parse(&out).unwrap().include, ["a.jsonc", "b.jsonc"]);
+    }
+
+    #[test]
+    fn roms_dir_edit_changes_only_its_value() {
+        let raw = "{\n  // \"roms_dir\": \"~/old\",\n  \"roms_dir\" : \"~/R\\\"OMs\", // mine\n  \"games\": []\n}\n";
+        let out = set_roms_dir(raw, "~/roms").unwrap();
+        assert_eq!(out, raw.replace("\"~/R\\\"OMs\"", "\"~/roms\""));
+        // Not set at all (so it was the default): it gets a line of its own.
+        let out = set_roms_dir("// romi\n{\n  \"games\": []\n}\n", "~/roms").unwrap();
+        assert_eq!(out, "// romi\n{\n  \"roms_dir\": \"~/roms\",\n  \"games\": []\n}\n");
     }
 
     #[test]

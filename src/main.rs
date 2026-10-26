@@ -43,7 +43,10 @@ fn main() {
     let (command, cfg_path) = cli::parse();
     let result = match command {
         Some(command) => cli::run(command, &cfg_path),
-        None => cli::load_config(&cfg_path).and_then(|cfg| run(cfg, cfg_path)),
+        None => cli::first_run(&cfg_path).and_then(|ready| match ready {
+            true => cli::load_config(&cfg_path).and_then(|cfg| run(cfg, cfg_path)),
+            false => Ok(()),
+        }),
     };
     if let Err(e) = result {
         // Output piped into something that stopped reading (`romi list | head`) isn't a problem.

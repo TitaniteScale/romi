@@ -487,15 +487,8 @@ pub fn state_dir() -> PathBuf {
     dirs::state_dir().unwrap_or_else(|| home().join(".local/state")).join("romi")
 }
 
-/// Loads the config, writing the default one first if none exists.
+/// Loads the config and the files it includes.
 pub fn load(path: &Path) -> Result<Config> {
-    if !path.exists() {
-        if let Some(dir) = path.parent() {
-            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
-        }
-        std::fs::write(path, DEFAULT_CONFIG)
-            .with_context(|| format!("writing default config to {}", path.display()))?;
-    }
     let raw = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let mut cfg = parse(&raw).with_context(|| format!("parsing {}", path.display()))?;
     let dir = path.parent().unwrap_or(Path::new("."));

@@ -74,8 +74,10 @@ Built in this order, one commit each:
 - ✓ **Never overwrite your config.** Generated systems go in `init.jsonc`, which the config includes
   (`"include"` is a general option now). Rerunning init replaces only that file. `--print` writes to
   stdout instead, and `--yes` skips the question.
-- **First run in the TUI**: when there's no config, walk through the same steps in a wizard that works
-  with a controller, instead of writing the default.
+- ✓ **First run**: with no config, `romi` does what init does (asking first, in the terminal) and then
+  opens, rather than writing a default that points at `~/ROMs` and gets in init's way.
+- **First run with a controller**: the same steps in a TUI wizard, for when romi is opened from
+  couch mode before there's a keyboard to hand.
 - ✓ **`romi add <path>`** adds a program, script, folder or `.desktop` launcher as a game, run from
   its own folder, in a `games.jsonc` the config includes.
 

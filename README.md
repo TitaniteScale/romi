@@ -97,8 +97,11 @@ appear; existing ones won't be renamed or removed.
 
 ```
 cargo install --path . --root ~/.local
-romi init
+romi
 ```
+
+With no config yet, `romi` first does what `romi init` does (below), asks before writing anything,
+then opens. No ROMs yet is fine too: it starts with your Steam games and anything you `romi add`.
 
 `romi init` looks for your ROM folders (the one set in ES-DE, `~/ROMs`, `~/roms`,
 `~/Emulation/roms`, `~/RetroPie/roms`, or `--roms DIR`) and works out which system each folder is
@@ -120,7 +123,9 @@ commands, not which games you have or how many, so it's safe in a public dotfile
 
 What it finds goes in `init.jsonc` next to your config, which your config includes. Rerun init
 after installing an emulator or adding a folder: it replaces `init.jsonc` and nothing else, and
-systems you've set up in `config.json` take priority. `--print` shows the result without writing;
+systems you've set up in `config.json` take priority. The one exception: if your config's
+`roms_dir` no longer exists, init looks for your ROMs and points `roms_dir` at them. ROMs given
+with `--roms` somewhere other than `roms_dir` get full paths instead, leaving `roms_dir` as it is. `--print` shows the result without writing;
 `--yes` skips the question.
 
 `romi check` uses the same knowledge to suggest fixes: a system whose emulator is gone but which
@@ -229,8 +234,8 @@ detached Steam game won't scroll the list behind it.
 
 ## Config
 
-`~/.config/romi/config.json` (or `$ROMI_CONFIG`). Comments are allowed. `romi init` writes one for
-you; otherwise a default is written on first run. See [`default-config.jsonc`](default-config.jsonc)
+`~/.config/romi/config.json` (or `$ROMI_CONFIG`). Comments are allowed. `romi init` (or the
+first `romi`) writes one for you; other commands without one say to run it. See [`default-config.jsonc`](default-config.jsonc)
 for every option.
 
 `"include": ["other.jsonc"]` adds the systems, games, vars and BIOS folders of other files

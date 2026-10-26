@@ -3,10 +3,11 @@
 import json
 import re
 import subprocess
+import types
 
 import pytest
 
-from drive import CONFIG, binary
+from drive import CONFIG, Romi, binary
 
 SYSTEMS = """<?xml version="1.0"?>
 <systemList>
@@ -298,3 +299,83 @@ def test_init_uses_esde_dir_from_the_config(machine):
     out = romi(machine, "init", "--print")
     assert out.returncode == 0, out.stderr
     assert "ES-DE's system list" in out.stderr and "gb" in systems(out.stdout)
+
+
+def test_commands_without_a_config_say_to_run_init(machine):
+    fresh(machine)
+    out = romi(machine, "list")
+    assert out.returncode == 78 and "run `romi init` first" in out.stderr
+    assert not machine.config_path.exists()
+    # status only needs the state folder.
+    assert romi(machine, "status").returncode == 0
+
+
+def test_init_finds_the_roms_when_roms_dir_is_gone(machine):
+    machine.config_path.write_text('// mine\n{\n  "roms_dir": "~/Gone",\n  "games": []\n}\n')
+    out = init(machine, "--yes")
+    assert out.returncode == 0, out.stderr
+    config = machine.config_path.read_text()
+    assert config.startswith("// mine\n{\n") and '"roms_dir": "~/ROMs"' in config
+    assert "Tetris" in romi(machine, "list").stdout
+
+
+def test_roms_somewhere_else_get_full_paths(machine):
+    # The config's own systems are in its roms_dir, so that stays as it is.
+    (machine.root / "more/gb").mkdir(parents=True)
+    (machine.root / "more/gb/Wario Land (USA).gb").touch()
+    out = init(machine, "--roms", str(machine.root / "more"), "--yes")
+    assert out.returncode == 0, out.stderr
+    assert jsonc(machine.config_path.read_text())["roms_dir"] == "~/ROMs"
+    assert systems((machine.root / "init.jsonc").read_text())["gb"]["dir"] == str(machine.root / "more/gb")
+    names = romi(machine, "list").stdout
+    assert "Wario Land" in names and "Advance Wars" in names
+
+
+def first_run(sandbox):
+    """romi with no config and no ES-DE of its own; it may find the machine's, so only what
+    doesn't depend on that is checked."""
+    fresh(sandbox)
+    executable(sandbox.root / "bin/retroarch")
+    cores = sandbox.home / ".config/retroarch/cores"
+    cores.mkdir(parents=True)
+    (cores / "mgba_libretro.so").touch()
+    env = dict(sandbox.env, PATH=f"{sandbox.root / 'bin'}:{sandbox.env['PATH']}")
+    return Romi(types.SimpleNamespace(env=env))
+
+
+def test_first_run_sets_up_then_opens(machine):
+    romi = first_run(machine)
+    try:
+        romi.wait_for("There's no config yet")
+        romi.wait_for("Go ahead?")
+        assert "ROMs in ~/ROMs" in romi.text()
+        romi.keys("\r")
+        romi.wait_for("Systems")
+        assert jsonc(machine.config_path.read_text())["include"] == ["init.jsonc"]
+        assert (machine.config_path.parent / "init.jsonc").exists()
+    finally:
+        romi.close()
+
+
+def test_first_run_declined_writes_nothing(machine):
+    romi = first_run(machine)
+    try:
+        romi.wait_for("Go ahead?")
+        romi.keys("n\r")
+        romi.wait_for(lambda: romi.exited is not None)
+        assert romi.exited == 0
+        assert not machine.config_path.exists()
+    finally:
+        romi.close()
+
+
+def test_first_run_without_roms_still_opens(machine):
+    (machine.home / "ROMs").rename(machine.home / "elsewhere")
+    romi = first_run(machine)
+    try:
+        romi.wait_for("No ROM folders found")
+        romi.keys("\r")
+        romi.wait_for("No games found")
+        assert jsonc(machine.config_path.read_text())["roms_dir"] == "~/ROMs"
+    finally:
+        romi.close()
