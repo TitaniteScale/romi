@@ -16,7 +16,7 @@ optdepends=(
   'emulationstation-de: system definitions and emulators for romi init, names from its gamelists'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')
+sha256sums=('2de1dd0fb400e7f6aa09af346ef728187824a758859cd6a3a1b65184ab687462')
 
 prepare() {
   cd "$pkgname-$pkgver"
