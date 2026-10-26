@@ -1,0 +1,19 @@
+pkgbase = romi
+	pkgdesc = A terminal game launcher for ROMs, native ports and Steam, driven by keyboard or controller
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/TitaniteScale/romi
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	makedepends = cargo
+	depends = glibc
+	depends = libgcc
+	depends = systemd-libs
+	optdepends = retroarch: run most systems, through libretro cores
+	optdepends = emulationstation-de: system definitions and emulators for romi init, names from its gamelists
+	options = !lto
+	source = romi-0.1.0.tar.gz::https://github.com/TitaniteScale/romi/archive/refs/tags/v0.1.0.tar.gz
+	sha256sums = SKIP
+
+pkgname = romi

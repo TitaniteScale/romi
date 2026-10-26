@@ -1,0 +1,50 @@
+# Maintainer: Jake Eaker <jacob.eaker@gmail.com>
+
+pkgname=romi
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="A terminal game launcher for ROMs, native ports and Steam, driven by keyboard or controller"
+arch=('x86_64' 'aarch64')
+url="https://github.com/TitaniteScale/romi"
+license=('MIT')
+depends=('glibc' 'libgcc' 'systemd-libs')
+makedepends=('cargo')
+# With makepkg's LTO flags, ring's C code comes out as GCC bitcode that Rust's linker can't read.
+options=('!lto')
+optdepends=(
+  'retroarch: run most systems, through libretro cores'
+  'emulationstation-de: system definitions and emulators for romi init, names from its gamelists'
+)
+source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  cargo fetch --locked --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo build --frozen --release
+}
+
+check() {
+  cd "$pkgname-$pkgver"
+  export RUSTUP_TOOLCHAIN=stable
+  export CARGO_TARGET_DIR=target
+  cargo test --frozen
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  install -Dm755 target/release/romi -t "$pkgdir/usr/bin/"
+  install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
+  install -Dm644 README.md ROADMAP.md default-config.jsonc -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -Dm644 examples/couch/* -t "$pkgdir/usr/share/doc/$pkgname/examples/couch/"
+  install -Dm644 packaging/completions/romi.bash "$pkgdir/usr/share/bash-completion/completions/romi"
+  install -Dm644 packaging/completions/romi.fish "$pkgdir/usr/share/fish/vendor_completions.d/romi.fish"
+  install -Dm644 packaging/completions/_romi "$pkgdir/usr/share/zsh/site-functions/_romi"
+}

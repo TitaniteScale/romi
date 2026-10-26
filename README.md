@@ -55,7 +55,7 @@ counts as a few seconds.
 `started` (Unix time) and `elapsed_secs` for each, which is all a waybar module needs.
 
 **Completions** cover commands, flags, game names, system ids and genres, read from your library as
-you type. Set them up once:
+you type. The AUR package sets them up for bash, zsh and fish; otherwise, set them up once:
 
 ```
 echo 'COMPLETE=fish romi | source' > ~/.config/fish/completions/romi.fish   # fish
@@ -94,6 +94,15 @@ appear; existing ones won't be renamed or removed.
 `romi play` otherwise exits with whatever the game did.
 
 ## Install
+
+On Arch, from the [AUR](https://aur.archlinux.org/packages/romi) (with yay, paru, or any AUR helper):
+
+```
+yay -S romi
+romi
+```
+
+Anywhere else, from a clone, with Rust installed:
 
 ```
 cargo install --path . --root ~/.local
@@ -479,6 +488,22 @@ your own config and state are never touched (`drive.py --real` uses yours). They
 buttons on a virtual gamepad, and read the screen with [pyte](https://github.com/selectel/pyte). The
 controller tests need write access to `/dev/uinput` and are skipped without it. CI runs rustfmt,
 clippy, the unit tests and the end-to-end tests on every push.
+
+### Releasing
+
+The AUR package's recipe is in `packaging/aur`. For a release:
+
+1. Set the version in `Cargo.toml`, build so `Cargo.lock` follows, and commit.
+2. Tag it and push the tag: `git tag v0.2.0 && git push origin main v0.2.0`.
+3. In `packaging/aur`, set `pkgver` to match and `pkgrel=1`, then run `updpkgsums` (from
+   `pacman-contrib`) to fill in the checksum of GitHub's tarball for the tag.
+4. Build it: `makepkg -f`, or `pkgctl build` (from `devtools`) for a clean chroot that catches
+   missing dependencies. `namcap PKGBUILD *.pkg.tar.zst` checks for common mistakes.
+5. `makepkg --printsrcinfo > .SRCINFO`, and commit both files here.
+6. Copy `PKGBUILD` and `.SRCINFO` into the AUR's git repo
+   (`git clone ssh://aur@aur.archlinux.org/romi.git`), commit and push.
+
+A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 
 ## Code map
 

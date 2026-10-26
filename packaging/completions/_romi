@@ -1,0 +1,5 @@
+#compdef romi
+# romi's completions read your library as you type, so they come from romi itself. This loads
+# them the first time, then completes with them.
+source <(COMPLETE=zsh romi)
+_clap_dynamic_completer_romi "$@"

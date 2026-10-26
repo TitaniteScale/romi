@@ -7,3 +7,8 @@
 /.venv/
 __pycache__/
 .pytest_cache/
+
+# makepkg output, from testing the AUR package
+/packaging/aur/src/
+/packaging/aur/pkg/
+/packaging/aur/*.tar.*

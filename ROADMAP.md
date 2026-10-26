@@ -175,6 +175,6 @@ Smaller items that fit between phases.
 - **More descriptions**: Wikipedia's summary API needs no key, but matching titles to articles is
   hit-or-miss. ScreenScraper and TheGamesDB need keys.
 - **SteamGridDB** (free key) for covers on PC ports and pinball tables.
-- **An AUR package.**
+- **An AUR package**: the recipe is ready in `packaging/aur`, to publish once v0.1.0 is tagged.
 - **A waybar module**, if it turns out to be wanted: games usually run full screen, hiding the bar, so
   it's not planned. `romi status --json` already has what one needs.
