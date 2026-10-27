@@ -44,6 +44,8 @@ pub enum MenuItem {
     Favorite,
     Hide,
     Emulator,
+    /// Plays the game inside romi, in the middle panel.
+    PlayHere,
     /// Opens the game's tags.
     Tags,
     /// Opens the achievements screen on the game.
@@ -173,6 +175,8 @@ pub struct App {
     pub search: Option<Search>,
     pub status: Option<Status>,
     pub running: Option<Running>,
+    /// A game played inside romi, in the middle panel.
+    pub embedded: Option<crate::embedded::Embedded>,
     pub pad: PadState,
     pub show_details: bool,
     pub terminal_job: Option<TerminalJob>,
@@ -242,6 +246,7 @@ impl App {
             search: None,
             status: None,
             running: None,
+            embedded: None,
             pad,
             terminal_job: None,
             covers: None,
@@ -543,6 +548,13 @@ impl App {
     }
 
     pub fn on_term_event(&mut self, ev: Event) {
+        // A game in the middle panel gets every key, releases too.
+        if let (Some(embedded), Event::Key(k)) = (&mut self.embedded, &ev) {
+            if !embedded.on_key(*k) {
+                self.stop_embedded();
+            }
+            return;
+        }
         match ev {
             Event::FocusGained => {
                 self.term_focused = true;
@@ -723,7 +735,11 @@ impl App {
             PadEvent::Disconnected => self.pad = PadState::Searching,
             PadEvent::Unavailable(e) => self.pad = PadState::Unavailable(e),
             PadEvent::Action(a) => {
-                if self.input_blocked() || (self.cfg.controller.require_focus && !self.term_focused) {
+                // A game in the middle panel reads the controller itself.
+                if self.embedded.is_some()
+                    || self.input_blocked()
+                    || (self.cfg.controller.require_focus && !self.term_focused)
+                {
                     return;
                 }
                 self.apply(match a {
@@ -1017,7 +1033,11 @@ impl App {
         }
         match menu.and_then(|m| m.game) {
             Some(g) => {
-                let mut items = vec![Favorite, Hide, Tags];
+                let mut items = Vec::new();
+                if self.embeddable(g).is_some() {
+                    items.push(PlayHere);
+                }
+                items.extend([Favorite, Hide, Tags]);
                 if self.emulator_options(g).len() > 1 {
                     items.push(Emulator);
                 }
@@ -1067,6 +1087,7 @@ impl App {
                 format!("Show hidden games ({})", self.lib.games.iter().filter(|g| g.hidden).count())
             }
             MenuItem::Reload => "Reload config".into(),
+            MenuItem::PlayHere => "Play in romi".into(),
             MenuItem::Quit => "Quit romi".into(),
             MenuItem::Favorite if game.is_some_and(|g| self.state.is_favorite(&g.key)) => "Unfavorite".into(),
             MenuItem::Favorite => "Favorite".into(),
@@ -1116,6 +1137,11 @@ impl App {
                 let Some(&item) = items.get(selected) else { return };
                 match item {
                     MenuItem::Game => self.apply(Op::GameMenu),
+                    MenuItem::PlayHere => {
+                        if let Some(g) = game {
+                            self.play_here(g);
+                        }
+                    }
                     MenuItem::Search => self.apply(Op::Search),
                     MenuItem::Filter => self.apply(Op::Filter),
                     // Stays open, so A again tries the next order.
@@ -1170,6 +1196,12 @@ impl App {
                             self.cycle_emulator(g);
                         }
                         self.menu = Some(Menu { game, selected, tags: false });
+                        // An emulator with a libretro core adds Play in romi above, or takes it away.
+                        if let Some(at) = self.menu_items().iter().position(|&i| i == MenuItem::Emulator)
+                            && let Some(menu) = &mut self.menu
+                        {
+                            menu.selected = at;
+                        }
                     }
                 }
             }
@@ -1357,6 +1389,41 @@ impl App {
     }
 
     // ---- launching ----
+
+    /// The core and ROM to play a game inside romi with, if it runs through a libretro core.
+    fn embeddable(&self, g: usize) -> Option<(PathBuf, PathBuf)> {
+        let game = &self.lib.games[g];
+        let rom = game.path.clone().filter(|r| crate::retro::can_open(r))?;
+        let core = crate::retro::core_in(&game.launch.prepare().ok()?.argv)?;
+        core.is_file().then_some((core, rom))
+    }
+
+    fn play_here(&mut self, g: usize) {
+        let Some((core, rom)) = self.embeddable(g) else { return };
+        match crate::embedded::Embedded::start(g, &core, &rom) {
+            Ok(e) => self.embedded = Some(e),
+            Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),
+        }
+    }
+
+    /// Stops the game in the middle panel. Input waits a moment, so the buttons that stopped it
+    /// don't also do something in the list.
+    pub fn stop_embedded(&mut self) {
+        self.embedded = None;
+        self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);
+    }
+
+    /// Feeds the game in the middle panel: controller input in, the newest frame out.
+    pub fn pump_embedded(&mut self) {
+        let Some(embedded) = &mut self.embedded else { return };
+        if !embedded.read_pads() {
+            return self.stop_embedded();
+        }
+        if let Err(e) = embedded.pump() {
+            self.stop_embedded();
+            self.set_status(Level::Error, format!("Stopped: {e:#}"));
+        }
+    }
 
     fn launch(&mut self, g: usize) {
         let game = &self.lib.games[g];

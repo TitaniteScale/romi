@@ -65,6 +65,11 @@ F2 whether the terminal or romi scales them, and the bottom line shows frame rat
 Keys follow RetroArch's defaults (arrows, X/Z for A/B, A/S for Y/X, Q/W for L/R, Enter for Start,
 Backspace for Select); a controller works too. Esc, or holding Select+Start, quits.
 
+In the TUI, a game's menu (`o`) has **Play in romi** for games run through a libretro core. It plays
+the game in the middle panel, with the systems and details still around it, drawn behind Kitty
+Unicode placeholders. Esc, or holding Select+Start, stops it. This is experimental too: Kitty
+graphics only, no sound, no saves.
+
 **Detached games** (from `--mode detach`, or a game configured that way) are played by a copy of
 romi running in the background, so their play time is recorded even after the TUI or the command
 that started them has gone. A launcher that hands off and returns right away, like Steam, still
@@ -555,6 +560,8 @@ A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 | `src/hooks.rs`    | `on_launch` and `on_exit` hooks                                  |
 | `src/retro.rs`    | a minimal libretro frontend for `romi run`: loading cores, frames, scripted input |
 | `src/live.rs`     | `romi run --live`: a game in the terminal over Kitty graphics, with controller input |
+| `src/embedded.rs` | a game played in the TUI's middle panel                          |
+| `src/kitty.rs`    | Kitty graphics: Unicode placeholders, shared memory              |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
 | `e2e/test_*.py`   | end-to-end tests of the TUI and the CLI                          |

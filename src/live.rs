@@ -74,29 +74,47 @@ enum Scale {
 }
 
 /// What the core thread and the terminal share.
-struct Shared {
+pub struct Shared {
     /// The newest frame and how many frames have run.
-    latest: Mutex<(u64, Frame)>,
+    pub latest: Mutex<(u64, Frame)>,
     ready: Condvar,
-    buttons: AtomicU16,
+    pub buttons: AtomicU16,
     quit: AtomicBool,
 }
 
+impl Shared {
+    /// Starts `core` on its own thread, running at its own frame rate until `stop`.
+    pub fn start(core: Core) -> Result<(Arc<Shared>, std::thread::JoinHandle<()>)> {
+        let shared = Arc::new(Shared {
+            latest: Mutex::new((0, Frame::default())),
+            ready: Condvar::new(),
+            buttons: AtomicU16::new(0),
+            quit: AtomicBool::new(false),
+        });
+        let thread = {
+            let shared = shared.clone();
+            std::thread::Builder::new().name("core".into()).spawn(move || run_core(core, &shared))?
+        };
+        Ok((shared, thread))
+    }
+
+    pub fn stop(&self) {
+        self.quit.store(true, Ordering::SeqCst);
+    }
+
+    /// The newest frame, if it's newer than frame number `seen`, and its number.
+    pub fn take_newer(&self, seen: u64) -> Option<(u64, Frame)> {
+        let mut latest = self.latest.lock().unwrap_or_else(|e| e.into_inner());
+        (latest.0 != seen).then(|| (latest.0, std::mem::take(&mut latest.1)))
+    }
+}
+
 pub fn play(core: Core, name: &str) -> Result<()> {
-    let shared = Arc::new(Shared {
-        latest: Mutex::new((0, Frame::default())),
-        ready: Condvar::new(),
-        buttons: AtomicU16::new(0),
-        quit: AtomicBool::new(false),
-    });
     let fps = core.fps;
     let core_name = core.name.clone();
-    let emu = {
-        let shared = shared.clone();
-        std::thread::Builder::new().name("core".into()).spawn(move || run_core(core, &shared))?
-    };
+    let (shared, emu) = Shared::start(core)?;
     let result = Screen::enter().and_then(|_screen| View::new(name, &core_name, fps).run(&shared));
-    shared.quit.store(true, Ordering::SeqCst);
+    shared.stop();
     let _ = emu.join();
     result
 }
@@ -369,7 +387,7 @@ impl View {
         let bytes = match self.transfer {
             Transfer::Shm => {
                 let name = format!("/romi-{pid}-{}", self.sent);
-                write_shm(&name, pixels)?;
+                crate::kitty::write_shm(&name, pixels)?;
                 self.check_read(Handoff::Shm(name.clone()));
                 write!(out, "\x1b_G{keys},t=s,S={};{}\x1b\\", pixels.len(), BASE64.encode(&name))?;
                 pixels.len()
@@ -510,35 +528,6 @@ fn scale_up(frame: &Frame, factor: u32) -> Vec<u8> {
     out
 }
 
-fn write_shm(name: &str, data: &[u8]) -> std::io::Result<()> {
-    let cname = std::ffi::CString::new(name).expect("shm names have no NUL");
-    // SAFETY: plain POSIX calls on a fresh object; the mapping is exactly `data.len()` bytes and
-    // is unmapped before returning.
-    unsafe {
-        let fd = libc::shm_open(cname.as_ptr(), libc::O_CREAT | libc::O_EXCL | libc::O_RDWR, 0o600);
-        if fd < 0 {
-            return Err(std::io::Error::last_os_error());
-        }
-        let result = (|| {
-            if libc::ftruncate(fd, data.len() as libc::off_t) != 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            let ptr = libc::mmap(std::ptr::null_mut(), data.len(), libc::PROT_WRITE, libc::MAP_SHARED, fd, 0);
-            if ptr == libc::MAP_FAILED {
-                return Err(std::io::Error::last_os_error());
-            }
-            std::ptr::copy_nonoverlapping(data.as_ptr(), ptr.cast(), data.len());
-            libc::munmap(ptr, data.len());
-            Ok(())
-        })();
-        libc::close(fd);
-        if result.is_err() {
-            libc::shm_unlink(cname.as_ptr());
-        }
-        result
-    }
-}
-
 /// A frame left for the terminal to pick up.
 enum Handoff {
     Shm(String),
@@ -549,11 +538,7 @@ impl Handoff {
     /// Deletes it; true if it was still there.
     fn remove(&self) -> bool {
         match self {
-            Handoff::Shm(name) => {
-                let cname = std::ffi::CString::new(name.as_str()).expect("shm names have no NUL");
-                // SAFETY: unlinking by name has no memory-safety requirements.
-                unsafe { libc::shm_unlink(cname.as_ptr()) == 0 }
-            }
+            Handoff::Shm(name) => crate::kitty::remove_shm(name),
             Handoff::File(path) => std::fs::remove_file(path).is_ok(),
         }
     }
@@ -570,7 +555,7 @@ impl Drop for View {
 
 /// RetroArch's default keys: arrows, X and Z for A and B, A and S for L and R, Enter for Start,
 /// and Backspace for Select (RetroArch uses right Shift, which terminals don't report alone).
-fn key_button(code: KeyCode) -> Option<u16> {
+pub fn key_button(code: KeyCode) -> Option<u16> {
     let name = match code {
         KeyCode::Up => "up",
         KeyCode::Down => "down",
@@ -591,7 +576,7 @@ fn key_button(code: KeyCode) -> Option<u16> {
 
 /// The buttons held on one controller, in libretro's layout: A on the right face button, B on
 /// the bottom one, as on a Super Nintendo pad. The left stick works as the d-pad.
-fn pad_buttons(pad: &gilrs::Gamepad) -> u16 {
+pub fn pad_buttons(pad: &gilrs::Gamepad) -> u16 {
     const MAP: [(Button, &str); 14] = [
         (Button::East, "a"),
         (Button::South, "b"),

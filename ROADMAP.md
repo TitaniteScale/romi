@@ -148,9 +148,10 @@ It's built in steps, and the first one pays off without any of the TUI work:
      when it scales it, which blurs pixel art, so romi should scale by a whole number itself and send
      the bigger frame through shared memory. zlib shrinks a GBA frame from 112 KB to a few KB, which
      makes direct transfer a real option for terminals without shared memory.
-   - **In the TUI**: draw the game in the middle panel with Kitty's Unicode placeholders, so ratatui
-     owns the cells and only the image data changes each frame. The core thread and controller input
-     move into the main event loop.
+   - ✓ **In the TUI** ("Play in romi" in a game's menu): the game plays in the middle panel behind
+     Kitty's Unicode placeholders, so ratatui owns the cells and only the image changes each frame.
+     romi scales frames to the cells' exact pixel size, nearest neighbour; panels that aren't a whole
+     multiple of the game's size get some pixels a screen pixel wider than others.
 3. **Audio and input**: audio through `cpal`, resampled to the device rate and used to pace emulation.
    The controller already goes through `gilrs`. Playing on a keyboard needs key-release events, so it
    only works in terminals that support the Kitty keyboard protocol.

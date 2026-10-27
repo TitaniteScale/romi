@@ -835,7 +835,7 @@ fn run_core(
             (game.name.clone(), rom, Some(game.launch.clone()))
         }
     };
-    if rom.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip") || e.eq_ignore_ascii_case("7z")) {
+    if !crate::retro::can_open(&rom) {
         return fail(exit::UNAVAILABLE, format!("{}: romi can't unpack archives yet; extract it first", rom.display()));
     }
     let core = match core {
@@ -846,7 +846,7 @@ fn run_core(
                 Some(Err(e)) => return fail(exit::CONFIG, format!("{name}: {e:#}")),
                 None => Vec::new(),
             };
-            match libretro_core(&argv) {
+            match crate::retro::core_in(&argv) {
                 Some(c) => c,
                 None => return fail(exit::USAGE, format!("{name} doesn't run through a libretro core; pass --core")),
             }
@@ -930,14 +930,6 @@ fn rom_file(
         crate::launch::Launch { command: s.command.clone(), mode: s.mode, cwd: None, env: s.env.clone(), vars }
     });
     Ok((name, rom.to_path_buf(), launch))
-}
-
-/// The core in a RetroArch command line (`-L core.so` or `--libretro=core.so`).
-fn libretro_core(argv: &[String]) -> Option<PathBuf> {
-    argv.iter().enumerate().find_map(|(i, arg)| match arg.as_str() {
-        "-L" | "--libretro" => argv.get(i + 1).map(PathBuf::from),
-        _ => arg.strip_prefix("--libretro=").map(PathBuf::from),
-    })
 }
 
 // ---- init and add ----

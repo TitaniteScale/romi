@@ -108,7 +108,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         }
         let areas = Layout::horizontal(cols).split(body);
         draw_systems(f, app, &theme, areas[0]);
-        if grid {
+        if app.embedded.is_some() {
+            draw_embedded(f, app, &theme, areas[1]);
+        } else if grid {
             draw_grid(f, app, &theme, areas[1]);
         } else {
             draw_games(f, app, &theme, areas[1]);
@@ -650,6 +652,21 @@ fn draw_playing(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let used = if art_h >= 4 { draw_cover(f, app, g, Rect { height: art_h, ..inner }) } else { 0 };
     let text_area = Rect { y: inner.y + used + u16::from(used > 0), height: text_h, ..inner };
     f.render_widget(Paragraph::new(lines).alignment(Alignment::Center), text_area);
+}
+
+/// A game played inside romi: its picture, as big as fits, and how to stop it.
+fn draw_embedded(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
+    let Some(embedded) = &mut app.embedded else { return };
+    let block = theme.block(app.lib.games[embedded.game].name.clone(), true);
+    let inner = block.inner(area);
+    f.render_widget(Clear, area);
+    f.render_widget(block, area);
+    let [screen, hint] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
+    if let Some(cells) = embedded.place(screen) {
+        crate::kitty::placeholders(f.buffer_mut(), cells, crate::embedded::IMAGE);
+    }
+    let text = "Esc, or hold Select+Start, to stop";
+    f.render_widget(Paragraph::new(Span::styled(text, Style::new().dim())).alignment(Alignment::Center), hint);
 }
 
 fn draw_empty(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {

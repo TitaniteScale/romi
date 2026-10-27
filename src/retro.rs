@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result, bail};
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -338,6 +338,19 @@ impl Drop for Core {
         }
         LOADED.store(false, Ordering::SeqCst);
     }
+}
+
+/// The core in a RetroArch command line (`-L core.so` or `--libretro=core.so`).
+pub fn core_in(argv: &[String]) -> Option<PathBuf> {
+    argv.iter().enumerate().find_map(|(i, arg)| match arg.as_str() {
+        "-L" | "--libretro" => argv.get(i + 1).map(PathBuf::from),
+        _ => arg.strip_prefix("--libretro=").map(PathBuf::from),
+    })
+}
+
+/// Whether romi can open this ROM itself (it can't unpack archives yet).
+pub fn can_open(rom: &Path) -> bool {
+    !rom.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip") || e.eq_ignore_ascii_case("7z"))
 }
 
 // ---- scripted input ----

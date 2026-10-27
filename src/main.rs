@@ -5,12 +5,14 @@ mod cheevos;
 mod cli;
 mod config;
 mod cover;
+mod embedded;
 mod emucfg;
 mod emulators;
 mod filter;
 mod gamepad;
 mod hooks;
 mod init;
+mod kitty;
 mod launch;
 mod library;
 mod live;
@@ -126,7 +128,10 @@ fn terminal_answers() -> bool {
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, rx: &Receiver<PadEvent>) -> Result<()> {
     while !app.quit {
         terminal.draw(|f| ui::draw(f, app))?;
-        if event::poll(Duration::from_millis(20))? {
+        app.pump_embedded();
+        // A game in the middle panel needs a new frame every 16ms.
+        let wait = if app.embedded.is_some() { Duration::from_millis(4) } else { Duration::from_millis(20) };
+        if event::poll(wait)? {
             while event::poll(Duration::ZERO)? {
                 app.on_term_event(event::read()?);
             }
