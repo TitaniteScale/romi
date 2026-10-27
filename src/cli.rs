@@ -10,7 +10,7 @@ use crate::meta::Meta;
 use crate::session::{self, Session};
 use crate::state::{State, now};
 use crate::{app, art, steam};
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
 use serde::Serialize;
@@ -131,6 +131,32 @@ pub enum Command {
         #[arg(long)]
         dry_run: bool,
         /// Print the outcome (or with --dry-run, the command) as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a game inside romi for a number of frames, with no window, and save the last frame.
+    /// Uses the libretro core from the game's RetroArch command
+    Run {
+        /// A ROM file, or a game key (from `romi list`), exact name or words from the name
+        #[arg(add = ArgValueCompleter::new(complete_games))]
+        game: String,
+        /// Only look in this system (id or name)
+        #[arg(long, value_name = "ID", add = ArgValueCompleter::new(complete_systems))]
+        system: Option<String>,
+        /// The libretro core to use instead of the one in the game's command
+        #[arg(long, value_name = "PATH")]
+        core: Option<PathBuf>,
+        /// How many frames to run
+        #[arg(long, default_value_t = 600, value_name = "N")]
+        frames: u64,
+        /// Save the last frame here as a PNG
+        #[arg(long, value_name = "PATH")]
+        screenshot: Option<PathBuf>,
+        /// Buttons to press: lines of `<frame> <buttons...>`, each held until the next line
+        /// (buttons: a b x y l r l2 r2 l3 r3 start select up down left right)
+        #[arg(long, value_name = "PATH")]
+        input: Option<PathBuf>,
+        /// Print the outcome as JSON
         #[arg(long)]
         json: bool,
     },
@@ -370,6 +396,9 @@ pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
         Command::Info { game, system, json } => info(cfg, &game, system.as_deref(), json),
         Command::Play { game, system, mode, dry_run, json } => {
             play(cfg, cfg_path, &game, system.as_deref(), mode, dry_run, json)
+        }
+        Command::Run { game, system, core, frames, screenshot, input, json } => {
+            run_core(cfg, &game, system.as_deref(), core, frames, screenshot.as_deref(), input.as_deref(), json)
         }
         Command::Stats { json } => stats(cfg, json),
         Command::Achievements { json } => achievements(cfg, json),
@@ -775,6 +804,132 @@ fn wait_for_game(child: &mut Child) -> std::io::Result<ExitStatus> {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
+}
+
+// ---- run ----
+
+#[allow(clippy::too_many_arguments)]
+fn run_core(
+    cfg: &Config,
+    query: &str,
+    system: Option<&str>,
+    core: Option<PathBuf>,
+    frames: u64,
+    screenshot: Option<&Path>,
+    input: Option<&Path>,
+    json: bool,
+) -> Result<()> {
+    let (name, rom, launch) = match Path::new(query).is_file() {
+        true => rom_file(cfg, Path::new(query), system)?,
+        false => {
+            let lib = Library::load(cfg);
+            let game = &lib.games[resolve(&lib, query, system)?];
+            let Some(rom) = game.path.clone() else {
+                return fail(exit::USAGE, format!("{} isn't a ROM", game.name));
+            };
+            (game.name.clone(), rom, Some(game.launch.clone()))
+        }
+    };
+    if rom.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip") || e.eq_ignore_ascii_case("7z")) {
+        return fail(exit::UNAVAILABLE, format!("{}: romi can't unpack archives yet; extract it first", rom.display()));
+    }
+    let core = match core {
+        Some(c) => c,
+        None => {
+            let argv = match launch.as_ref().map(|l| l.prepare()) {
+                Some(Ok(p)) => p.argv,
+                Some(Err(e)) => return fail(exit::CONFIG, format!("{name}: {e:#}")),
+                None => Vec::new(),
+            };
+            match libretro_core(&argv) {
+                Some(c) => c,
+                None => return fail(exit::USAGE, format!("{name} doesn't run through a libretro core; pass --core")),
+            }
+        }
+    };
+    if !core.is_file() {
+        return fail(exit::UNAVAILABLE, format!("no core at {}", app::tilde(&core)));
+    }
+    let script = match input {
+        Some(path) => {
+            let text = std::fs::read_to_string(path).with_context(|| format!("can't read {}", path.display()))?;
+            crate::retro::Script::parse(&text).or_else(|e| fail(exit::USAGE, format!("{}: {e:#}", path.display())))?
+        }
+        None => crate::retro::Script::default(),
+    };
+
+    let mut emu = crate::retro::Core::load(&core, &rom)?;
+    let started = Instant::now();
+    for n in 0..frames {
+        emu.run_frame(script.buttons_at(n));
+    }
+    let elapsed = started.elapsed();
+    let frame = emu.frame();
+    if let Some(path) = screenshot {
+        let Some(img) = image::RgbImage::from_raw(frame.width, frame.height, frame.rgb) else {
+            bail!("{} hasn't drawn anything after {frames} frames", emu.name);
+        };
+        img.save(path).with_context(|| format!("can't save {}", path.display()))?;
+    }
+    let speed = frames as f64 / elapsed.as_secs_f64().max(1e-9);
+    if json {
+        let outcome = serde_json::json!({
+            "name": name,
+            "rom": rom,
+            "core": core,
+            "core_name": emu.name,
+            "frames": frames,
+            "width": frame.width,
+            "height": frame.height,
+            "fps": emu.fps,
+            "elapsed_secs": elapsed.as_secs_f64(),
+            "screenshot": screenshot,
+        });
+        println!("{outcome}");
+    } else {
+        println!(
+            "Ran {frames} frames of {name} in {:.2}s with {} ({speed:.0} fps, {:.1}x full speed)",
+            elapsed.as_secs_f64(),
+            emu.name,
+            speed / emu.fps,
+        );
+        if let Some(path) = screenshot {
+            println!("Saved the last frame ({}×{}) to {}", frame.width, frame.height, path.display());
+        }
+    }
+    Ok(())
+}
+
+/// A ROM given by path runs with the command of the first system that lists its extension.
+fn rom_file(
+    cfg: &Config,
+    rom: &Path,
+    system: Option<&str>,
+) -> Result<(String, PathBuf, Option<crate::launch::Launch>)> {
+    let ext = rom.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    let sys = cfg.systems.iter().find(|s| match system {
+        Some(want) => s.id.eq_ignore_ascii_case(want) || s.name.eq_ignore_ascii_case(want),
+        None => s.extensions.iter().any(|e| e.eq_ignore_ascii_case(&ext)),
+    });
+    let name = rom.file_stem().unwrap_or(rom.as_os_str()).to_string_lossy().into_owned();
+    let launch = sys.map(|s| {
+        let mut vars = cfg.vars.clone();
+        let rom_str = rom.to_string_lossy().into_owned();
+        vars.insert("rom".into(), rom_str);
+        vars.insert("file".into(), rom.file_name().unwrap_or_default().to_string_lossy().into_owned());
+        vars.insert("name".into(), name.clone());
+        vars.insert("dir".into(), rom.parent().unwrap_or(Path::new(".")).to_string_lossy().into_owned());
+        crate::launch::Launch { command: s.command.clone(), mode: s.mode, cwd: None, env: s.env.clone(), vars }
+    });
+    Ok((name, rom.to_path_buf(), launch))
+}
+
+/// The core in a RetroArch command line (`-L core.so` or `--libretro=core.so`).
+fn libretro_core(argv: &[String]) -> Option<PathBuf> {
+    argv.iter().enumerate().find_map(|(i, arg)| match arg.as_str() {
+        "-L" | "--libretro" => argv.get(i + 1).map(PathBuf::from),
+        _ => arg.strip_prefix("--libretro=").map(PathBuf::from),
+    })
 }
 
 // ---- init and add ----

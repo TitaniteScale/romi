@@ -135,7 +135,7 @@ once per frame, and answer the video, audio and input callbacks.
 
 It's built in steps, and the first one pays off without any of the TUI work:
 
-1. **Headless runner**: `romi run <rom> --frames 600 --screenshot out.png [--input script]` runs a core
+1. ✓ **Headless runner**: `romi run <rom> --frames 600 --screenshot out.png [--input script]` runs a core
    for a set number of frames with scripted input and saves the last frame. There's no window and no
    RetroArch. A coding agent working on a ROM hack, a decomp or a homebrew game can build it, boot it
    and look at the result. Runs come out the same every time, so the screenshots also work as

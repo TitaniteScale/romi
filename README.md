@@ -45,6 +45,20 @@ script, stops both; romi waits for the game to exit and records the session befo
 signal sent to romi alone is passed on to the game. `--json` prints the outcome: `exit_code`,
 `played_secs` and the `log` path.
 
+**Running a game headless**: `romi run` plays a game inside romi, with no window and no RetroArch,
+for a set number of frames (600 by default, 10 seconds of most consoles) and saves the last frame
+with `--screenshot out.png`. It loads the libretro core from the game's `retroarch -L` command, or
+the one given with `--core`, and takes a game name or a ROM file, so it works on a build fresh out
+of a ROM hack or decomp. `--input` holds buttons from a script of `<frame> <buttons...>` lines, each
+held until the next line (`300 start`, then `306` to let go). The same ROM, script and frame count
+always give the same picture, so screenshots can be compared between builds. Only cores that draw
+in software work (most 2D systems), there's no sound, and zipped ROMs need extracting first.
+
+```
+romi run "pokemon pinball" --frames 1200 --input start.txt --screenshot title.png
+romi run build/game.gba --core /usr/lib/libretro/mgba_libretro.so --screenshot out.png --json
+```
+
 **Detached games** (from `--mode detach`, or a game configured that way) are played by a copy of
 romi running in the background, so their play time is recorded even after the TUI or the command
 that started them has gone. A launcher that hands off and returns right away, like Steam, still
@@ -533,6 +547,7 @@ A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 | `src/stats.rs`    | the session history and the stats worked out from it             |
 | `src/ra.rs`       | RetroAchievements: game lists, your progress, ROM hashing        |
 | `src/hooks.rs`    | `on_launch` and `on_exit` hooks                                  |
+| `src/retro.rs`    | a minimal libretro frontend for `romi run`: loading cores, frames, scripted input |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
 | `e2e/test_*.py`   | end-to-end tests of the TUI and the CLI                          |

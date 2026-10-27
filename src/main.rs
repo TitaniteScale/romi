@@ -16,6 +16,7 @@ mod library;
 mod meta;
 mod overrides;
 mod ra;
+mod retro;
 mod session;
 mod sort;
 mod state;
