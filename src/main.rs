@@ -13,6 +13,7 @@ mod hooks;
 mod init;
 mod launch;
 mod library;
+mod live;
 mod meta;
 mod overrides;
 mod ra;

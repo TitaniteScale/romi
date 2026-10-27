@@ -141,10 +141,16 @@ It's built in steps, and the first one pays off without any of the TUI work:
    and look at the result. Runs come out the same every time, so the screenshots also work as
    regression tests.
 2. **Live video in the terminal**: stream frames with the Kitty graphics protocol, replacing one image
-   in place. Use shared memory or temp-file transfer where the terminal supports them, since base64
-   through the terminal is about 12 MB/s at GBA resolution and 60 fps. Without Kitty graphics, fall back
-   to truecolor half-blocks (a Game Boy screen is 160×72 cells), drawing fewer frames than are emulated
-   if needed.
+   in place. Without Kitty graphics, fall back to truecolor half-blocks (a Game Boy screen is 160×72
+   cells), drawing fewer frames than are emulated if needed.
+   - ✓ **Spike** (`romi run --live`): full screen, a controller, clock pacing. In Ghostty, a GBA game
+     holds 59.7 fps through shared memory, with nothing piling up unread. Ghostty smooths the picture
+     when it scales it, which blurs pixel art, so romi should scale by a whole number itself and send
+     the bigger frame through shared memory. zlib shrinks a GBA frame from 112 KB to a few KB, which
+     makes direct transfer a real option for terminals without shared memory.
+   - **In the TUI**: draw the game in the middle panel with Kitty's Unicode placeholders, so ratatui
+     owns the cells and only the image data changes each frame. The core thread and controller input
+     move into the main event loop.
 3. **Audio and input**: audio through `cpal`, resampled to the device rate and used to pace emulation.
    The controller already goes through `gilrs`. Playing on a keyboard needs key-release events, so it
    only works in terminals that support the Kitty keyboard protocol.
@@ -156,9 +162,14 @@ It's built in steps, and the first one pays off without any of the TUI work:
 6. **Full screen**: at first, scale the game to fill the terminal. Later, maybe, hand off to RetroArch
    mid-game through a save state. Whether romi's save states and RetroArch's are compatible still needs
    checking.
+7. **RetroAchievements during play**: unlock notifications drawn over the game. This needs `rcheevos`
+   (RetroAchievements' C library, compiled into romi) to check each achievement's memory conditions
+   against the core's memory every frame. Showing an unlock only needs the achievement list.
+   Recording it on the user's account needs a login token from their password, because the web API
+   key romi has now only reads.
 
-Before going past step 1, a spike should check whether a Game Boy core holds 60 fps in Ghostty and kitty,
-and how much input lag there is.
+The spike settled 60 fps in Ghostty. Still to check: kitty and other terminals, and how much input
+lag there is.
 
 ## Filling the gaps, any time
 

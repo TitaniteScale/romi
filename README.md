@@ -59,6 +59,12 @@ romi run "pokemon pinball" --frames 1200 --input start.txt --screenshot title.pn
 romi run build/game.gba --core /usr/lib/libretro/mgba_libretro.so --screenshot out.png --json
 ```
 
+`romi run <game> --live` plays it in the terminal instead, drawn with the Kitty graphics protocol.
+It's an experiment on the way to playing inside the TUI: F1 switches how frames reach the terminal,
+F2 whether the terminal or romi scales them, and the bottom line shows frame rates and send times.
+Keys follow RetroArch's defaults (arrows, X/Z for A/B, A/S for Y/X, Q/W for L/R, Enter for Start,
+Backspace for Select); a controller works too. Esc, or holding Select+Start, quits.
+
 **Detached games** (from `--mode detach`, or a game configured that way) are played by a copy of
 romi running in the background, so their play time is recorded even after the TUI or the command
 that started them has gone. A launcher that hands off and returns right away, like Steam, still
@@ -548,6 +554,7 @@ A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 | `src/ra.rs`       | RetroAchievements: game lists, your progress, ROM hashing        |
 | `src/hooks.rs`    | `on_launch` and `on_exit` hooks                                  |
 | `src/retro.rs`    | a minimal libretro frontend for `romi run`: loading cores, frames, scripted input |
+| `src/live.rs`     | `romi run --live`: a game in the terminal over Kitty graphics, with controller input |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
 | `e2e/test_*.py`   | end-to-end tests of the TUI and the CLI                          |

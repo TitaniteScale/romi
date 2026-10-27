@@ -159,6 +159,10 @@ pub enum Command {
         /// Print the outcome as JSON
         #[arg(long)]
         json: bool,
+        /// Play it in this terminal instead, drawn with Kitty graphics (an experiment: Esc quits,
+        /// F1 and F2 switch how frames are sent and scaled)
+        #[arg(long, conflicts_with_all = ["frames", "screenshot", "input", "json"])]
+        live: bool,
     },
     /// Find your ROM folders and emulators, and write a config for them
     Init {
@@ -397,8 +401,8 @@ pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
         Command::Play { game, system, mode, dry_run, json } => {
             play(cfg, cfg_path, &game, system.as_deref(), mode, dry_run, json)
         }
-        Command::Run { game, system, core, frames, screenshot, input, json } => {
-            run_core(cfg, &game, system.as_deref(), core, frames, screenshot.as_deref(), input.as_deref(), json)
+        Command::Run { game, system, core, frames, screenshot, input, json, live } => {
+            run_core(cfg, &game, system.as_deref(), core, frames, screenshot.as_deref(), input.as_deref(), json, live)
         }
         Command::Stats { json } => stats(cfg, json),
         Command::Achievements { json } => achievements(cfg, json),
@@ -818,6 +822,7 @@ fn run_core(
     screenshot: Option<&Path>,
     input: Option<&Path>,
     json: bool,
+    live: bool,
 ) -> Result<()> {
     let (name, rom, launch) = match Path::new(query).is_file() {
         true => rom_file(cfg, Path::new(query), system)?,
@@ -859,6 +864,9 @@ fn run_core(
     };
 
     let mut emu = crate::retro::Core::load(&core, &rom)?;
+    if live {
+        return crate::live::play(emu, &name);
+    }
     let started = Instant::now();
     for n in 0..frames {
         emu.run_frame(script.buttons_at(n));
