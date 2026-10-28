@@ -1400,7 +1400,8 @@ impl App {
 
     fn play_here(&mut self, g: usize) {
         let Some((core, rom)) = self.embeddable(g) else { return };
-        match crate::embedded::Embedded::start(g, &core, &rom) {
+        let volume = f32::from(self.cfg.volume.min(100)) / 100.0;
+        match crate::embedded::Embedded::start(g, &core, &rom, volume) {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),
         }
@@ -1421,7 +1422,10 @@ impl App {
         }
         if let Err(e) = embedded.pump() {
             self.stop_embedded();
-            self.set_status(Level::Error, format!("Stopped: {e:#}"));
+            return self.set_status(Level::Error, format!("Stopped: {e:#}"));
+        }
+        if let Some(e) = embedded.sound_error() {
+            self.set_status(Level::Warn, format!("No sound: {e}"));
         }
     }
 

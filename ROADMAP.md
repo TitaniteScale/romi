@@ -155,6 +155,11 @@ It's built in steps, and the first one pays off without any of the TUI work:
 3. **Audio and input**: audio through `cpal`, resampled to the device rate and used to pace emulation.
    The controller already goes through `gilrs`. Playing on a keyboard needs key-release events, so it
    only works in terminals that support the Kitty keyboard protocol.
+   - ✓ **Sound**, through PulseAudio (which PipeWire also serves) or ALSA. Each frame takes as long
+     as the sound it made, stretched or shortened by up to half a percent to keep about 40 ms
+     queued, so frames stay evenly spaced and the pitch is exact. A core's sample rate turned out
+     to be more reliable than its frame rate: mGBA says 61.2 fps for Game Boy games, which run at
+     59.7. `romi run --wav` saves a headless run's sound, the same every time.
 4. **Saves**: keep in-game saves in RetroArch's save folder, under the same names, so a save made in romi
    carries over to RetroArch and back.
 5. **Scenes**: a PNG frame with a transparent screen area. romi draws each emulated frame into it and

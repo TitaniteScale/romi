@@ -56,6 +56,9 @@
     "require_focus": true
   },
 
+  // How loud games played inside romi ("Play in romi", `romi run --live`) are: 0 (silent) to 100.
+  "volume": 100,
+
   "systems": [
     {
       "id": "arcade", "arcade": true, "name": "Arcade",

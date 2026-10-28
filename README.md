@@ -51,24 +51,28 @@ with `--screenshot out.png`. It loads the libretro core from the game's `retroar
 the one given with `--core`, and takes a game name or a ROM file, so it works on a build fresh out
 of a ROM hack or decomp. `--input` holds buttons from a script of `<frame> <buttons...>` lines, each
 held until the next line (`300 start`, then `306` to let go). The same ROM, script and frame count
-always give the same picture, so screenshots can be compared between builds. Only cores that draw
-in software work (most 2D systems), there's no sound, and zipped ROMs need extracting first.
+always give the same picture, so screenshots can be compared between builds. `--wav out.wav` saves
+the sound of the whole run, which comes out the same every time too. Only cores that draw in
+software work (most 2D systems), and zipped ROMs need extracting first.
 
 ```
 romi run "pokemon pinball" --frames 1200 --input start.txt --screenshot title.png
 romi run build/game.gba --core /usr/lib/libretro/mgba_libretro.so --screenshot out.png --json
+romi run "pokemon pinball" --frames 3600 --wav title-music.wav
 ```
 
 `romi run <game> --live` plays it in the terminal instead, drawn with the Kitty graphics protocol.
 It's an experiment on the way to playing inside the TUI: F1 switches how frames reach the terminal,
-F2 whether the terminal or romi scales them, and the bottom line shows frame rates and send times.
+F2 whether the terminal or romi scales them, F4 mutes the sound, and the bottom line shows frame
+rates, send times and how far ahead the sound is queued.
 Keys follow RetroArch's defaults (arrows, X/Z for A/B, A/S for Y/X, Q/W for L/R, Enter for Start,
 Backspace for Select); a controller works too. Esc, or holding Select+Start, quits.
 
 In the TUI, a game's menu (`o`) has **Play in romi** for games run through a libretro core. It plays
 the game in the middle panel, with the systems and details still around it, drawn behind Kitty
 Unicode placeholders. Esc, or holding Select+Start, stops it. This is experimental too: Kitty
-graphics only, no sound, no saves.
+graphics only, no saves. Sound plays through PulseAudio (or PipeWire's stand-in for it), or ALSA
+without either; `"volume"` in the config sets how loud, from 0 to 100.
 
 **Detached games** (from `--mode detach`, or a game configured that way) are played by a copy of
 romi running in the background, so their play time is recorded even after the TUI or the command
@@ -560,6 +564,7 @@ A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 | `src/hooks.rs`    | `on_launch` and `on_exit` hooks                                  |
 | `src/retro.rs`    | a minimal libretro frontend for `romi run`: loading cores, frames, scripted input |
 | `src/live.rs`     | `romi run --live`: a game in the terminal over Kitty graphics, with controller input |
+| `src/audio.rs`    | sound for games played in romi: to the speakers, pacing the game, or to a WAV file |
 | `src/embedded.rs` | a game played in the TUI's middle panel                          |
 | `src/kitty.rs`    | Kitty graphics: Unicode placeholders, shared memory              |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |

@@ -1,5 +1,5 @@
 //! A minimal libretro frontend: loads a core (the same `.so` RetroArch uses), gives it a ROM and
-//! runs it one frame at a time. Only what 2D cores need: software video, a joypad, no audio yet.
+//! runs it one frame at a time. Only what 2D cores need: software video, stereo sound, a joypad.
 //!
 //! libretro's callbacks are plain C functions with no user data, so what they share with romi
 //! lives in a global, and only one core can be loaded at a time.
@@ -119,12 +119,15 @@ pub struct Frame {
 struct Shared {
     pixel_format: c_int,
     frame: Frame,
+    /// The last frame's sound: interleaved left and right samples at the core's sample rate.
+    audio: Vec<i16>,
     buttons: u16,
 }
 
 static SHARED: Mutex<Shared> = Mutex::new(Shared {
     pixel_format: PIXEL_0RGB1555,
     frame: Frame { width: 0, height: 0, rgb: Vec::new() },
+    audio: Vec::new(),
     buttons: 0,
 });
 
@@ -215,9 +218,15 @@ fn to_rgb(format: c_int, line: &[u8], out: &mut Vec<u8>) {
     }
 }
 
-extern "C" fn audio_sample(_left: i16, _right: i16) {}
+extern "C" fn audio_sample(left: i16, right: i16) {
+    shared().audio.extend_from_slice(&[left, right]);
+}
 
-extern "C" fn audio_batch(_data: *const i16, frames: usize) -> usize {
+extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
+    if !data.is_null() {
+        // SAFETY: the core hands over `frames` pairs of samples, valid for this call.
+        shared().audio.extend_from_slice(unsafe { std::slice::from_raw_parts(data, frames * 2) });
+    }
     frames
 }
 
@@ -242,6 +251,8 @@ pub struct Core {
     /// The core's name and version, e.g. "mGBA 0.11".
     pub name: String,
     pub fps: f64,
+    /// Sound samples per second, per channel.
+    pub sample_rate: f64,
     /// The ROM's bytes, which the core may keep pointing into until the game is unloaded.
     _rom: Vec<u8>,
     // Dropped last, after `Drop` has shut the core down.
@@ -258,7 +269,7 @@ impl Core {
     }
 
     fn open(core_path: &Path, rom: &Path) -> Result<Core> {
-        *shared() = Shared { pixel_format: PIXEL_0RGB1555, frame: Frame::default(), buttons: 0 };
+        *shared() = Shared { pixel_format: PIXEL_0RGB1555, frame: Frame::default(), audio: Vec::new(), buttons: 0 };
         // SAFETY: loading a core runs its initializers; libretro cores are made to be loaded this way.
         let lib = unsafe { libloading::Library::new(core_path) }
             .with_context(|| format!("can't load {}", core_path.display()))?;
@@ -312,13 +323,17 @@ impl Core {
             }
             let mut av = AvInfo::default();
             sym!("retro_get_system_av_info", unsafe extern "C" fn(*mut AvInfo))(&mut av);
-            Ok(Core { api, name, fps: av.timing.fps, _rom: data, _lib: lib })
+            Ok(Core { api, name, fps: av.timing.fps, sample_rate: av.timing.sample_rate, _rom: data, _lib: lib })
         }
     }
 
     /// Runs one frame with these buttons held (bits from `button`).
     pub fn run_frame(&mut self, buttons: u16) {
-        shared().buttons = buttons;
+        {
+            let mut s = shared();
+            s.buttons = buttons;
+            s.audio.clear();
+        }
         // SAFETY: the game is loaded, and only one thread drives a core.
         unsafe { (self.api.run)() }
     }
@@ -326,6 +341,11 @@ impl Core {
     /// The last frame the core drew.
     pub fn frame(&self) -> Frame {
         shared().frame.clone()
+    }
+
+    /// Appends the last frame's sound to `out`, as interleaved left and right samples.
+    pub fn audio(&self, out: &mut Vec<i16>) {
+        out.extend_from_slice(&shared().audio);
     }
 }
 

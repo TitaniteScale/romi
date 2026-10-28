@@ -31,6 +31,8 @@ pub struct Config {
     pub hooks: Hooks,
     pub theme: Theme,
     pub controller: ControllerConfig,
+    /// How loud games played inside romi are, from 0 (silent) to 100.
+    pub volume: u8,
     pub systems: Vec<SystemConfig>,
     pub games: Vec<GameConfig>,
     /// Tweaks to any game (ROM, hand-added or Steam) by its key, as `romi list` shows it.
@@ -107,6 +109,7 @@ impl Default for Config {
             hooks: Hooks::default(),
             theme: Theme::default(),
             controller: ControllerConfig::default(),
+            volume: 100,
             systems: Vec::new(),
             games: Vec::new(),
             overrides: HashMap::new(),

@@ -7,7 +7,7 @@ pkgdesc="A terminal game launcher for ROMs, native ports and Steam, driven by ke
 arch=('x86_64' 'aarch64')
 url="https://github.com/TitaniteScale/romi"
 license=('MIT')
-depends=('glibc' 'libgcc' 'systemd-libs')
+depends=('alsa-lib' 'glibc' 'libgcc' 'systemd-libs')
 makedepends=('cargo')
 # With makepkg's LTO flags, ring's C code comes out as GCC bitcode that Rust's linker can't read.
 options=('!lto')

@@ -51,9 +51,9 @@ pub struct Embedded {
 }
 
 impl Embedded {
-    pub fn start(game: usize, core: &Path, rom: &Path) -> Result<Embedded> {
+    pub fn start(game: usize, core: &Path, rom: &Path, volume: f32) -> Result<Embedded> {
         let core = Core::load(core, rom)?;
-        let (shared, thread) = Shared::start(core)?;
+        let (shared, thread) = Shared::start(core, volume)?;
         // Key releases are needed to know when a button is let go.
         let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
         execute!(std::io::stdout(), PushKeyboardEnhancementFlags(flags))?;
@@ -106,6 +106,11 @@ impl Embedded {
         }
         self.shared.buttons.store(buttons, Ordering::Relaxed);
         true
+    }
+
+    /// Why the game has no sound, once, if it has none.
+    pub fn sound_error(&self) -> Option<String> {
+        self.shared.sound_error.lock().unwrap_or_else(|e| e.into_inner()).take()
     }
 
     /// Works out the cells the picture covers in `area`: as big as fits, in the frame's shape,

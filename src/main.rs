@@ -1,6 +1,7 @@
 mod add;
 mod app;
 mod art;
+mod audio;
 mod cheevos;
 mod cli;
 mod config;

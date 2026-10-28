@@ -152,6 +152,9 @@ pub enum Command {
         /// Save the last frame here as a PNG
         #[arg(long, value_name = "PATH")]
         screenshot: Option<PathBuf>,
+        /// Save the sound of the whole run here as a WAV file
+        #[arg(long, value_name = "PATH")]
+        wav: Option<PathBuf>,
         /// Buttons to press: lines of `<frame> <buttons...>`, each held until the next line
         /// (buttons: a b x y l r l2 r2 l3 r3 start select up down left right)
         #[arg(long, value_name = "PATH")]
@@ -160,8 +163,8 @@ pub enum Command {
         #[arg(long)]
         json: bool,
         /// Play it in this terminal instead, drawn with Kitty graphics (an experiment: Esc quits,
-        /// F1 and F2 switch how frames are sent and scaled)
-        #[arg(long, conflicts_with_all = ["frames", "screenshot", "input", "json"])]
+        /// F1 and F2 switch how frames are sent and scaled, F4 mutes)
+        #[arg(long, conflicts_with_all = ["frames", "screenshot", "wav", "input", "json"])]
         live: bool,
     },
     /// Find your ROM folders and emulators, and write a config for them
@@ -401,8 +404,9 @@ pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
         Command::Play { game, system, mode, dry_run, json } => {
             play(cfg, cfg_path, &game, system.as_deref(), mode, dry_run, json)
         }
-        Command::Run { game, system, core, frames, screenshot, input, json, live } => {
-            run_core(cfg, &game, system.as_deref(), core, frames, screenshot.as_deref(), input.as_deref(), json, live)
+        Command::Run { game, system, core, frames, screenshot, wav, input, json, live } => {
+            let (screenshot, wav) = (screenshot.as_deref(), wav.as_deref());
+            run_core(cfg, &game, system.as_deref(), core, frames, screenshot, wav, input.as_deref(), json, live)
         }
         Command::Stats { json } => stats(cfg, json),
         Command::Achievements { json } => achievements(cfg, json),
@@ -820,6 +824,7 @@ fn run_core(
     core: Option<PathBuf>,
     frames: u64,
     screenshot: Option<&Path>,
+    wav: Option<&Path>,
     input: Option<&Path>,
     json: bool,
     live: bool,
@@ -865,13 +870,21 @@ fn run_core(
 
     let mut emu = crate::retro::Core::load(&core, &rom)?;
     if live {
-        return crate::live::play(emu, &name);
+        return crate::live::play(emu, &name, f32::from(cfg.volume.min(100)) / 100.0);
     }
+    let mut sound = wav.map(|path| crate::audio::Wav::create(path, emu.sample_rate)).transpose()?;
+    let mut samples = Vec::new();
     let started = Instant::now();
     for n in 0..frames {
         emu.run_frame(script.buttons_at(n));
+        if let Some(sound) = &mut sound {
+            samples.clear();
+            emu.audio(&mut samples);
+            sound.write(&samples)?;
+        }
     }
     let elapsed = started.elapsed();
+    let sound_len = sound.map(|s| s.finish()).transpose()?;
     let frame = emu.frame();
     if let Some(path) = screenshot {
         let Some(img) = image::RgbImage::from_raw(frame.width, frame.height, frame.rgb) else {
@@ -892,6 +905,9 @@ fn run_core(
             "fps": emu.fps,
             "elapsed_secs": elapsed.as_secs_f64(),
             "screenshot": screenshot,
+            "sample_rate": emu.sample_rate,
+            "wav": wav,
+            "wav_secs": sound_len.map(|d| d.as_secs_f64()),
         });
         println!("{outcome}");
     } else {
@@ -903,6 +919,10 @@ fn run_core(
         );
         if let Some(path) = screenshot {
             println!("Saved the last frame ({}×{}) to {}", frame.width, frame.height, path.display());
+        }
+        if let (Some(path), Some(len)) = (wav, sound_len) {
+            let rate = emu.sample_rate.round();
+            println!("Saved {:.1}s of sound ({rate} Hz) to {}", len.as_secs_f64(), path.display());
         }
     }
     Ok(())

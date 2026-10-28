@@ -6,9 +6,11 @@
 //! who scales the picture (the terminal, or romi by a whole number), and the bottom line shows the
 //! frame rates and how long each frame took to send.
 //!
-//! The core runs on its own thread, paced by the clock, and the terminal shows the newest frame
-//! whenever it can, so a slow terminal drops frames rather than slowing the game.
+//! The core runs on its own thread, paced by its sound (or the clock, without sound), and the
+//! terminal shows the newest frame whenever it can, so a slow terminal drops frames rather than
+//! slowing the game. F4 mutes the sound.
 
+use crate::audio;
 use crate::retro::{Core, Frame, button};
 use anyhow::Result;
 use base64::Engine;
@@ -22,7 +24,7 @@ use ratatui::crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScr
 use ratatui::crossterm::{cursor, execute};
 use std::collections::{HashSet, VecDeque};
 use std::io::Write;
-use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
@@ -80,16 +82,29 @@ pub struct Shared {
     ready: Condvar,
     pub buttons: AtomicU16,
     quit: AtomicBool,
+    /// How loud the sound plays (1 is as the core made it).
+    volume: f32,
+    pub muted: AtomicBool,
+    /// Milliseconds of sound queued for the device, or `NO_SOUND`.
+    queued_ms: AtomicU32,
+    /// Why there's no sound, once the core thread has found out.
+    pub sound_error: Mutex<Option<String>>,
 }
 
+const NO_SOUND: u32 = u32::MAX;
+
 impl Shared {
-    /// Starts `core` on its own thread, running at its own frame rate until `stop`.
-    pub fn start(core: Core) -> Result<(Arc<Shared>, std::thread::JoinHandle<()>)> {
+    /// Starts `core` on its own thread, running until `stop`, with its sound `volume` loud.
+    pub fn start(core: Core, volume: f32) -> Result<(Arc<Shared>, std::thread::JoinHandle<()>)> {
         let shared = Arc::new(Shared {
             latest: Mutex::new((0, Frame::default())),
             ready: Condvar::new(),
             buttons: AtomicU16::new(0),
             quit: AtomicBool::new(false),
+            volume,
+            muted: AtomicBool::new(false),
+            queued_ms: AtomicU32::new(NO_SOUND),
+            sound_error: Mutex::new(None),
         });
         let thread = {
             let shared = shared.clone();
@@ -109,22 +124,39 @@ impl Shared {
     }
 }
 
-pub fn play(core: Core, name: &str) -> Result<()> {
+pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     let fps = core.fps;
     let core_name = core.name.clone();
-    let (shared, emu) = Shared::start(core)?;
+    let (shared, emu) = Shared::start(core, volume)?;
     let result = Screen::enter().and_then(|_screen| View::new(name, &core_name, fps).run(&shared));
     shared.stop();
     let _ = emu.join();
     result
 }
 
-/// Runs the core at its own frame rate until told to quit.
+/// Runs the core until told to quit, playing its sound, at the pace its sound sets (or at its
+/// frame rate, without sound).
 fn run_core(mut core: Core, shared: &Shared) {
+    // The stream lives on this thread, so it's opened here.
+    let mut sound = audio::Output::open(core.sample_rate, core.fps)
+        .inspect_err(|e| *shared.sound_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("{e:#}")))
+        .ok();
+    let mut samples = Vec::new();
     let period = Duration::from_secs_f64(1.0 / core.fps);
     let mut next = Instant::now();
     while !shared.quit.load(Ordering::Relaxed) {
         core.run_frame(shared.buttons.load(Ordering::Relaxed));
+        let wait = match &mut sound {
+            Some(sound) => {
+                samples.clear();
+                core.audio(&mut samples);
+                let volume = if shared.muted.load(Ordering::Relaxed) { 0.0 } else { shared.volume };
+                let lasts = sound.push(&samples, volume);
+                shared.queued_ms.store(sound.ahead().as_millis() as u32, Ordering::Relaxed);
+                lasts
+            }
+            None => period,
+        };
         let frame = core.frame();
         {
             let mut latest = shared.latest.lock().unwrap_or_else(|e| e.into_inner());
@@ -132,7 +164,7 @@ fn run_core(mut core: Core, shared: &Shared) {
             latest.1 = frame;
         }
         shared.ready.notify_one();
-        next += period;
+        next += wait;
         let now = Instant::now();
         if next > now {
             std::thread::sleep(next - now);
@@ -291,6 +323,9 @@ impl View {
                     KeyCode::F(3) if k.kind == KeyEventKind::Press => {
                         self.show_status = !self.show_status;
                         self.relayout()?;
+                    }
+                    KeyCode::F(4) if k.kind == KeyEventKind::Press => {
+                        shared.muted.fetch_xor(true, Ordering::Relaxed);
                     }
                     code => {
                         self.keys.insert(code);
@@ -457,8 +492,16 @@ impl View {
             0 => String::new(),
             n => format!(" · {n} unread!"),
         };
+        let sound = match shared.queued_ms.load(Ordering::Relaxed) {
+            _ if shared.muted.load(Ordering::Relaxed) => "muted".to_string(),
+            NO_SOUND => match &*shared.sound_error.lock().unwrap_or_else(|e| e.into_inner()) {
+                Some(e) => format!("no sound: {e}"),
+                None => "no sound yet".to_string(),
+            },
+            ms => format!("sound {ms} ms ahead"),
+        };
         let line = format!(
-            " game {game_fps:.1}/{:.1} fps · shown {shown_fps:.1} fps · {} · scaled {scale} · {} KB/frame · send {:.2} ms (worst {:.1}){unread} · F1 transfer F2 scale F3 hide · Esc or hold Select+Start to quit · {} · {}",
+            " game {game_fps:.1}/{:.1} fps · shown {shown_fps:.1} fps · {} · scaled {scale} · {} KB/frame · send {:.2} ms (worst {:.1}){unread} · {sound} · F1 transfer F2 scale F3 hide F4 mute · Esc or hold Select+Start to quit · {} · {}",
             self.fps,
             self.transfer.label(),
             per_frame / 1024,
