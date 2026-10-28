@@ -6,36 +6,30 @@
 //! who scales the picture (the terminal, or romi by a whole number), and the bottom line shows the
 //! frame rates and how long each frame took to send.
 //!
-//! The core runs on its own thread, paced by its sound (or the clock, without sound), and the
-//! terminal shows the newest frame whenever it can, so a slow terminal drops frames rather than
-//! slowing the game. F4 mutes the sound.
+//! The game runs on its own thread (see `runner`), and the terminal shows the newest frame whenever
+//! it can, so a slow terminal drops frames rather than slowing the game. F4 mutes the sound.
 
-use crate::audio;
-use crate::config::Config;
-use crate::retro::{Core, Dirs, Frame, button};
-use anyhow::{Context, Result};
+use crate::controls::Controls;
+use crate::kitty;
+use crate::retro::{Core, Frame};
+use crate::runner::Shared;
+use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use gilrs::{Axis, Button, Gilrs};
 use ratatui::crossterm::event::{
     self, Event, KeyCode, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
     PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen};
 use ratatui::crossterm::{cursor, execute};
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::io::Write;
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 /// The id of the one image romi keeps replacing, and of its one placement.
 const IMAGE: u32 = 1;
 /// Base64 bytes per escape sequence when sending pixels directly (the protocol's limit).
 const CHUNK: usize = 4096;
-/// Holding Select and Start together this long quits.
-const QUIT_HOLD: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, PartialEq)]
 enum Transfer {
@@ -77,65 +71,6 @@ enum Scale {
     Integer,
 }
 
-/// What the core thread and the terminal share.
-pub struct Shared {
-    /// The newest frame and how many frames have run.
-    pub latest: Mutex<(u64, Frame)>,
-    ready: Condvar,
-    pub buttons: AtomicU16,
-    quit: AtomicBool,
-    /// How loud the sound plays (1 is as the core made it).
-    volume: f32,
-    pub muted: AtomicBool,
-    /// Milliseconds of sound queued for the device, or `NO_SOUND`.
-    queued_ms: AtomicU32,
-    /// Why there's no sound, once the core thread has found out.
-    pub sound_error: Mutex<Option<String>>,
-}
-
-const NO_SOUND: u32 = u32::MAX;
-
-impl Shared {
-    /// Starts `core` on its own thread, running until `stop`, with its sound `volume` loud.
-    pub fn start(core: Core, volume: f32) -> Result<(Arc<Shared>, std::thread::JoinHandle<()>)> {
-        let shared = Arc::new(Shared {
-            latest: Mutex::new((0, Frame::default())),
-            ready: Condvar::new(),
-            buttons: AtomicU16::new(0),
-            quit: AtomicBool::new(false),
-            volume,
-            muted: AtomicBool::new(false),
-            queued_ms: AtomicU32::new(NO_SOUND),
-            sound_error: Mutex::new(None),
-        });
-        let thread = {
-            let shared = shared.clone();
-            std::thread::Builder::new().name("core".into()).spawn(move || run_core(core, &shared))?
-        };
-        Ok((shared, thread))
-    }
-
-    pub fn stop(&self) {
-        self.quit.store(true, Ordering::SeqCst);
-    }
-
-    /// The newest frame, if it's newer than frame number `seen`, and its number.
-    pub fn take_newer(&self, seen: u64) -> Option<(u64, Frame)> {
-        let mut latest = self.latest.lock().unwrap_or_else(|e| e.into_inner());
-        (latest.0 != seen).then(|| (latest.0, std::mem::take(&mut latest.1)))
-    }
-}
-
-/// Loads a core to play `rom` with. It gets RetroArch's system folder and RetroArch's save folder
-/// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways.
-pub fn load(cfg: &Config, core: &Path, rom: &Path) -> Result<Core> {
-    let saves = crate::retro::info(core).and_then(|info| crate::emucfg::retroarch_save_dir(&info.name, rom));
-    if let Some(dir) = &saves {
-        std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;
-    }
-    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves })
-}
-
 pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     let fps = core.fps;
     let core_name = core.name.clone();
@@ -144,47 +79,6 @@ pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     shared.stop();
     let _ = emu.join();
     result
-}
-
-/// Runs the core until told to quit, playing its sound, at the pace its sound sets (or at its
-/// frame rate, without sound).
-fn run_core(mut core: Core, shared: &Shared) {
-    // The stream lives on this thread, so it's opened here.
-    let mut sound = audio::Output::open(core.sample_rate, core.fps)
-        .inspect_err(|e| *shared.sound_error.lock().unwrap_or_else(|e| e.into_inner()) = Some(format!("{e:#}")))
-        .ok();
-    let mut samples = Vec::new();
-    let period = Duration::from_secs_f64(1.0 / core.fps);
-    let mut next = Instant::now();
-    while !shared.quit.load(Ordering::Relaxed) {
-        core.run_frame(shared.buttons.load(Ordering::Relaxed));
-        let wait = match &mut sound {
-            Some(sound) => {
-                samples.clear();
-                core.audio(&mut samples);
-                let volume = if shared.muted.load(Ordering::Relaxed) { 0.0 } else { shared.volume };
-                let lasts = sound.push(&samples, volume);
-                shared.queued_ms.store(sound.ahead().as_millis() as u32, Ordering::Relaxed);
-                lasts
-            }
-            None => period,
-        };
-        let frame = core.frame();
-        {
-            let mut latest = shared.latest.lock().unwrap_or_else(|e| e.into_inner());
-            latest.0 += 1;
-            latest.1 = frame;
-        }
-        shared.ready.notify_one();
-        next += wait;
-        let now = Instant::now();
-        if next > now {
-            std::thread::sleep(next - now);
-        } else if now - next > period * 4 {
-            // Too far behind to catch up without a burst of fast frames; carry on from here.
-            next = now;
-        }
-    }
 }
 
 /// The terminal in the state live play needs, put back however play ends.
@@ -206,7 +100,7 @@ impl Screen {
 impl Drop for Screen {
     fn drop(&mut self) {
         let mut out = std::io::stdout();
-        let _ = write!(out, "\x1b_Ga=d,d=I,i={IMAGE},q=2\x1b\\");
+        let _ = write!(out, "{}", kitty::delete(IMAGE));
         let _ =
             execute!(out, terminal::EnableLineWrap, PopKeyboardEnhancementFlags, cursor::Show, LeaveAlternateScreen);
         let _ = terminal::disable_raw_mode();
@@ -241,9 +135,7 @@ struct View {
     layout: Option<Layout>,
     /// Size of the frame the layout was worked out for.
     laid_out_for: (u32, u32),
-    gilrs: Option<Gilrs>,
-    keys: HashSet<KeyCode>,
-    quit_held_since: Option<Instant>,
+    controls: Controls,
     /// Numbers the shared memory objects and temp files.
     sent: u64,
     /// Shared memory objects and temp files sent recently, to spot ones the terminal never read.
@@ -273,9 +165,7 @@ impl View {
             show_status: true,
             layout: None,
             laid_out_for: (0, 0),
-            gilrs: Gilrs::new().ok(),
-            keys: HashSet::new(),
-            quit_held_since: None,
+            controls: Controls::new(),
             sent: 0,
             pending: VecDeque::new(),
             unread: 0,
@@ -293,17 +183,10 @@ impl View {
     fn run(&mut self, shared: &Shared) -> Result<()> {
         let mut shown = 0;
         loop {
-            let frame = {
-                let latest = shared.latest.lock().unwrap_or_else(|e| e.into_inner());
-                let (mut latest, _) = shared
-                    .ready
-                    .wait_timeout_while(latest, Duration::from_millis(8), |l| l.0 == shown)
-                    .unwrap_or_else(|e| e.into_inner());
-                (latest.0 != shown).then(|| {
-                    shown = latest.0;
-                    std::mem::take(&mut latest.1)
-                })
-            };
+            let frame = shared.newer_frame(shown, Duration::from_millis(8)).map(|(n, frame)| {
+                shown = n;
+                frame
+            });
             if !self.read_input(shared)? {
                 return Ok(());
             }
@@ -318,52 +201,30 @@ impl View {
     fn read_input(&mut self, shared: &Shared) -> Result<bool> {
         while event::poll(Duration::ZERO)? {
             match event::read()? {
-                Event::Key(k) if k.kind == KeyEventKind::Release => {
-                    self.keys.remove(&k.code);
-                }
                 Event::Key(k) => match k.code {
-                    KeyCode::Esc => return Ok(false),
+                    KeyCode::Esc if k.kind != KeyEventKind::Release => return Ok(false),
                     KeyCode::F(1) if k.kind == KeyEventKind::Press => {
                         self.transfer = self.transfer.next();
-                        self.stats.reset(shared.latest.lock().unwrap_or_else(|e| e.into_inner()).0);
+                        self.stats.reset(shared.frames_run());
                     }
                     KeyCode::F(2) if k.kind == KeyEventKind::Press => {
                         self.scale = if self.scale == Scale::Terminal { Scale::Integer } else { Scale::Terminal };
-                        self.stats.reset(shared.latest.lock().unwrap_or_else(|e| e.into_inner()).0);
+                        self.stats.reset(shared.frames_run());
                         self.relayout()?;
                     }
                     KeyCode::F(3) if k.kind == KeyEventKind::Press => {
                         self.show_status = !self.show_status;
                         self.relayout()?;
                     }
-                    KeyCode::F(4) if k.kind == KeyEventKind::Press => {
-                        shared.muted.fetch_xor(true, Ordering::Relaxed);
-                    }
-                    code => {
-                        self.keys.insert(code);
-                    }
+                    KeyCode::F(4) if k.kind == KeyEventKind::Press => shared.toggle_mute(),
+                    _ => self.controls.key(k),
                 },
                 Event::Resize(..) => self.relayout()?,
                 _ => {}
             }
         }
-        let mut buttons = self.keys.iter().filter_map(|&k| key_button(k)).fold(0, |b, n| b | n);
-        if let Some(gilrs) = &mut self.gilrs {
-            while gilrs.next_event().is_some() {}
-            for (_, pad) in gilrs.gamepads() {
-                buttons |= pad_buttons(&pad);
-            }
-        }
-        let quit_combo = button("select").unwrap() | button("start").unwrap();
-        if buttons & quit_combo == quit_combo {
-            let since = *self.quit_held_since.get_or_insert_with(Instant::now);
-            if since.elapsed() >= QUIT_HOLD {
-                return Ok(false);
-            }
-        } else {
-            self.quit_held_since = None;
-        }
-        shared.buttons.store(buttons, Ordering::Relaxed);
+        let Some(buttons) = self.controls.buttons() else { return Ok(false) };
+        shared.set_buttons(buttons);
         Ok(true)
     }
 
@@ -371,7 +232,7 @@ impl View {
     fn relayout(&mut self) -> Result<()> {
         self.layout = None;
         let mut out = std::io::stdout();
-        write!(out, "\x1b_Ga=d,d=I,i={IMAGE},q=2\x1b\\\x1b[2J")?;
+        write!(out, "{}\x1b[2J", kitty::delete(IMAGE))?;
         out.flush()?;
         Ok(())
     }
@@ -379,11 +240,7 @@ impl View {
     fn lay_out(&self, width: u32, height: u32) -> Result<Layout> {
         let size = terminal::window_size()?;
         let (cols, rows) = (u32::from(size.columns.max(1)), u32::from(size.rows.max(1)));
-        // Terminals that don't report pixels get a guess at a common cell size.
-        let (cell_w, cell_h) = match (size.width, size.height) {
-            (0, _) | (_, 0) => (8, 16),
-            (w, h) => (u32::from(w) / cols, u32::from(h) / rows),
-        };
+        let (cell_w, cell_h) = kitty::cell_size(&size);
         let usable_rows = if self.show_status { rows.saturating_sub(1).max(1) } else { rows };
         let (area_w, area_h) = (cols * cell_w, usable_rows * cell_h);
         let mut layout = Layout { status_row: (rows - 1) as u16, ..Layout::default() };
@@ -488,7 +345,7 @@ impl View {
         if elapsed < Duration::from_secs(1) {
             return Ok(());
         }
-        let core_frames = shared.latest.lock().unwrap_or_else(|e| e.into_inner()).0;
+        let core_frames = shared.frames_run();
         let secs = elapsed.as_secs_f64();
         let s = &self.stats;
         let game_fps = (core_frames - s.core_frames_at_start) as f64 / secs;
@@ -504,13 +361,13 @@ impl View {
             0 => String::new(),
             n => format!(" · {n} unread!"),
         };
-        let sound = match shared.queued_ms.load(Ordering::Relaxed) {
-            _ if shared.muted.load(Ordering::Relaxed) => "muted".to_string(),
-            NO_SOUND => match &*shared.sound_error.lock().unwrap_or_else(|e| e.into_inner()) {
+        let sound = match shared.queued_sound() {
+            _ if shared.muted() => "muted".to_string(),
+            Some(ahead) => format!("sound {} ms ahead", ahead.as_millis()),
+            None => match shared.sound_error() {
                 Some(e) => format!("no sound: {e}"),
                 None => "no sound yet".to_string(),
             },
-            ms => format!("sound {ms} ms ahead"),
         };
         let line = format!(
             " game {game_fps:.1}/{:.1} fps · shown {shown_fps:.1} fps · {} · scaled {scale} · {} KB/frame · send {:.2} ms (worst {:.1}){unread} · {sound} · F1 transfer F2 scale F3 hide F4 mute · Esc or hold Select+Start to quit · {} · {}",
@@ -606,56 +463,6 @@ impl Drop for View {
             sent.remove();
         }
     }
-}
-
-/// RetroArch's default keys: arrows, X and Z for A and B, A and S for L and R, Enter for Start,
-/// and Backspace for Select (RetroArch uses right Shift, which terminals don't report alone).
-pub fn key_button(code: KeyCode) -> Option<u16> {
-    let name = match code {
-        KeyCode::Up => "up",
-        KeyCode::Down => "down",
-        KeyCode::Left => "left",
-        KeyCode::Right => "right",
-        KeyCode::Char('x' | 'X') => "a",
-        KeyCode::Char('z' | 'Z') => "b",
-        KeyCode::Char('s' | 'S') => "x",
-        KeyCode::Char('a' | 'A') => "y",
-        KeyCode::Char('q' | 'Q') => "l",
-        KeyCode::Char('w' | 'W') => "r",
-        KeyCode::Enter => "start",
-        KeyCode::Backspace => "select",
-        _ => return None,
-    };
-    button(name)
-}
-
-/// The buttons held on one controller, in libretro's layout: A on the right face button, B on
-/// the bottom one, as on a Super Nintendo pad. The left stick works as the d-pad.
-pub fn pad_buttons(pad: &gilrs::Gamepad) -> u16 {
-    const MAP: [(Button, &str); 14] = [
-        (Button::East, "a"),
-        (Button::South, "b"),
-        (Button::North, "x"),
-        (Button::West, "y"),
-        (Button::LeftTrigger, "l"),
-        (Button::RightTrigger, "r"),
-        (Button::LeftTrigger2, "l2"),
-        (Button::RightTrigger2, "r2"),
-        (Button::Select, "select"),
-        (Button::Start, "start"),
-        (Button::DPadUp, "up"),
-        (Button::DPadDown, "down"),
-        (Button::DPadLeft, "left"),
-        (Button::DPadRight, "right"),
-    ];
-    let mut buttons = MAP.iter().filter(|(b, _)| pad.is_pressed(*b)).fold(0, |acc, (_, n)| acc | button(n).unwrap());
-    let (x, y) = (pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY));
-    for (held, name) in [(x < -0.5, "left"), (x > 0.5, "right"), (y > 0.5, "up"), (y < -0.5, "down")] {
-        if held {
-            buttons |= button(name).unwrap();
-        }
-    }
-    buttons
 }
 
 #[cfg(test)]

@@ -37,10 +37,7 @@ pub fn update(cfg_path: &Path, key: &str, change: impl FnOnce(&mut Override)) ->
         file.overrides.remove(key);
     }
     let text = format!("{HEADER}{}\n", serde_json::to_string_pretty(&file)?);
-    let tmp = path.with_extension("jsonc.tmp");
-    std::fs::write(&tmp, text)
-        .and_then(|()| std::fs::rename(&tmp, &path))
-        .with_context(|| format!("writing {}", path.display()))?;
+    crate::files::write_atomic(&path, text).with_context(|| format!("writing {}", path.display()))?;
 
     let Some((raw, own)) = crate::init::existing_config(cfg_path) else {
         bail!("{} can't be read", cfg_path.display());

@@ -88,7 +88,7 @@ pub fn entry_for(path: &Path, cfg: Option<&Config>) -> Result<Entry, Refusal> {
                 entry.name = name_from(&path);
                 Ok(entry)
             }
-            _ => Err(Refusal::Several(programs.iter().map(|p| crate::app::tilde(p)).collect())),
+            _ => Err(Refusal::Several(programs.iter().map(|p| crate::config::tilde(p)).collect())),
         };
     }
     if has_ext(&path, "desktop") {
@@ -100,7 +100,7 @@ pub fn entry_for(path: &Path, cfg: Option<&Config>) -> Result<Entry, Refusal> {
     if let Some((system, folder)) = cfg.and_then(|c| rom_system(c, &path)) {
         return Err(Refusal::Rom { system, folder });
     }
-    let dir = path.parent().map(crate::app::tilde);
+    let dir = path.parent().map(crate::config::tilde);
     let file = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
     let file = shell_words::quote(&file).into_owned();
     if has_ext(&path, "sh") {
@@ -172,7 +172,7 @@ fn rom_system(cfg: &Config, path: &Path) -> Option<(String, PathBuf)> {
     if ["zip", "7z", "bin", "iso", "chd", "cue", "m3u", "sh"].contains(&ext.as_str()) {
         return None;
     }
-    let sys = cfg.systems.iter().find(|s| s.extensions.iter().any(|e| e.eq_ignore_ascii_case(&ext)))?;
+    let sys = cfg.system_for_extension(&ext)?;
     let dir = sys.dir.as_deref().unwrap_or(&sys.id);
     let folder = if dir.starts_with('/') || dir.starts_with('~') {
         config::expand_path(dir)

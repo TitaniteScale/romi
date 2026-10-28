@@ -61,11 +61,8 @@ impl State {
         });
         let mut state = Self::load_from(path);
         change(&mut state);
-        let tmp = path.with_extension("json.tmp");
-        if let Ok(json) = serde_json::to_string_pretty(&state)
-            && std::fs::write(&tmp, json).is_ok()
-        {
-            let _ = std::fs::rename(&tmp, path);
+        if let Ok(json) = serde_json::to_string_pretty(&state) {
+            let _ = crate::files::write_atomic(path, json);
         }
         state
     }

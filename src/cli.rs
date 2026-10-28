@@ -9,6 +9,7 @@ use crate::library::{Game, Library, Resolve};
 use crate::meta::Meta;
 use crate::session::{self, Session};
 use crate::state::{State, now};
+use crate::text;
 use crate::{app, art, steam};
 use anyhow::{Context, Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand};
@@ -329,7 +330,7 @@ fn complete_genres(current: &OsStr) -> Vec<CompletionCandidate> {
     let Some(lib) = completion_library(true) else { return Vec::new() };
     let genres: Vec<(String, String)> = crate::meta::genre_counts(&lib)
         .into_iter()
-        .map(|(g, n)| (g, format!("{n} game{}", if n == 1 { "" } else { "s" })))
+        .map(|(g, n)| (g, format!("{n} {}", text::plural(n, "game"))))
         .collect();
     candidates(current, genres.iter().map(|(g, n)| (g.as_str(), n.as_str())))
 }
@@ -339,7 +340,7 @@ fn complete_tags(current: &OsStr) -> Vec<CompletionCandidate> {
     let tags: Vec<(String, String)> = state
         .tags
         .iter()
-        .map(|(t, keys)| (t.clone(), format!("{} game{}", keys.len(), if keys.len() == 1 { "" } else { "s" })))
+        .map(|(t, keys)| (t.clone(), format!("{} {}", keys.len(), text::plural(keys.len(), "game"))))
         .collect();
     candidates(current, tags.iter().map(|(t, n)| (t.as_str(), n.as_str())))
 }
@@ -374,7 +375,7 @@ fn exit_with(e: clap::Error) -> ! {
 /// only gets in the way of `romi init` finding the right one.
 pub fn load_config(path: &Path) -> Result<Config> {
     if !path.exists() {
-        return fail(exit::CONFIG, format!("no config at {} yet; run `romi init` first", app::tilde(path)));
+        return fail(exit::CONFIG, format!("no config at {} yet; run `romi init` first", config::tilde(path)));
     }
     config::load(path).or_else(|e| fail(exit::CONFIG, format!("{e:#}")))
 }
@@ -609,14 +610,14 @@ fn info(cfg: &Config, query: &str, system: Option<&str>, json: bool) -> Result<(
     }
     let game = &lib.games[g];
     let m = &game.meta;
-    let tilde = |p: &str| app::tilde(std::path::Path::new(p));
+    let tilde = |p: &str| config::tilde(std::path::Path::new(p));
     let mut emulators = crate::emulators::Emulators::default();
     emulators.find(cfg, &lib, g);
     let options = emulators.options(&lib, g);
     let played = (record.playtime_secs > 0 || record.last_played.is_some()).then(|| {
-        let mut s = crate::ui::fmt_duration(record.playtime_secs);
+        let mut s = crate::text::duration(record.playtime_secs);
         if let Some(at) = record.last_played {
-            s.push_str(&format!(", last {}", crate::ui::fmt_ago(now().saturating_sub(at))));
+            s.push_str(&format!(", last {}", crate::text::ago(now().saturating_sub(at))));
         }
         s
     });
@@ -733,7 +734,7 @@ fn play(
             Some(sig) => format!("was killed by signal {sig}"),
             None => format!("exited with code {code}"),
         };
-        let log = log.map(|l| format!(" (log: {})", app::tilde(std::path::Path::new(&l)))).unwrap_or_default();
+        let log = log.map(|l| format!(" (log: {})", config::tilde(std::path::Path::new(&l)))).unwrap_or_default();
         return fail(code, format!("{} {how}{log}", game.name));
     }
     Ok(())
@@ -855,7 +856,7 @@ fn run_core(
         }
     };
     if !core.is_file() {
-        return fail(exit::UNAVAILABLE, format!("no core at {}", app::tilde(&core)));
+        return fail(exit::UNAVAILABLE, format!("no core at {}", config::tilde(&core)));
     }
     if !crate::retro::can_open(&core, &rom) {
         let why = "this core can't open 7z files, and romi can only unpack zips; extract it first";
@@ -870,12 +871,12 @@ fn run_core(
     };
 
     if live {
-        let emu = crate::live::load(cfg, &core, &rom)?;
-        return crate::live::play(emu, &name, f32::from(cfg.volume.min(100)) / 100.0);
+        let emu = crate::runner::load(cfg, &core, &rom)?;
+        return crate::live::play(emu, &name, cfg.volume_gain());
     }
     // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared
     // before the core, so it's removed after the core has shut down and written its last.
-    let saves = crate::archive::TempDir::new("saves").context("can't make a save folder in /tmp")?;
+    let saves = crate::files::TempDir::new("saves").context("can't make a save folder in /tmp")?;
     let dirs = crate::retro::Dirs { system: cfg.system_dir(), saves: Some(saves.path().to_path_buf()) };
     let mut emu = crate::retro::Core::load(&core, &rom, &dirs)?;
     let mut sound = wav.map(|path| crate::audio::Wav::create(path, emu.sample_rate)).transpose()?;
@@ -941,10 +942,13 @@ fn rom_file(
     system: Option<&str>,
 ) -> Result<(String, PathBuf, Option<crate::launch::Launch>)> {
     let ext = rom.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
-    let sys = cfg.systems.iter().find(|s| match system {
-        Some(want) => s.id.eq_ignore_ascii_case(want) || cfg.system_name(s).eq_ignore_ascii_case(want),
-        None => s.extensions.iter().any(|e| e.eq_ignore_ascii_case(&ext)),
-    });
+    let sys = match system {
+        Some(want) => cfg
+            .systems
+            .iter()
+            .find(|s| s.id.eq_ignore_ascii_case(want) || cfg.system_name(s).eq_ignore_ascii_case(want)),
+        None => cfg.system_for_extension(&ext),
+    };
     let name = rom.file_stem().unwrap_or(rom.as_os_str()).to_string_lossy().into_owned();
     let launch = sys.map(|s| {
         let mut vars = cfg.vars.clone();
@@ -992,10 +996,10 @@ fn add(
 ) -> Result<()> {
     use crate::add::{GAMES_FILE, Refusal};
     let Some((raw, own)) = crate::init::existing_config(cfg_path) else {
-        return fail(exit::CONFIG, format!("no config at {} yet; run `romi init` first", app::tilde(cfg_path)));
+        return fail(exit::CONFIG, format!("no config at {} yet; run `romi init` first", config::tilde(cfg_path)));
     };
     let cfg = load_config(cfg_path)?;
-    let shown = app::tilde(path);
+    let shown = config::tilde(path);
     let mut entry = match crate::add::entry_for(path, Some(&cfg)) {
         Ok(entry) => entry,
         Err(Refusal::Missing) => return fail(exit::NOT_FOUND, format!("{shown} doesn't exist")),
@@ -1009,7 +1013,7 @@ fn add(
             return fail(exit::USAGE, msg);
         }
         Err(Refusal::Rom { system, folder }) => {
-            let msg = format!("{shown} looks like a {system} game; put it in {} instead", app::tilde(&folder));
+            let msg = format!("{shown} looks like a {system} game; put it in {} instead", config::tilde(&folder));
             return fail(exit::USAGE, msg);
         }
         Err(Refusal::Windows) => {
@@ -1038,7 +1042,7 @@ fn add(
     let Some(games_text) = crate::add::append(existing_games.as_deref(), &entry) else {
         let msg = format!(
             "couldn't add to {} safely; add this to its games by hand:\n  {}",
-            app::tilde(&games_path),
+            config::tilde(&games_path),
             entry.to_json()
         );
         return fail(exit::CONFIG, msg);
@@ -1046,13 +1050,13 @@ fn add(
     let Some(config_text) = crate::init::add_include(&raw, &own, GAMES_FILE, "Games added with `romi add`.") else {
         let msg = format!(
             "couldn't add \"{GAMES_FILE}\" to the \"include\" list in {}; add it by hand",
-            app::tilde(cfg_path)
+            config::tilde(cfg_path)
         );
         return fail(exit::CONFIG, msg);
     };
-    println!("{}\n  {}", app::tilde(&games_path), entry.to_json());
+    println!("{}\n  {}", config::tilde(&games_path), entry.to_json());
     let also =
-        if config_text == raw { String::new() } else { format!(", and include it from {}", app::tilde(cfg_path)) };
+        if config_text == raw { String::new() } else { format!(", and include it from {}", config::tilde(cfg_path)) };
     if !confirm(&format!("\nAdd this to {GAMES_FILE}{also}?"), yes)? {
         return Ok(());
     }
@@ -1091,7 +1095,7 @@ fn init(
 ) -> Result<()> {
     let existing = crate::init::existing_config(cfg_path);
     if cfg_path.exists() && existing.is_none() {
-        return fail(exit::CONFIG, format!("{} can't be read; fix it first", app::tilde(cfg_path)));
+        return fail(exit::CONFIG, format!("{} can't be read; fix it first", config::tilde(cfg_path)));
     }
     let esde = esde.or_else(|| existing.as_ref().and_then(|(_, c)| c.esde_dir.as_deref()).map(config::expand_path));
     let catalog = if no_esde {
@@ -1160,11 +1164,11 @@ fn init(
     let include_path = cfg_path.parent().unwrap_or(Path::new(".")).join(crate::init::INCLUDE_FILE);
     let (main, plan) = match &existing {
         Some((raw, cfg)) => {
-            let shown = app::tilde(cfg_path);
+            let shown = config::tilde(cfg_path);
             let mut text = raw.clone();
             let mut changes = Vec::new();
             if move_roms_dir {
-                let dir = app::tilde(&roms_dir);
+                let dir = config::tilde(&roms_dir);
                 let Some(edited) = crate::init::set_roms_dir(&text, &dir) else {
                     let msg =
                         format!("couldn't set \"roms_dir\" to {dir:?} in {shown}; set it by hand, then run init again");
@@ -1184,14 +1188,14 @@ fn init(
             if edited != text {
                 changes.insert(0, "include it".to_string());
             }
-            let mut plan = format!("write {}", app::tilde(&include_path));
+            let mut plan = format!("write {}", config::tilde(&include_path));
             if !changes.is_empty() {
                 plan += &format!(", and in {shown} {}", changes.join(" and "));
             }
             ((edited != *raw).then_some(edited), plan)
         }
         None => {
-            let plan = format!("write {} and a new {}", app::tilde(&include_path), app::tilde(cfg_path));
+            let plan = format!("write {} and a new {}", config::tilde(&include_path), config::tilde(cfg_path));
             (Some(crate::init::fresh_config(&roms_dir)), plan)
         }
     };
@@ -1224,7 +1228,7 @@ fn print_suggestions(cfg: &Config, lib: &Library) {
     if suggestions.is_empty() {
         return;
     }
-    let games = |n: usize| format!("{n} game{}", if n == 1 { "" } else { "s" });
+    let games = |n: usize| format!("{n} {}", text::plural(n, "game"));
     println!("\nsuggestions");
     for s in suggestions {
         match s {
@@ -1291,7 +1295,7 @@ fn achievements(cfg: &Config, json: bool) -> Result<()> {
     writeln!(out, "{} of your games have achievements{points}; you've earned some in {started}.", ok.len())?;
     let row = |out: &mut std::io::StdoutLock, g: usize, text: String| {
         let game = &lib.games[g];
-        writeln!(out, "  {:<20} {:<40} {text}", truncate(&game.system, 20), truncate(&game.name, 40))
+        writeln!(out, "  {:<20} {:<40} {text}", text::truncate(&game.system, 20), text::truncate(&game.name, 40))
     };
     for (g, a) in &ok {
         row(&mut out, *g, a.summary())?;
@@ -1314,18 +1318,18 @@ fn stats(cfg: &Config, json: bool) -> Result<()> {
         println!("{}", serde_json::to_string_pretty(&s)?);
         return Ok(());
     }
-    let dur = crate::ui::fmt_duration;
+    let dur = crate::text::duration;
     if s.games == 0 {
         println!("Nothing played from romi yet.");
         return Ok(());
     }
-    println!("Played {} across {} game{}", dur(s.total_secs), s.games, if s.games == 1 { "" } else { "s" });
+    println!("Played {} across {} {}", dur(s.total_secs), s.games, text::plural(s.games, "game"));
     let table = |title: &str, rows: &[(String, u64)]| {
         let most = rows.first().map_or(1, |r| r.1.max(1));
         println!("\n{title}");
         for (name, secs) in rows {
             let bar = "█".repeat(((secs * 20).div_ceil(most)) as usize);
-            println!("  {:<32} {:>8}  {bar}", truncate(name, 32), dur(*secs));
+            println!("  {:<32} {:>8}  {bar}", text::truncate(name, 32), dur(*secs));
         }
     };
     table("By system", &s.systems);
@@ -1338,13 +1342,13 @@ fn stats(cfg: &Config, json: bool) -> Result<()> {
         Some(since) => {
             let year_total: u64 = y.months.iter().sum();
             let n = y.sessions;
-            println!("  {} in {n} session{}", dur(year_total), if n == 1 { "" } else { "s" });
+            println!("  {} in {n} {}", dur(year_total), text::plural(n, "session"));
             let most = y.months.iter().copied().max().unwrap_or(1).max(1);
             for (m, secs) in MONTHS.iter().zip(y.months).filter(|(_, s)| *s > 0) {
                 println!("  {m}  {:>8}  {}", dur(secs), "█".repeat(((secs * 20).div_ceil(most)) as usize));
             }
             if crate::stats::local_year_month(since).0 == y.year {
-                println!("  (recorded since {})", crate::ui::fmt_date(since));
+                println!("  (recorded since {})", crate::text::date(since));
             }
         }
     }
@@ -1355,10 +1359,6 @@ fn stats(cfg: &Config, json: bool) -> Result<()> {
 }
 
 const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max { s.to_string() } else { format!("{}…", s.chars().take(max - 1).collect::<String>()) }
-}
 
 fn status(json: bool) -> Result<()> {
     let running = session::running();
@@ -1382,7 +1382,7 @@ fn status(json: bool) -> Result<()> {
         println!("nothing running");
     } else {
         for r in &running {
-            let elapsed = crate::ui::fmt_duration(now().saturating_sub(r.started));
+            let elapsed = crate::text::duration(now().saturating_sub(r.started));
             println!("{}  ({}, {elapsed})", r.name, r.system_name);
         }
     }
@@ -1393,11 +1393,11 @@ fn status(json: bool) -> Result<()> {
 
 fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
     let lib = Library::load_complete(cfg);
-    println!("config  {}", app::tilde(cfg_path));
+    println!("config  {}", config::tilde(cfg_path));
     println!("roms    {}\n", cfg.roms_dir);
     let roms = config::expand_path(&cfg.roms_dir);
     let width = lib.systems.iter().map(|s| s.name.chars().count()).max().unwrap_or(0).max(24);
-    let games = |n: usize| format!("{n:>4} game{}", if n == 1 { " " } else { "s" });
+    let games = |n: usize| format!("{n:>4} {:<5}", text::plural(n, "game"));
     for sys in &cfg.systems {
         let dir = sys.dir.as_deref().unwrap_or(&sys.id);
         let (mark, detail) = match lib.systems.iter().find(|s| s.id == sys.id) {

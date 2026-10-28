@@ -9,6 +9,7 @@
 //! starts; so does `romi achievements`).
 
 use crate::config::{self, Config, expand_path};
+use crate::files::StampCache;
 use crate::library::Library;
 use crate::titles::TitleIndex;
 use anyhow::{Context, Result, anyhow};
@@ -480,7 +481,7 @@ const MAX_ROM: u64 = 256 << 20;
 fn rom_bytes(path: &Path) -> Option<Vec<u8>> {
     let ext = path.extension()?.to_string_lossy().to_lowercase();
     if ext == "zip" {
-        return crate::archive::biggest_in_zip(path, MAX_ROM).map(|(_, data)| data);
+        return crate::archive::read_biggest(path, MAX_ROM).map(|(_, data)| data);
     }
     if ext == "7z" || std::fs::metadata(path).ok()?.len() > MAX_ROM {
         return None;
@@ -488,44 +489,16 @@ fn rom_bytes(path: &Path) -> Option<Vec<u8>> {
     std::fs::read(path).ok()
 }
 
-/// ROM hashes, remembered by path, size and modification time so each file is read once.
-struct Hashes {
-    known: HashMap<String, (u64, u64, String)>,
-    dirty: bool,
-}
+/// ROM hashes, remembered so each file is read once.
+struct Hashes(StampCache<String>);
 
 impl Hashes {
-    fn path() -> PathBuf {
-        cache_dir().join("hashes.tsv")
-    }
-
     fn load() -> Hashes {
-        let known = std::fs::read_to_string(Self::path())
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|l| {
-                let mut f = l.rsplitn(4, '\t');
-                let md5 = f.next()?.to_string();
-                let mtime = f.next()?.parse().ok()?;
-                let size = f.next()?.parse().ok()?;
-                Some((f.next()?.to_string(), (size, mtime, md5)))
-            })
-            .collect();
-        Hashes { known, dirty: false }
+        Hashes(StampCache::load(cache_dir().join("hashes.tsv")))
     }
 
     fn save(&self) {
-        if !self.dirty {
-            return;
-        }
-        let mut lines: Vec<String> =
-            self.known.iter().map(|(p, (size, mtime, md5))| format!("{p}\t{size}\t{mtime}\t{md5}")).collect();
-        lines.sort();
-        let _ = std::fs::create_dir_all(cache_dir());
-        let tmp = Self::path().with_extension("tsv.tmp");
-        if std::fs::write(&tmp, lines.join("\n")).is_ok() {
-            let _ = std::fs::rename(&tmp, Self::path());
-        }
+        self.0.save();
     }
 
     /// What a game hashes to for RetroAchievements, if its system is hashed and it's been hashed
@@ -535,8 +508,7 @@ impl Hashes {
         if how == Hashing::SetName {
             return Some(set_name_hash(&path));
         }
-        let (size, mtime) = stamp(&path)?;
-        self.known.get(path.to_str()?).filter(|k| (k.0, k.1) == (size, mtime)).map(|k| k.2.clone())
+        self.0.get(&path)
     }
 
     /// The same, hashing the ROM if it hasn't been.
@@ -552,9 +524,7 @@ impl Hashes {
             Hashing::SetName => unreachable!("set names are hashed in known()"),
         };
         let md5 = format!("{:x}", md5::compute(&bytes));
-        let (size, mtime) = stamp(&path)?;
-        self.known.insert(path.to_string_lossy().into_owned(), (size, mtime, md5.clone()));
-        self.dirty = true;
+        self.0.insert(&path, md5.clone());
         Some(md5)
     }
 }
@@ -573,12 +543,6 @@ fn hashable(lib: &Library, g: usize) -> Option<(PathBuf, Hashing)> {
 fn set_name_hash(path: &Path) -> String {
     let stem = path.file_stem().unwrap_or_default().to_string_lossy();
     format!("{:x}", md5::compute(stem.as_bytes()))
-}
-
-fn stamp(path: &Path) -> Option<(u64, u64)> {
-    let md = std::fs::metadata(path).ok()?;
-    let mtime = md.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
-    Some((md.len(), mtime))
 }
 
 /// The same words, ignoring dashes and how they're spaced ("Megaman" for "Mega Man").

@@ -56,7 +56,9 @@ impl Session {
         };
         let file = running_dir().join(format!("{pid}.json"));
         // Best effort, like the rest of the state: a game that can't be listed still plays.
-        let _ = write_atomic(&file, &record);
+        if let Ok(json) = serde_json::to_vec(&record) {
+            let _ = crate::files::write_atomic(&file, json);
+        }
         let state = State::update(|s| s.record_launch(&game.key));
         (Session { key: game.key.clone(), started: Instant::now(), started_at: now(), file, hooks }, state)
     }
@@ -80,14 +82,6 @@ pub fn exit_code(status: ExitStatus) -> i32 {
 
 fn running_dir() -> PathBuf {
     crate::config::state_dir().join("running")
-}
-
-fn write_atomic(path: &Path, record: &Running) -> Result<()> {
-    std::fs::create_dir_all(path.parent().context("no parent")?)?;
-    let tmp = path.with_extension("tmp");
-    std::fs::write(&tmp, serde_json::to_vec(record)?)?;
-    std::fs::rename(&tmp, path)?;
-    Ok(())
 }
 
 /// The games running right now, oldest first. Files for games that are no longer running (romi

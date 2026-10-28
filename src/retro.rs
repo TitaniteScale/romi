@@ -307,7 +307,7 @@ pub struct Core {
     /// The ROM's bytes, which the core may keep pointing into until the game is unloaded.
     _rom: Vec<u8>,
     /// Where the ROM was unpacked to, for a zip the core can't open itself.
-    _unpacked: Option<crate::archive::TempDir>,
+    _unpacked: Option<crate::files::TempDir>,
     // Dropped last, after `Drop` has shut the core down.
     _lib: libloading::Library,
 }
@@ -463,13 +463,13 @@ fn opens(core: &Path, ext: &str) -> bool {
 
 /// For a zip the core can't open itself, the ROM in it unpacked to a folder in /tmp, as RetroArch
 /// does: the biggest file, which is the game in the zips ROM sets come in.
-fn unpack(core: &Path, rom: &Path) -> Result<Option<(crate::archive::TempDir, PathBuf)>> {
+fn unpack(core: &Path, rom: &Path) -> Result<Option<(crate::files::TempDir, PathBuf)>> {
     if archive_ext(rom).as_deref() != Some("zip") || opens(core, "zip") {
         return Ok(None);
     }
-    let (name, data) = crate::archive::biggest_in_zip(rom, 1 << 30)
+    let (name, data) = crate::archive::read_biggest(rom, 1 << 30)
         .with_context(|| format!("can't read the game out of {}", rom.display()))?;
-    let dir = crate::archive::TempDir::new("rom").context("can't make a folder in /tmp to unpack into")?;
+    let dir = crate::files::TempDir::new("rom").context("can't make a folder in /tmp to unpack into")?;
     let path = dir.path().join(if name.is_empty() { "rom" } else { &name });
     std::fs::write(&path, data).with_context(|| format!("can't unpack {}", rom.display()))?;
     Ok(Some((dir, path)))

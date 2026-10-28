@@ -246,8 +246,7 @@ pub fn achievements(steam_dir: &Path, appid: &str) -> Option<Vec<crate::ra::Chee
                 description,
                 points: 0,
                 kind: hidden.then(|| "hidden".to_string()),
-                earned: earned
-                    .then(|| when.map_or_else(|| "earned".to_string(), |t| crate::ui::fmt_datetime(t as u64))),
+                earned: earned.then(|| when.map_or_else(|| "earned".to_string(), |t| crate::text::datetime(t as u64))),
                 earned_hardcore: None,
                 rarity: -1.0,
             });

@@ -578,10 +578,15 @@ A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 | `src/ra.rs`       | RetroAchievements: game lists, your progress, ROM hashing        |
 | `src/hooks.rs`    | `on_launch` and `on_exit` hooks                                  |
 | `src/retro.rs`    | a minimal libretro frontend for `romi run`: loading cores, frames, scripted input |
-| `src/live.rs`     | `romi run --live`: a game in the terminal over Kitty graphics, with controller input |
+| `src/runner.rs`   | a game running in romi: the core thread, paced by its sound, and its folders |
+| `src/controls.rs` | game input: keys and controllers as joypad buttons, Select+Start to quit |
+| `src/live.rs`     | `romi run --live`: a game in the whole terminal over Kitty graphics |
 | `src/audio.rs`    | sound for games played in romi: to the speakers, pacing the game, or to a WAV file |
 | `src/embedded.rs` | a game played in the TUI's middle panel                          |
 | `src/kitty.rs`    | Kitty graphics: Unicode placeholders, shared memory              |
+| `src/archive.rs`  | reading ROMs out of zips                                         |
+| `src/files.rs`    | atomic writes, caches keyed by file size and time, temp folders  |
+| `src/text.rs`     | counts, durations, dates and truncation for the TUI and CLI      |
 | `src/main.rs`     | event loop, handing the terminal to `terminal`-mode commands     |
 | `e2e/drive.py`    | runs romi in a fake terminal with a virtual gamepad (tests and by hand) |
 | `e2e/test_*.py`   | end-to-end tests of the TUI and the CLI                          |

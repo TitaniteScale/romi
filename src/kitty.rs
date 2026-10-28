@@ -6,6 +6,7 @@
 //! each new frame only replaces the image behind them.
 
 use ratatui::buffer::{Buffer, CellDiffOption};
+use ratatui::crossterm::terminal::WindowSize;
 use ratatui::layout::Rect;
 use ratatui::style::Color;
 use std::num::NonZeroU16;
@@ -334,6 +335,15 @@ pub fn placeholders(buf: &mut Buffer, area: Rect, id: u32) {
                 .set_fg(fg)
                 .set_diff_option(CellDiffOption::ForcedWidth(NonZeroU16::new(1).unwrap()));
         }
+    }
+}
+
+/// The size of a terminal cell in pixels. Terminals that don't report pixels get a guess at a
+/// common size.
+pub fn cell_size(size: &WindowSize) -> (u32, u32) {
+    match (size.width, size.height) {
+        (0, _) | (_, 0) => (8, 16),
+        (w, h) => (u32::from(w) / u32::from(size.columns.max(1)), u32::from(h) / u32::from(size.rows.max(1))),
     }
 }
 

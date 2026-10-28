@@ -182,5 +182,5 @@ fn run(
 fn report(problems: Vec<String>) -> Option<String> {
     let first = problems.first()?.clone();
     let more = if problems.len() > 1 { format!(" (and {} more)", problems.len() - 1) } else { String::new() };
-    Some(format!("{first}{more}; see {}", crate::app::tilde(&log_path())))
+    Some(format!("{first}{more}; see {}", crate::config::tilde(&log_path())))
 }

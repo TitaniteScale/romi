@@ -141,6 +141,16 @@ impl Config {
         }
     }
 
+    /// `volume` as what sound samples are multiplied by: 1 at 100.
+    pub fn volume_gain(&self) -> f32 {
+        f32::from(self.volume.min(100)) / 100.0
+    }
+
+    /// The first system that lists `ext` among its file extensions.
+    pub fn system_for_extension(&self, ext: &str) -> Option<&SystemConfig> {
+        self.systems.iter().find(|s| s.extensions.iter().any(|e| e.eq_ignore_ascii_case(ext)))
+    }
+
     /// The folder libretro cores romi runs get as their system folder, for BIOS files and their
     /// own data: the first of `bios_dirs` that exists (RetroArch's, unless changed).
     pub fn system_dir(&self) -> Option<PathBuf> {
@@ -598,6 +608,14 @@ pub fn parse(raw: &str) -> Result<Config> {
 
 pub fn home() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// `path` with the home folder written as `~`, for showing.
+pub fn tilde(path: &Path) -> String {
+    match path.strip_prefix(home()) {
+        Ok(rest) => format!("~/{}", rest.display()),
+        Err(_) => path.display().to_string(),
+    }
 }
 
 pub fn expand_tilde(s: &str) -> String {

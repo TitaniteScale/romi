@@ -6,6 +6,7 @@ use crate::cover::Cover;
 use crate::filter::ROWS as FILTER_ROWS;
 use crate::sort::Sort;
 use crate::state::now;
+use crate::text;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect, Size};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -186,7 +187,7 @@ fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         .into_iter()
         .enumerate()
         .map(|(i, item)| {
-            let label = truncate(&app.menu_label(item), WIDTH);
+            let label = text::truncate(&app.menu_label(item), WIDTH);
             let style = if i == menu.selected { theme.selected(true) } else { Style::new() };
             Line::from(Span::styled(format!("  {label:<WIDTH$}"), style))
         })
@@ -194,7 +195,7 @@ fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let rect = centered(area, WIDTH as u16 + 6, items.len() as u16 + 4);
     f.render_widget(Clear, rect);
     let title = match menu.game {
-        Some(g) => format!(" {} ", truncate(&app.lib.games[g].name, WIDTH)),
+        Some(g) => format!(" {} ", text::truncate(&app.lib.games[g].name, WIDTH)),
         None => " romi ".into(),
     };
     let block = theme.block(title, true).padding(Padding::vertical(1));
@@ -339,7 +340,7 @@ fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             let tag = if mixed { format!("{} ", game.system) } else { String::new() };
             // Leave room for the system tag; the name gives way first, then the suffix.
             let room = width.saturating_sub(2 + tag.chars().count() + if mixed { 2 } else { 0 });
-            let name = truncate(&game.name, room);
+            let name = text::truncate(&game.name, room);
             let mut spans = vec![
                 Span::styled(if fav { "★ " } else { "  " }, Style::new().fg(theme.accent)),
                 if game.hidden {
@@ -351,7 +352,7 @@ fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             if let Some(sfx) = &game.suffix {
                 let left = room.saturating_sub(name.chars().count() + 2);
                 if left > 3 {
-                    spans.push(Span::styled(format!("  {}", truncate(sfx, left)), Style::new().dim()));
+                    spans.push(Span::styled(format!("  {}", text::truncate(sfx, left)), Style::new().dim()));
                 }
             }
             if mixed {
@@ -522,7 +523,7 @@ fn draw_grid(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             label = label.dim().italic();
         }
         let label_area = Rect::new(art.x, art.y + cover_h, cover_w, 1);
-        f.render_widget(Paragraph::new(truncate(&name, cover_w as usize)).style(label).centered(), label_area);
+        f.render_widget(Paragraph::new(text::truncate(&name, cover_w as usize)).style(label).centered(), label_area);
 
         let cover = app.covers.as_mut().map(|c| c.get(&app.lib, g, Size::new(cover_w, cover_h)));
         match cover {
@@ -598,10 +599,10 @@ fn draw_details(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         }
     }
     if let Some(&secs) = app.state.playtime.get(&game.key).filter(|&&s| s > 0) {
-        lines.push(Line::from(vec![label("Played"), Span::raw(fmt_duration(secs))]));
+        lines.push(Line::from(vec![label("Played"), Span::raw(text::duration(secs))]));
     }
     if let Some(&at) = app.state.last_played.get(&game.key) {
-        lines.push(Line::from(vec![label("Last"), Span::raw(fmt_ago(now().saturating_sub(at)))]));
+        lines.push(Line::from(vec![label("Last"), Span::raw(text::ago(now().saturating_sub(at)))]));
     }
     if game.hidden {
         lines.push(Line::from(vec![label("Hidden"), Span::raw("yes (o to unhide)")]));
@@ -634,7 +635,7 @@ fn draw_playing(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         Line::from(Span::styled(game.name.clone(), Style::new().bold())),
         Line::from(Span::styled(game.system.clone(), Style::new().dim())),
         Line::raw(""),
-        Line::raw(fmt_clock(run.started.elapsed().as_secs())),
+        Line::raw(text::clock(run.started.elapsed().as_secs())),
         Line::raw(""),
         Line::from(Span::styled("romi will be back when the game closes", Style::new().dim())),
     ];
@@ -683,7 +684,7 @@ fn draw_empty(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         Line::from(Span::styled("No games found", Style::new().fg(theme.accent).bold())),
         Line::raw(""),
         Line::raw(format!("ROMs are read from {}", app.cfg.roms_dir)),
-        Line::raw(format!("Edit {} and press ctrl-r", crate::app::tilde(&app.cfg_path))),
+        Line::raw(format!("Edit {} and press ctrl-r", crate::config::tilde(&app.cfg_path))),
         Line::raw("or run `romi check` to see what's going on."),
     ];
     f.render_widget(Paragraph::new(lines).alignment(Alignment::Center).block(theme.block("", true)), area);
@@ -804,16 +805,6 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     f.render_widget(Paragraph::new(line), area);
 }
 
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        s.to_string()
-    } else {
-        let mut t: String = s.chars().take(max.saturating_sub(1)).collect();
-        t.push('…');
-        t
-    }
-}
-
 /// "retroarch · mgba" for libretro cores, otherwise just the program name.
 pub fn runs_label(command: &str) -> String {
     let mut words = command.split_whitespace();
@@ -822,14 +813,6 @@ pub fn runs_label(command: &str) -> String {
     match words.find_map(|w| w.rsplit('/').next()?.strip_suffix("_libretro.so")) {
         Some(core) => format!("{program} · {core}"),
         None => program.to_string(),
-    }
-}
-
-pub fn fmt_duration(secs: u64) -> String {
-    match secs {
-        0..60 => format!("{secs}s"),
-        60..3600 => format!("{}m", secs / 60),
-        _ => format!("{}h {}m", secs / 3600, secs % 3600 / 60),
     }
 }
 
@@ -846,10 +829,9 @@ fn draw_stats(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         f.render_widget(Paragraph::new("Nothing played from romi yet.").dim(), inner);
         return;
     }
-    let plural = if s.games == 1 { "" } else { "s" };
     let summary = Line::from(vec![
-        Span::styled(fmt_duration(s.total_secs), accent.bold()),
-        Span::raw(format!(" played across {} game{plural}", s.games)),
+        Span::styled(text::duration(s.total_secs), accent.bold()),
+        Span::raw(format!(" played across {} {}", s.games, text::plural(s.games, "game"))),
     ]);
     let [top, columns, year] =
         Layout::vertical([Constraint::Length(2), Constraint::Min(4), Constraint::Length(6)]).areas(inner);
@@ -864,8 +846,8 @@ fn draw_stats(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
         for (name, secs) in rows {
             let bar = "█".repeat((secs * bar_room).div_ceil(most) as usize);
             lines.push(Line::from(vec![
-                Span::raw(format!("{:<name_w$} ", truncate(name, name_w))),
-                Span::styled(format!("{:>8}  ", fmt_duration(*secs)), Style::new().dim()),
+                Span::raw(format!("{:<name_w$} ", text::truncate(name, name_w))),
+                Span::styled(format!("{:>8}  ", text::duration(*secs)), Style::new().dim()),
                 Span::styled(bar, accent),
             ]));
         }
@@ -896,11 +878,11 @@ fn draw_stats(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             .map(|&m| if m == 0 { "  ".to_string() } else { format!("{} ", BARS[((m * 7).div_ceil(most)) as usize]) })
             .collect();
         let total: u64 = y.months.iter().sum();
-        let best = y.top.first().map(|(n, t)| format!(" · most: {n} ({})", fmt_duration(*t))).unwrap_or_default();
+        let best = y.top.first().map(|(n, t)| format!(" · most: {n} ({})", text::duration(*t))).unwrap_or_default();
         lines.push(Line::from(Span::styled(bars, accent)));
         lines.push(Line::from(Span::raw(LETTERS.join(" ")).dim()));
-        let plural = if y.sessions == 1 { "" } else { "s" };
-        lines.push(Line::raw(format!("{} in {} session{plural}{best}", fmt_duration(total), y.sessions)));
+        let sessions = text::plural(y.sessions, "session");
+        lines.push(Line::raw(format!("{} in {} {sessions}{best}", text::duration(total), y.sessions)));
     }
     f.render_widget(Paragraph::new(lines), year);
 }
@@ -956,7 +938,9 @@ fn draw_cheevos(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 Span::styled(c.title.clone(), title),
                 Span::raw(format!("  {}", notes.join(" · "))).dim(),
             ]));
-            lines.push(Line::from(Span::raw(format!("  {}", truncate(&c.description, width.saturating_sub(2)))).dim()));
+            lines.push(Line::from(
+                Span::raw(format!("  {}", text::truncate(&c.description, width.saturating_sub(2)))).dim(),
+            ));
         }
         app.page = inner.height as usize;
         f.render_widget(Paragraph::new(lines), inner);
@@ -982,7 +966,7 @@ fn draw_cheevos(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             filters.push(Span::styled("█", accent));
         }
     }
-    let count = format!("{} game{}", rows.len(), if rows.len() == 1 { "" } else { "s" });
+    let count = format!("{} {}", rows.len(), text::plural(rows.len(), "game"));
     let [head, list] = Layout::vertical([Constraint::Length(2), Constraint::Min(1)]).areas(inner);
     f.render_widget(Paragraph::new(vec![Line::from(filters), Line::from(Span::raw(count).dim())]), head);
 
@@ -1016,7 +1000,7 @@ fn draw_cheevos(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             let system = if system_w > 0 { format!("{:<w$}", game.system, w = system_w) } else { String::new() };
             let style = if a.supported { Style::new() } else { Style::new().dim() };
             ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<name_w$}  ", truncate(&game.name, name_w)), style),
+                Span::styled(format!("{:<name_w$}  ", text::truncate(&game.name, name_w)), style),
                 Span::raw(system).dim(),
                 Span::styled(bar, accent),
                 Span::styled(format!("  {status}"), style),
@@ -1025,51 +1009,6 @@ fn draw_cheevos(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         .collect();
     let mut state = ratatui::widgets::ListState::default().with_selected((!rows.is_empty()).then_some(screen.selected));
     f.render_stateful_widget(List::new(items).highlight_style(theme.selected(true)), list, &mut state);
-}
-
-/// A Unix time as a local date and time, like "2026-10-24 12:00:00".
-pub fn fmt_datetime(t: u64) -> String {
-    let tt = t as libc::time_t;
-    // SAFETY: localtime_r only writes the tm it's given.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    if unsafe { libc::localtime_r(&tt, &mut tm) }.is_null() {
-        return String::new();
-    }
-    format!(
-        "{}-{:02}-{:02} {:02}:{:02}:{:02}",
-        tm.tm_year + 1900,
-        tm.tm_mon + 1,
-        tm.tm_mday,
-        tm.tm_hour,
-        tm.tm_min,
-        tm.tm_sec
-    )
-}
-
-/// A Unix time as a local date, like "Oct 24, 2026".
-pub fn fmt_date(t: u64) -> String {
-    const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    let tt = t as libc::time_t;
-    // SAFETY: localtime_r only writes the tm it's given.
-    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
-    if unsafe { libc::localtime_r(&tt, &mut tm) }.is_null() {
-        return String::new();
-    }
-    format!("{} {}, {}", MONTHS[tm.tm_mon as usize], tm.tm_mday, tm.tm_year + 1900)
-}
-
-fn fmt_clock(secs: u64) -> String {
-    format!("{:02}:{:02}:{:02}", secs / 3600, secs % 3600 / 60, secs % 60)
-}
-
-pub fn fmt_ago(secs: u64) -> String {
-    match secs {
-        0..60 => "just now".into(),
-        60..3600 => format!("{}m ago", secs / 60),
-        3600..86400 => format!("{}h ago", secs / 3600),
-        86400..2_592_000 => format!("{}d ago", secs / 86400),
-        _ => format!("{}mo ago", secs / 2_592_000),
-    }
 }
 
 #[cfg(test)]

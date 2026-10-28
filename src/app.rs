@@ -1406,8 +1406,8 @@ impl App {
         if let Err(e) = self.try_core(&core, &rom) {
             return self.set_status(Level::Error, format!("{}: {e}", self.lib.games[g].name));
         }
-        let volume = f32::from(self.cfg.volume.min(100)) / 100.0;
-        let started = crate::live::load(&self.cfg, &core, &rom)
+        let volume = self.cfg.volume_gain();
+        let started = crate::runner::load(&self.cfg, &core, &rom)
             .and_then(|core| crate::embedded::Embedded::start(g, core, volume));
         match started {
             Ok(e) => self.embedded = Some(e),
@@ -1557,11 +1557,10 @@ impl App {
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);
         match code {
             Some(Some(0)) => {
-                self.set_status(Level::Info, format!("Played {name} for {}", crate::ui::fmt_duration(played.as_secs())))
+                self.set_status(Level::Info, format!("Played {name} for {}", crate::text::duration(played.as_secs())))
             }
-            Some(Some(c)) => {
-                self.set_status(Level::Error, format!("{name} exited with code {c} (log: {})", tilde(&log_path())))
-            }
+            Some(Some(c)) => self
+                .set_status(Level::Error, format!("{name} exited with code {c} (log: {})", config::tilde(&log_path()))),
             Some(None) => self.set_status(Level::Warn, format!("{name} was killed by a signal")),
             None => self.set_status(Level::Error, format!("Lost track of {name}")),
         }
@@ -1595,14 +1594,6 @@ impl App {
             s.selected_system = system;
             s.selected_game = game;
         });
-    }
-}
-
-pub fn tilde(p: &std::path::Path) -> String {
-    let home = config::home();
-    match p.strip_prefix(&home) {
-        Ok(rest) => format!("~/{}", rest.display()),
-        Err(_) => p.display().to_string(),
     }
 }
 

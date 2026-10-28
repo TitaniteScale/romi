@@ -4,11 +4,11 @@
 //! the exact No-Intro/Redump name that box art lookups need.
 
 use crate::config::{self, Config, expand_path};
+use crate::files::StampCache;
 use crate::library::Library;
 use crate::titles::TitleIndex;
 use serde::Serialize;
 use std::collections::{BTreeSet, HashMap};
-use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 /// Raw ROMs bigger than this aren't checksummed (it'd mean reading GBs at startup for disc images).
@@ -392,44 +392,16 @@ fn parse_categories(text: &str) -> HashMap<String, String> {
 
 // ---- checksums ----
 
-/// ROM checksums, remembered by path, size and modification time so each file is read once.
-struct Crcs {
-    path: PathBuf,
-    known: HashMap<String, (u64, u64, u32)>,
-    dirty: bool,
-}
+/// ROM checksums, remembered so each file is read once.
+struct Crcs(StampCache<u32>);
 
 impl Crcs {
     fn load() -> Crcs {
-        let path = config::cache_dir().join("crc.tsv");
-        let known = std::fs::read_to_string(&path)
-            .unwrap_or_default()
-            .lines()
-            .filter_map(|l| {
-                let mut f = l.rsplitn(4, '\t');
-                let crc = u32::from_str_radix(f.next()?, 16).ok()?;
-                let mtime = f.next()?.parse().ok()?;
-                let size = f.next()?.parse().ok()?;
-                Some((f.next()?.to_string(), (size, mtime, crc)))
-            })
-            .collect();
-        Crcs { path, known, dirty: false }
+        Crcs(StampCache::load(config::cache_dir().join("crc.tsv")))
     }
 
     fn save(&self) {
-        if !self.dirty {
-            return;
-        }
-        let mut lines: Vec<String> =
-            self.known.iter().map(|(p, (size, mtime, crc))| format!("{p}\t{size}\t{mtime}\t{crc:08x}")).collect();
-        lines.sort();
-        if let Some(dir) = self.path.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let tmp = self.path.with_extension("tsv.tmp");
-        if std::fs::write(&tmp, lines.join("\n")).is_ok() {
-            let _ = std::fs::rename(&tmp, &self.path);
-        }
+        self.0.save();
     }
 
     fn get(&mut self, path: &Path) -> Option<u32> {
@@ -437,55 +409,19 @@ impl Crcs {
         if UNHASHABLE.contains(&ext.as_str()) {
             return None;
         }
-        let md = std::fs::metadata(path).ok()?;
-        let mtime = md.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
-        let key = path.to_string_lossy().into_owned();
-        if let Some(&(size, t, crc)) = self.known.get(&key)
-            && size == md.len()
-            && t == mtime
-        {
+        if let Some(crc) = self.0.get(path) {
             return Some(crc);
         }
         let crc = if ext == "zip" {
-            zip_crc(path)?
-        } else if md.len() <= MAX_HASH_SIZE {
+            crate::archive::biggest(path)?.crc
+        } else if std::fs::metadata(path).ok()?.len() <= MAX_HASH_SIZE {
             crc32fast::hash(&std::fs::read(path).ok()?)
         } else {
             return None;
         };
-        self.known.insert(key, (md.len(), mtime, crc));
-        self.dirty = true;
+        self.0.insert(path, crc);
         Some(crc)
     }
-}
-
-/// The CRC of the biggest file in a zip, straight from its central directory (no decompressing).
-fn zip_crc(path: &Path) -> Option<u32> {
-    let mut f = std::fs::File::open(path).ok()?;
-    let len = f.metadata().ok()?.len();
-    let tail_len = len.min(66_000);
-    f.seek(SeekFrom::Start(len - tail_len)).ok()?;
-    let mut tail = vec![0; tail_len as usize];
-    f.read_exact(&mut tail).ok()?;
-    let eocd = tail.windows(4).rposition(|w| w == b"PK\x05\x06")?;
-    let le32 = |b: &[u8], at: usize| Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?));
-    let le16 = |b: &[u8], at: usize| Some(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?) as usize);
-    let (cd_size, cd_offset) = (le32(&tail, eocd + 12)?, le32(&tail, eocd + 16)?);
-    if cd_offset == u32::MAX || cd_size as u64 > len {
-        return None; // zip64; not worth handling for ROMs
-    }
-    f.seek(SeekFrom::Start(cd_offset as u64)).ok()?;
-    let mut cd = vec![0; cd_size as usize];
-    f.read_exact(&mut cd).ok()?;
-    let (mut at, mut best) = (0, None::<(u32, u32)>);
-    while cd.get(at..at + 4) == Some(b"PK\x01\x02") {
-        let (crc, size) = (le32(&cd, at + 16)?, le32(&cd, at + 24)?);
-        if best.is_none_or(|(_, s)| size > s) {
-            best = Some((crc, size));
-        }
-        at += 46 + le16(&cd, at + 28)? + le16(&cd, at + 30)? + le16(&cd, at + 32)?;
-    }
-    best.map(|(crc, _)| crc)
 }
 
 // ---- putting it together ----

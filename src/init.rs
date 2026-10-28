@@ -152,7 +152,7 @@ impl Catalog {
         match &finder.cores {
             Some(dir) if cfg.vars.get("cores").map(|c| expand_path(c)).as_ref() != Some(dir) => found
                 .into_iter()
-                .map(|t| Translated { command: t.command.replace("{cores}", &crate::app::tilde(dir)), ..t })
+                .map(|t| Translated { command: t.command.replace("{cores}", &crate::config::tilde(dir)), ..t })
                 .collect(),
             _ => found,
         }
@@ -281,7 +281,7 @@ impl<'a> Finder<'a> {
                 .iter()
                 .find(|p| find_program(p).is_some())
                 .cloned()
-                .or_else(|| paths.iter().find_map(|p| first_match(p)).map(|p| crate::app::tilde(&p)))
+                .or_else(|| paths.iter().find_map(|p| first_match(p)).map(|p| crate::config::tilde(&p)))
         });
         self.programs.insert(name.to_string(), found.clone());
         found
@@ -297,7 +297,7 @@ impl<'a> Finder<'a> {
             .iter()
             .map(|d| expand_path(d).join(file))
             .find(|p| p.is_file())
-            .map(|p| crate::app::tilde(&p))
+            .map(|p| crate::config::tilde(&p))
     }
 
     /// Turns an ES-DE command into romi's, or says why it can't run here.
@@ -334,7 +334,7 @@ impl<'a> Finder<'a> {
                     "BASENAME" => "{name}".to_string(),
                     "FILENAME" => "{file}".to_string(),
                     "GAMEDIR" | "GAMEDIRRAW" => "{dir}".to_string(),
-                    "ROMPATH" => crate::app::tilde(roms_dir),
+                    "ROMPATH" => crate::config::tilde(roms_dir),
                     "CORE_RETROARCH" => {
                         // The core's file name follows: `%CORE_RETROARCH%/x_libretro.so`.
                         let rest = &word[start + token.len()..];
@@ -620,7 +620,7 @@ pub fn render(report: &Report) -> String {
         .collect();
     let uses_cores = new.iter().any(|(_, _, run, _, _)| run.command.contains("{cores}"));
     if let (true, Some(cores)) = (uses_cores, &report.cores) {
-        let _ = writeln!(out, "  \"vars\": {{ \"cores\": {} }},", q(&crate::app::tilde(cores)));
+        let _ = writeln!(out, "  \"vars\": {{ \"cores\": {} }},", q(&crate::config::tilde(cores)));
     }
     out.push_str("  \"systems\": [");
     // Nothing here says what's in the ROM folders (not even how many games), so the file is safe
@@ -647,7 +647,7 @@ pub fn render(report: &Report) -> String {
             let _ = write!(out, ", \"name\": {}", q(&def.name));
         }
         if report.absolute {
-            let _ = write!(out, ", \"dir\": {}", q(&crate::app::tilde(&report.roms_dir.join(&def.folder))));
+            let _ = write!(out, ", \"dir\": {}", q(&crate::config::tilde(&report.roms_dir.join(&def.folder))));
         } else if def.folder != def.id {
             let _ = write!(out, ", \"dir\": {}", q(&def.folder));
         }
@@ -679,8 +679,8 @@ pub fn render(report: &Report) -> String {
 pub fn summary(report: &Report) -> String {
     let mut out = String::new();
     let source = if report.esde { "ES-DE's system list" } else { "romi's built-in system list" };
-    let _ = writeln!(out, "ROMs in {} (using {source})\n", crate::app::tilde(&report.roms_dir));
-    let plural = |n: usize| format!("{n:>4} game{}", if n == 1 { " " } else { "s" });
+    let _ = writeln!(out, "ROMs in {} (using {source})\n", crate::config::tilde(&report.roms_dir));
+    let plural = |n: usize| format!("{n:>4} {:<5}", crate::text::plural(n, "game"));
     for f in &report.findings {
         let line = match f {
             Finding::New { def, games, run, guessed, .. } => {
@@ -707,7 +707,7 @@ pub fn summary(report: &Report) -> String {
         let _ = writeln!(out, "{}", line.trim_end());
     }
     let added = report.findings.iter().filter(|f| matches!(f, Finding::New { .. })).count();
-    let _ = writeln!(out, "\n{added} system{} to add", if added == 1 { "" } else { "s" });
+    let _ = writeln!(out, "\n{added} {} to add", crate::text::plural(added, "system"));
     out
 }
 
@@ -734,11 +734,11 @@ pub fn fresh_config(roms_dir: &Path) -> String {
         "// romi config. Comments are allowed. Press ctrl-r in romi to reload after editing.\n\
          // Every option is described in default-config.jsonc in romi's repository.\n{\n",
     );
-    let _ = writeln!(out, "  \"roms_dir\": {},", q(&crate::app::tilde(roms_dir)));
+    let _ = writeln!(out, "  \"roms_dir\": {},", q(&crate::config::tilde(roms_dir)));
     let esde = expand_path("~/ES-DE/gamelists");
     if esde.is_dir() {
         out.push_str("  // Names and descriptions scraped by ES-DE.\n");
-        let _ = writeln!(out, "  \"gamelists_dir\": {},", q(&crate::app::tilde(&esde)));
+        let _ = writeln!(out, "  \"gamelists_dir\": {},", q(&crate::config::tilde(&esde)));
     }
     if let Some(mame) = ESDE_DIRS.iter().map(|d| Path::new(d).join("../../MAME")).find(|d| d.is_dir()) {
         out.push_str("  // MAME titles shipped with ES-DE, for arcade systems.\n");
