@@ -264,7 +264,7 @@ impl Library {
         let idx = self.systems.len();
         self.systems.push(System {
             id: sys.id.clone(),
-            name: sys.name.clone(),
+            name: cfg.system_name(sys),
             games: Vec::new(),
             problem: check_command(&sys.command, &cfg.vars, ROM_KEYS).or_else(|| {
                 // Some cores also accept BIOS files next to the games (neogeo.zip, naomi.zip).

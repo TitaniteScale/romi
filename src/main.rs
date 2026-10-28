@@ -1,5 +1,6 @@
 mod add;
 mod app;
+mod archive;
 mod art;
 mod audio;
 mod cheevos;

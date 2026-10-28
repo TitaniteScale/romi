@@ -36,6 +36,12 @@
   // played, in its system).
   "start_on": "last_selected",
 
+  // Some systems are called different things in different places: Genesis or Mega Drive, Sega CD
+  // or Mega-CD, TurboGrafx-16 or PC Engine, Super Nintendo or Super Famicom. Those left without a
+  // "name" below are named for this region: "na" (North America), "eu" (Europe and most of the
+  // world), "jp", or "auto" to go by your locale.
+  "region": "auto",
+
   // Commands run when a game starts and stops, here and per system (see the README).
   // "hooks": {
   //   "on_launch": ["playerctl pause", "powerprofilesctl set performance"],
@@ -101,7 +107,7 @@
       "command": "melonDS -f {rom}"
     },
     {
-      "id": "snes", "name": "Super Nintendo",
+      "id": "snes",
       "extensions": ["sfc", "smc", "zip", "7z"],
       "command": "retroarch -L {cores}/bsnes_hd_beta_libretro.so {rom}"
     },
@@ -116,12 +122,12 @@
       "command": "dolphin-emu -b -e {rom}"
     },
     {
-      "id": "megadrive", "name": "Mega Drive",
+      "id": "megadrive",
       "extensions": ["md", "gen", "smd", "bin", "32x", "sms", "gg", "zip", "7z"],
       "command": "retroarch -L {cores}/genesis_plus_gx_libretro.so {rom}"
     },
     {
-      "id": "scd", "name": "Sega CD",
+      "id": "scd",
       "extensions": ["chd", "cue", "m3u", "iso"],
       // US, Europe, Japan: games need the one for their region.
       "bios": [["bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"]],
@@ -140,7 +146,7 @@
       "command": "retroarch -L {cores}/flycast_libretro.so {rom}"
     },
     {
-      "id": "pcengine", "name": "PC Engine",
+      "id": "pcengine",
       "extensions": ["pce", "sgx", "chd", "cue", "m3u", "zip", "7z"],
       "command": "retroarch -L {cores}/mednafen_pce_fast_libretro.so {rom}"
     },

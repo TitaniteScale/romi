@@ -53,8 +53,9 @@ of a ROM hack or decomp. `--input` holds buttons from a script of `<frame> <butt
 held until the next line (`300 start`, then `306` to let go). The same ROM, script and frame count
 always give the same picture, so screenshots can be compared between builds. `--wav out.wav` saves
 the sound of the whole run, which comes out the same every time too. Only cores that draw in
-software work (most 2D systems, and arcade games through FinalBurn Neo). Zipped ROMs work with cores
-that open zips themselves, like FinalBurn Neo; for others they need extracting first. Cores get the
+software work (most 2D systems, and arcade games through FinalBurn Neo). Zipped ROMs go as they are
+to cores that open zips themselves, like FinalBurn Neo, and are unpacked to /tmp for the rest, as
+RetroArch does; 7z files only work with cores that open them. Cores get the
 first of `bios_dirs` as their system folder, and each run gets an empty save folder of its own,
 deleted afterwards, so nothing saved from one run changes the next.
 
@@ -299,6 +300,12 @@ for every option.
 
 `"include": ["other.jsonc"]` adds the systems, games, vars and BIOS folders of other files
 (relative to the config's folder). Anything the main config defines itself wins.
+
+**Regional names**: some systems are called different things in different places (Genesis or Mega
+Drive, Sega CD or Mega-CD, TurboGrafx-16 or PC Engine, Super Nintendo or Super Famicom, NES or
+Famicom). A system with one of those ids and no `"name"` is named for `"region"`: `"na"`, `"eu"`
+(Europe and most of the world), `"jp"`, or `"auto"` (the default), which goes by your locale
+(`en_US` is North America). `romi init` leaves these systems unnamed; give one a `"name"` to fix it.
 
 ```jsonc
 {

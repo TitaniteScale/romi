@@ -153,7 +153,7 @@ It's built in steps, and the first one pays off without any of the TUI work:
      romi scales frames to the cells' exact pixel size, nearest neighbour; panels that aren't a whole
      multiple of the game's size get some pixels a screen pixel wider than others.
    - ✓ **Arcade games through FinalBurn Neo**: it opens zips itself, so archives go to cores that
-     list them. Games on their side are turned upright as the core asks. Cores get RetroArch's system
+     list them; romi unpacks zips for the rest (Genesis Plus GX for the Mega Drive). Games on their side are turned upright as the core asks. Cores get RetroArch's system
      folder and its save folder for the core (headless runs get a fresh temporary one, so they
      repeat exactly). Cores that only draw with the GPU (Flycast) can crash while loading, so the
      TUI starts a core in a separate process the first time it's played.

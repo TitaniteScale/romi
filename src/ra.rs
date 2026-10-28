@@ -14,7 +14,6 @@ use crate::titles::TitleIndex;
 use anyhow::{Context, Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -481,58 +480,12 @@ const MAX_ROM: u64 = 256 << 20;
 fn rom_bytes(path: &Path) -> Option<Vec<u8>> {
     let ext = path.extension()?.to_string_lossy().to_lowercase();
     if ext == "zip" {
-        return zip_biggest(path);
+        return crate::archive::biggest_in_zip(path, MAX_ROM).map(|(_, data)| data);
     }
     if ext == "7z" || std::fs::metadata(path).ok()?.len() > MAX_ROM {
         return None;
     }
     std::fs::read(path).ok()
-}
-
-/// The biggest file in a zip, decompressed.
-fn zip_biggest(path: &Path) -> Option<Vec<u8>> {
-    let mut f = std::fs::File::open(path).ok()?;
-    let len = f.metadata().ok()?.len();
-    let tail_len = len.min(66_000);
-    f.seek(SeekFrom::Start(len - tail_len)).ok()?;
-    let mut tail = vec![0; tail_len as usize];
-    f.read_exact(&mut tail).ok()?;
-    let eocd = tail.windows(4).rposition(|w| w == b"PK\x05\x06")?;
-    let le32 = |b: &[u8], at: usize| Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?));
-    let le16 = |b: &[u8], at: usize| Some(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?) as usize);
-    let (cd_size, cd_offset) = (le32(&tail, eocd + 12)?, le32(&tail, eocd + 16)?);
-    if cd_offset == u32::MAX || cd_size as u64 > len {
-        return None; // zip64; not worth handling for ROMs
-    }
-    f.seek(SeekFrom::Start(cd_offset as u64)).ok()?;
-    let mut cd = vec![0; cd_size as usize];
-    f.read_exact(&mut cd).ok()?;
-    // (method, compressed size, size, local header offset) of the biggest entry.
-    let (mut at, mut best) = (0, None::<(usize, u32, u32, u32)>);
-    while cd.get(at..at + 4) == Some(b"PK\x01\x02") {
-        let entry = (le16(&cd, at + 10)?, le32(&cd, at + 20)?, le32(&cd, at + 24)?, le32(&cd, at + 42)?);
-        if best.is_none_or(|b| entry.2 > b.2) {
-            best = Some(entry);
-        }
-        at += 46 + le16(&cd, at + 28)? + le16(&cd, at + 30)? + le16(&cd, at + 32)?;
-    }
-    let (method, packed, size, offset) = best?;
-    if u64::from(size) > MAX_ROM {
-        return None;
-    }
-    let mut local = [0u8; 30];
-    f.seek(SeekFrom::Start(offset as u64)).ok()?;
-    f.read_exact(&mut local).ok()?;
-    let data_at = offset as u64 + 30 + le16(&local, 26)? as u64 + le16(&local, 28)? as u64;
-    f.seek(SeekFrom::Start(data_at)).ok()?;
-    let packed = f.take(packed as u64);
-    let mut out = Vec::with_capacity(size as usize);
-    match method {
-        0 => packed.take(size as u64).read_to_end(&mut out).ok()?,
-        8 => flate2::read::DeflateDecoder::new(packed).read_to_end(&mut out).ok()?,
-        _ => return None,
-    };
-    Some(out)
 }
 
 /// ROM hashes, remembered by path, size and modification time so each file is read once.

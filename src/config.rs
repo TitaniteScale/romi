@@ -27,6 +27,9 @@ pub struct Config {
     pub vars: HashMap<String, String>,
     /// Which game is selected when romi starts.
     pub start_on: StartOn,
+    /// Where in the world names come from, for systems known by different names in different
+    /// places (Genesis or Mega Drive) and given no name of their own.
+    pub region: Region,
     /// Commands run when any game starts and stops. A system's own hooks run as well.
     pub hooks: Hooks,
     pub theme: Theme,
@@ -57,6 +60,65 @@ pub enum StartOn {
     LastPlayed,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Region {
+    /// From the locale: the United States and Canada are North America, Japan is Japan, and
+    /// everywhere else (or no locale) gets the names used in most of the world, Europe's.
+    #[default]
+    Auto,
+    /// North America: Genesis, Sega CD, TurboGrafx-16.
+    Na,
+    /// Europe, and most of the world: Mega Drive, Mega-CD, PC Engine.
+    Eu,
+    /// Japan: Mega Drive, Super Famicom, Famicom.
+    Jp,
+}
+
+impl Region {
+    /// `Auto` worked out from the locale; any other region as it is.
+    pub fn resolve(self) -> Region {
+        if self != Region::Auto {
+            return self;
+        }
+        let locale =
+            ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|l| !l.is_empty()));
+        Region::of_locale(locale.as_deref().unwrap_or(""))
+    }
+
+    /// The region of a locale like `en_US.UTF-8`, by its territory.
+    fn of_locale(locale: &str) -> Region {
+        let territory = locale.split(['.', '@']).next().unwrap_or("").split_once('_').map(|(_, t)| t);
+        match territory {
+            Some("US" | "CA") => Region::Na,
+            Some("JP") => Region::Jp,
+            _ => Region::Eu,
+        }
+    }
+}
+
+/// Systems known by different names in different places: the ids they go by, then their names
+/// in North America, Europe and Japan.
+const REGIONAL_NAMES: &[(&[&str], [&str; 3])] = &[
+    (&["megadrive", "genesis"], ["Genesis", "Mega Drive", "Mega Drive"]),
+    (&["scd", "segacd", "megacd"], ["Sega CD", "Mega-CD", "Mega-CD"]),
+    (&["sega32x", "32x"], ["32X", "Mega Drive 32X", "Super 32X"]),
+    (&["snes", "sfc", "superfamicom"], ["Super Nintendo", "Super Nintendo", "Super Famicom"]),
+    (&["nes", "famicom"], ["NES", "NES", "Famicom"]),
+    (&["pcengine", "tg16"], ["TurboGrafx-16", "PC Engine", "PC Engine"]),
+    (&["pcenginecd", "tg-cd"], ["TurboGrafx-CD", "PC Engine CD", "PC Engine CD"]),
+];
+
+/// What the system with this id is called in `region`, if that depends on where you are.
+pub fn regional_name(id: &str, region: Region) -> Option<&'static str> {
+    let (_, names) = REGIONAL_NAMES.iter().find(|(ids, _)| ids.contains(&id))?;
+    Some(match region.resolve() {
+        Region::Na => names[0],
+        Region::Jp => names[2],
+        _ => names[1],
+    })
+}
+
 /// What an included file may contain. `romi init` writes its findings to one, so they stay
 /// apart from what you write by hand. Everything here only fills gaps: a system or var that the
 /// main config also defines is the main config's.
@@ -71,6 +133,14 @@ pub struct Include {
 }
 
 impl Config {
+    /// What a system is called: its own name, or for want of one its name in `region`, or its id.
+    pub fn system_name(&self, sys: &SystemConfig) -> String {
+        match &sys.name {
+            Some(name) => name.clone(),
+            None => regional_name(&sys.id, self.region).unwrap_or(&sys.id).to_string(),
+        }
+    }
+
     /// The folder libretro cores romi runs get as their system folder, for BIOS files and their
     /// own data: the first of `bios_dirs` that exists (RetroArch's, unless changed).
     pub fn system_dir(&self) -> Option<PathBuf> {
@@ -112,6 +182,7 @@ impl Default for Config {
             bios_dirs: vec!["~/.config/retroarch/system".into()],
             vars: HashMap::new(),
             start_on: StartOn::default(),
+            region: Region::default(),
             hooks: Hooks::default(),
             theme: Theme::default(),
             controller: ControllerConfig::default(),
@@ -145,7 +216,10 @@ pub enum LaunchMode {
 pub struct SystemConfig {
     /// Short id; also the ES-DE gamelist folder name.
     pub id: String,
-    pub name: String,
+    /// Shown everywhere. Systems known by different names in different places (Genesis or Mega
+    /// Drive) can leave it out to be named for `region`; others are named by their id without it.
+    #[serde(default)]
+    pub name: Option<String>,
     /// ROM folder, relative to `roms_dir` unless absolute or `~`-prefixed. Defaults to `id`.
     pub dir: Option<String>,
     /// File extensions to list, without the dot. Case-insensitive.
@@ -570,6 +644,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn regions_come_from_the_locales_territory() {
+        assert_eq!(Region::of_locale("en_US.UTF-8"), Region::Na);
+        assert_eq!(Region::of_locale("fr_CA"), Region::Na);
+        assert_eq!(Region::of_locale("ja_JP.UTF-8"), Region::Jp);
+        assert_eq!(Region::of_locale("en_GB.UTF-8"), Region::Eu);
+        assert_eq!(Region::of_locale("pt_BR@latin"), Region::Eu);
+        assert_eq!(Region::of_locale("C"), Region::Eu);
+        assert_eq!(Region::of_locale(""), Region::Eu);
+    }
+
+    #[test]
+    fn systems_without_a_name_are_named_for_the_region() {
+        let mut cfg = parse(
+            r#"{ "systems": [
+                { "id": "megadrive", "extensions": ["md"], "command": "x {rom}" },
+                { "id": "genesis", "name": "My Genesis", "extensions": ["md"], "command": "x {rom}" },
+                { "id": "gba", "extensions": ["gba"], "command": "x {rom}" }
+            ] }"#,
+        )
+        .unwrap();
+        let names = |cfg: &Config| cfg.systems.iter().map(|s| cfg.system_name(s)).collect::<Vec<_>>();
+        cfg.region = Region::Na;
+        assert_eq!(names(&cfg), ["Genesis", "My Genesis", "gba"]);
+        cfg.region = Region::Eu;
+        assert_eq!(names(&cfg), ["Mega Drive", "My Genesis", "gba"]);
+        assert_eq!(regional_name("pcengine", Region::Na), Some("TurboGrafx-16"));
+        assert_eq!(regional_name("snes", Region::Jp), Some("Super Famicom"));
+        assert_eq!(regional_name("gba", Region::Jp), None);
+    }
+
+    #[test]
     fn default_config_parses() {
         let cfg = parse(DEFAULT_CONFIG).unwrap();
         assert!(!cfg.systems.is_empty());
@@ -600,7 +705,7 @@ mod tests {
         assert_eq!(cfg.vars["cores"], "/mine");
         assert_eq!(cfg.vars["extra"], "/x");
         assert!(cfg.bios_dirs.contains(&"~/bios".to_string()));
-        let names: Vec<&str> = cfg.systems.iter().map(|s| s.name.as_str()).collect();
+        let names: Vec<String> = cfg.systems.iter().map(|s| cfg.system_name(s)).collect();
         assert_eq!(names, ["Mine", "SNES"]);
     }
 

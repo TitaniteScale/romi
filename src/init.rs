@@ -66,6 +66,13 @@ pub struct SystemDef {
     pub arcade: bool,
 }
 
+impl SystemDef {
+    /// Its name as romi will show it: for systems with regional names, the one for this locale.
+    fn shown_name(&self) -> &str {
+        config::regional_name(&self.id, config::Region::Auto).unwrap_or(&self.name)
+    }
+}
+
 /// Where to find each emulator, and RetroArch's cores.
 #[derive(Debug, Default)]
 pub struct FindRules {
@@ -174,8 +181,8 @@ impl Catalog {
             .map(|s| SystemDef {
                 folder: s.dir.clone().unwrap_or_else(|| s.id.clone()),
                 commands: vec![(String::new(), s.command)],
+                name: s.name.unwrap_or_else(|| s.id.clone()),
                 id: s.id,
-                name: s.name,
                 extensions: s.extensions,
                 arcade: s.arcade,
             })
@@ -634,7 +641,11 @@ pub fn render(report: &Report) -> String {
             let _ = writeln!(out, "    // {}", notes.join("; "));
         }
         out.push_str("    {\n");
-        let _ = write!(out, "      \"id\": {}, \"name\": {}", q(&def.id), q(&def.name));
+        // Systems with regional names are left without one, so they follow the region setting.
+        let _ = write!(out, "      \"id\": {}", q(&def.id));
+        if config::regional_name(&def.id, config::Region::Auto).is_none() {
+            let _ = write!(out, ", \"name\": {}", q(&def.name));
+        }
         if report.absolute {
             let _ = write!(out, ", \"dir\": {}", q(&crate::app::tilde(&report.roms_dir.join(&def.folder))));
         } else if def.folder != def.id {
@@ -675,7 +686,7 @@ pub fn summary(report: &Report) -> String {
             Finding::New { def, games, run, guessed, .. } => {
                 let how = describe(run);
                 let guess = if *guessed { "  (recognized by file type)" } else { "" };
-                format!("  + {:<14} {:<28} {}  {how}{guess}", def.folder, def.name, plural(*games))
+                format!("  + {:<14} {:<28} {}  {how}{guess}", def.folder, def.shown_name(), plural(*games))
             }
             Finding::Configured { folder, id } => {
                 format!("  = {folder:<14} already in your config as \"{id}\"")
@@ -685,12 +696,12 @@ pub fn summary(report: &Report) -> String {
                 format!(
                     "  ! {:<14} {:<28} {}  no emulator installed (ES-DE knows: {})",
                     def.folder,
-                    def.name,
+                    def.shown_name(),
                     plural(*games),
                     tried.join(", ")
                 )
             }
-            Finding::Empty { def } => format!("  - {:<14} {:<28}    no games", def.folder, def.name),
+            Finding::Empty { def } => format!("  - {:<14} {:<28}    no games", def.folder, def.shown_name()),
             Finding::Unknown { folder } => format!("  ? {folder:<14} not a system romi knows"),
         };
         let _ = writeln!(out, "{}", line.trim_end());

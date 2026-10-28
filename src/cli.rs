@@ -858,7 +858,7 @@ fn run_core(
         return fail(exit::UNAVAILABLE, format!("no core at {}", app::tilde(&core)));
     }
     if !crate::retro::can_open(&core, &rom) {
-        let why = "this core can't open archives, and romi can't unpack them yet; extract it first";
+        let why = "this core can't open 7z files, and romi can only unpack zips; extract it first";
         return fail(exit::UNAVAILABLE, format!("{}: {why}", rom.display()));
     }
     let script = match input {
@@ -875,8 +875,8 @@ fn run_core(
     }
     // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared
     // before the core, so it's removed after the core has shut down and written its last.
-    let saves = TempDir::new()?;
-    let dirs = crate::retro::Dirs { system: cfg.system_dir(), saves: Some(saves.0.clone()) };
+    let saves = crate::archive::TempDir::new("saves").context("can't make a save folder in /tmp")?;
+    let dirs = crate::retro::Dirs { system: cfg.system_dir(), saves: Some(saves.path().to_path_buf()) };
     let mut emu = crate::retro::Core::load(&core, &rom, &dirs)?;
     let mut sound = wav.map(|path| crate::audio::Wav::create(path, emu.sample_rate)).transpose()?;
     let mut samples = Vec::new();
@@ -934,23 +934,6 @@ fn run_core(
     Ok(())
 }
 
-/// A folder of its own in /tmp, removed with everything in it when dropped.
-struct TempDir(PathBuf);
-
-impl TempDir {
-    fn new() -> Result<TempDir> {
-        let dir = std::env::temp_dir().join(format!("romi-run-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).with_context(|| format!("can't make {}", dir.display()))?;
-        Ok(TempDir(dir))
-    }
-}
-
-impl Drop for TempDir {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_dir_all(&self.0);
-    }
-}
-
 /// A ROM given by path runs with the command of the first system that lists its extension.
 fn rom_file(
     cfg: &Config,
@@ -959,7 +942,7 @@ fn rom_file(
 ) -> Result<(String, PathBuf, Option<crate::launch::Launch>)> {
     let ext = rom.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     let sys = cfg.systems.iter().find(|s| match system {
-        Some(want) => s.id.eq_ignore_ascii_case(want) || s.name.eq_ignore_ascii_case(want),
+        Some(want) => s.id.eq_ignore_ascii_case(want) || cfg.system_name(s).eq_ignore_ascii_case(want),
         None => s.extensions.iter().any(|e| e.eq_ignore_ascii_case(&ext)),
     });
     let name = rom.file_stem().unwrap_or(rom.as_os_str()).to_string_lossy().into_owned();
@@ -1425,7 +1408,7 @@ fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
             None if !roms.join(dir).is_dir() && !config::expand_path(dir).is_dir() => ("-", "no folder".into()),
             None => ("-", games(0)),
         };
-        println!("  {mark} {:<width$} {}", sys.name, detail.trim_end());
+        println!("  {mark} {:<width$} {}", cfg.system_name(sys), detail.trim_end());
     }
     for s in &lib.systems {
         if !cfg.systems.iter().any(|c| c.id == s.id) {

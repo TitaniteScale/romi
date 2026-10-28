@@ -306,6 +306,8 @@ pub struct Core {
     pub sample_rate: f64,
     /// The ROM's bytes, which the core may keep pointing into until the game is unloaded.
     _rom: Vec<u8>,
+    /// Where the ROM was unpacked to, for a zip the core can't open itself.
+    _unpacked: Option<crate::archive::TempDir>,
     // Dropped last, after `Drop` has shut the core down.
     _lib: libloading::Library,
 }
@@ -320,6 +322,9 @@ impl Core {
     }
 
     fn open(core_path: &Path, rom: &Path, dirs: &Dirs) -> Result<Core> {
+        let unpacked = unpack(core_path, rom)?;
+        let rom = unpacked.as_ref().map_or(rom.to_path_buf(), |(_, path)| path.clone());
+        let rom = rom.as_path();
         let c_path = |d: &Option<PathBuf>| d.as_ref().and_then(|d| CString::new(d.as_os_str().as_encoded_bytes()).ok());
         *shared() = Shared {
             pixel_format: PIXEL_0RGB1555,
@@ -383,7 +388,15 @@ impl Core {
             }
             let mut av = AvInfo::default();
             sym!("retro_get_system_av_info", unsafe extern "C" fn(*mut AvInfo))(&mut av);
-            Ok(Core { api, name, fps: av.timing.fps, sample_rate: av.timing.sample_rate, _rom: data, _lib: lib })
+            Ok(Core {
+                api,
+                name,
+                fps: av.timing.fps,
+                sample_rate: av.timing.sample_rate,
+                _rom: data,
+                _unpacked: unpacked.map(|(dir, _)| dir),
+                _lib: lib,
+            })
         }
     }
 
@@ -428,14 +441,38 @@ pub fn core_in(argv: &[String]) -> Option<PathBuf> {
     })
 }
 
-/// Whether the core at `core` can be given this ROM. romi can't unpack archives yet, so a zip or 7z
-/// only goes to a core that opens them itself, as arcade cores like FinalBurn Neo do.
+/// Whether the core at `core` can be given this ROM. A zip goes as it is to a core that opens zips
+/// itself, as arcade cores like FinalBurn Neo do, and is unpacked for any other. romi can't unpack
+/// a 7z, so those only go to cores that open them.
 pub fn can_open(core: &Path, rom: &Path) -> bool {
-    let Some(ext) = rom.extension().map(|e| e.to_string_lossy().to_lowercase()) else { return true };
-    if ext != "zip" && ext != "7z" {
-        return true;
+    match archive_ext(rom).as_deref() {
+        Some("7z") => opens(core, "7z"),
+        _ => true,
     }
-    info(core).is_some_and(|info| info.extensions.contains(&ext))
+}
+
+/// "zip" or "7z", lowercased, for an archive.
+fn archive_ext(rom: &Path) -> Option<String> {
+    let ext = rom.extension()?.to_string_lossy().to_lowercase();
+    matches!(ext.as_str(), "zip" | "7z").then_some(ext)
+}
+
+fn opens(core: &Path, ext: &str) -> bool {
+    info(core).is_some_and(|info| info.extensions.iter().any(|e| e == ext))
+}
+
+/// For a zip the core can't open itself, the ROM in it unpacked to a folder in /tmp, as RetroArch
+/// does: the biggest file, which is the game in the zips ROM sets come in.
+fn unpack(core: &Path, rom: &Path) -> Result<Option<(crate::archive::TempDir, PathBuf)>> {
+    if archive_ext(rom).as_deref() != Some("zip") || opens(core, "zip") {
+        return Ok(None);
+    }
+    let (name, data) = crate::archive::biggest_in_zip(rom, 1 << 30)
+        .with_context(|| format!("can't read the game out of {}", rom.display()))?;
+    let dir = crate::archive::TempDir::new("rom").context("can't make a folder in /tmp to unpack into")?;
+    let path = dir.path().join(if name.is_empty() { "rom" } else { &name });
+    std::fs::write(&path, data).with_context(|| format!("can't unpack {}", rom.display()))?;
+    Ok(Some((dir, path)))
 }
 
 /// What a core says about itself before it's started.
@@ -563,11 +600,11 @@ mod tests {
     }
 
     #[test]
-    fn archives_only_go_to_cores_that_open_them() {
+    fn zips_are_unpacked_and_7z_files_only_go_to_cores_that_open_them() {
         let no_core = Path::new("/nonexistent/core_libretro.so");
         assert!(can_open(no_core, Path::new("game.gba")));
         assert!(can_open(no_core, Path::new("rom")));
-        assert!(!can_open(no_core, Path::new("game.ZIP")));
+        assert!(can_open(no_core, Path::new("game.ZIP")));
         assert!(!can_open(no_core, Path::new("game.7z")));
     }
 

@@ -179,7 +179,7 @@ fn rom_system(cfg: &Config, path: &Path) -> Option<(String, PathBuf)> {
     } else {
         config::expand_path(&cfg.roms_dir).join(dir)
     };
-    Some((sys.name.clone(), folder))
+    Some((cfg.system_name(sys), folder))
 }
 
 /// The text of games.jsonc with `entry` added: a new file, or the existing one with one more
