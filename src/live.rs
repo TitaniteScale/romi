@@ -11,8 +11,9 @@
 //! slowing the game. F4 mutes the sound.
 
 use crate::audio;
-use crate::retro::{Core, Frame, button};
-use anyhow::Result;
+use crate::config::Config;
+use crate::retro::{Core, Dirs, Frame, button};
+use anyhow::{Context, Result};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use gilrs::{Axis, Button, Gilrs};
@@ -24,6 +25,7 @@ use ratatui::crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScr
 use ratatui::crossterm::{cursor, execute};
 use std::collections::{HashSet, VecDeque};
 use std::io::Write;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
@@ -122,6 +124,16 @@ impl Shared {
         let mut latest = self.latest.lock().unwrap_or_else(|e| e.into_inner());
         (latest.0 != seen).then(|| (latest.0, std::mem::take(&mut latest.1)))
     }
+}
+
+/// Loads a core to play `rom` with. It gets RetroArch's system folder and RetroArch's save folder
+/// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways.
+pub fn load(cfg: &Config, core: &Path, rom: &Path) -> Result<Core> {
+    let saves = crate::retro::info(core).and_then(|info| crate::emucfg::retroarch_save_dir(&info.name, rom));
+    if let Some(dir) = &saves {
+        std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;
+    }
+    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves })
 }
 
 pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {

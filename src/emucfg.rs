@@ -1,5 +1,6 @@
-//! What `romi check` can tell from emulators' own settings files: whether RetroAchievements is on
-//! and logged in, and whether a controller is bound. romi only ever reads these files.
+//! What romi can tell from emulators' own settings files: for `romi check`, whether
+//! RetroAchievements is on and logged in and whether a controller is bound; for games played in
+//! romi, where RetroArch keeps saves. romi only ever reads these files.
 
 use crate::config::{Config, expand_path};
 use crate::library::Library;
@@ -223,6 +224,36 @@ fn controller(emu: Emulator, dir: &Path, systems: &[&str]) -> Option<Note> {
     }
 }
 
+/// The folder RetroArch gives the core called `core` (its name without the version) for what it
+/// writes while playing `rom`, so a game played in romi shares those files with RetroArch. None
+/// when RetroArch keeps them next to the game, which is also where cores go without a folder.
+pub fn retroarch_save_dir(core: &str, rom: &Path) -> Option<PathBuf> {
+    let dir = Emulator::RetroArch.config_dir(false);
+    save_dir(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
+}
+
+fn save_dir(ini: &Ini, config_dir: &Path, core: &str, rom: &Path) -> Option<PathBuf> {
+    if ini.get("", "savefiles_in_content_dir") == Some("true") {
+        return None;
+    }
+    let mut dir = match ini.get("", "savefile_directory") {
+        // RetroArch writes this line with its default when it first runs.
+        None => config_dir.join("saves"),
+        Some("" | "default") => return None,
+        Some(dir) => expand_path(dir),
+    };
+    // Both default to on and off as RetroArch's do.
+    if ini.get("", "sort_savefiles_enable") != Some("false") && !core.is_empty() {
+        dir.push(core);
+    }
+    if ini.get("", "sort_savefiles_by_content_enable") == Some("true")
+        && let Some(folder) = rom.parent().and_then(|p| p.file_name())
+    {
+        dir.push(folder);
+    }
+    Some(dir)
+}
+
 /// `key = value` lines under `[section]` headings (the ones before any heading are in ""), with
 /// quotes taken off values. Enough for retroarch.cfg, Dolphin's and PCSX2's ini files and melonDS's
 /// TOML. A key can appear more than once, as PCSX2 does for extra bindings.
@@ -272,6 +303,18 @@ impl Ini {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_folders_follow_retroarchs_settings() {
+        let (config, rom) = (Path::new("/ra"), Path::new("/roms/neogeo/kof98.zip"));
+        let at = |cfg: &str| save_dir(&Ini::parse(cfg), config, "FinalBurn Neo", rom);
+        assert_eq!(at(""), Some(PathBuf::from("/ra/saves/FinalBurn Neo")));
+        assert_eq!(at("savefile_directory = \"/s\"\nsort_savefiles_enable = \"false\""), Some(PathBuf::from("/s")));
+        let by_content = "savefile_directory = \"/s\"\nsort_savefiles_by_content_enable = \"true\"";
+        assert_eq!(at(by_content), Some(PathBuf::from("/s/FinalBurn Neo/neogeo")));
+        assert_eq!(at("savefile_directory = \"default\""), None);
+        assert_eq!(at("savefile_directory = \"/s\"\nsavefiles_in_content_dir = \"true\""), None);
+    }
 
     #[test]
     fn emulators_from_commands() {

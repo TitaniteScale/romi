@@ -840,9 +840,6 @@ fn run_core(
             (game.name.clone(), rom, Some(game.launch.clone()))
         }
     };
-    if !crate::retro::can_open(&rom) {
-        return fail(exit::UNAVAILABLE, format!("{}: romi can't unpack archives yet; extract it first", rom.display()));
-    }
     let core = match core {
         Some(c) => c,
         None => {
@@ -860,6 +857,10 @@ fn run_core(
     if !core.is_file() {
         return fail(exit::UNAVAILABLE, format!("no core at {}", app::tilde(&core)));
     }
+    if !crate::retro::can_open(&core, &rom) {
+        let why = "this core can't open archives, and romi can't unpack them yet; extract it first";
+        return fail(exit::UNAVAILABLE, format!("{}: {why}", rom.display()));
+    }
     let script = match input {
         Some(path) => {
             let text = std::fs::read_to_string(path).with_context(|| format!("can't read {}", path.display()))?;
@@ -868,10 +869,15 @@ fn run_core(
         None => crate::retro::Script::default(),
     };
 
-    let mut emu = crate::retro::Core::load(&core, &rom)?;
     if live {
+        let emu = crate::live::load(cfg, &core, &rom)?;
         return crate::live::play(emu, &name, f32::from(cfg.volume.min(100)) / 100.0);
     }
+    // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared
+    // before the core, so it's removed after the core has shut down and written its last.
+    let saves = TempDir::new()?;
+    let dirs = crate::retro::Dirs { system: cfg.system_dir(), saves: Some(saves.0.clone()) };
+    let mut emu = crate::retro::Core::load(&core, &rom, &dirs)?;
     let mut sound = wav.map(|path| crate::audio::Wav::create(path, emu.sample_rate)).transpose()?;
     let mut samples = Vec::new();
     let started = Instant::now();
@@ -926,6 +932,23 @@ fn run_core(
         }
     }
     Ok(())
+}
+
+/// A folder of its own in /tmp, removed with everything in it when dropped.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Result<TempDir> {
+        let dir = std::env::temp_dir().join(format!("romi-run-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).with_context(|| format!("can't make {}", dir.display()))?;
+        Ok(TempDir(dir))
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
 }
 
 /// A ROM given by path runs with the command of the first system that lists its extension.

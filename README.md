@@ -53,12 +53,16 @@ of a ROM hack or decomp. `--input` holds buttons from a script of `<frame> <butt
 held until the next line (`300 start`, then `306` to let go). The same ROM, script and frame count
 always give the same picture, so screenshots can be compared between builds. `--wav out.wav` saves
 the sound of the whole run, which comes out the same every time too. Only cores that draw in
-software work (most 2D systems), and zipped ROMs need extracting first.
+software work (most 2D systems, and arcade games through FinalBurn Neo). Zipped ROMs work with cores
+that open zips themselves, like FinalBurn Neo; for others they need extracting first. Cores get the
+first of `bios_dirs` as their system folder, and each run gets an empty save folder of its own,
+deleted afterwards, so nothing saved from one run changes the next.
 
 ```
 romi run "pokemon pinball" --frames 1200 --input start.txt --screenshot title.png
 romi run build/game.gba --core /usr/lib/libretro/mgba_libretro.so --screenshot out.png --json
 romi run "pokemon pinball" --frames 3600 --wav title-music.wav
+romi run "metal slug" --frames 1800 --screenshot attract.png
 ```
 
 `romi run <game> --live` plays it in the terminal instead, drawn with the Kitty graphics protocol.
@@ -70,8 +74,12 @@ Backspace for Select); a controller works too. Esc, or holding Select+Start, qui
 
 In the TUI, a game's menu (`o`) has **Play in romi** for games run through a libretro core. It plays
 the game in the middle panel, with the systems and details still around it, drawn behind Kitty
-Unicode placeholders. Esc, or holding Select+Start, stops it. This is experimental too: Kitty
-graphics only, no saves. Sound plays through PulseAudio (or PipeWire's stand-in for it), or ALSA
+Unicode placeholders. Esc, or holding Select+Start, stops it. Arcade games on their side, like
+Ms. Pac-Man, are turned upright. This is experimental too: Kitty graphics only, and no in-game saves
+yet, though what a core keeps itself (FinalBurn Neo's high scores and NVRAM) goes to RetroArch's
+save folder for that core, so it's shared with RetroArch. The first time a core is played, romi
+starts it in a separate process for a moment, so one that crashes (Flycast, which only draws with
+OpenGL or Vulkan) shows an error instead of taking romi down. Sound plays through PulseAudio (or PipeWire's stand-in for it), or ALSA
 without either; `"volume"` in the config sets how loud, from 0 to 100.
 
 **Detached games** (from `--mode detach`, or a game configured that way) are played by a copy of

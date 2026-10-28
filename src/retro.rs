@@ -1,10 +1,12 @@
 //! A minimal libretro frontend: loads a core (the same `.so` RetroArch uses), gives it a ROM and
-//! runs it one frame at a time. Only what 2D cores need: software video, stereo sound, a joypad.
+//! runs it one frame at a time. Only what 2D cores need: software video (turned upright for
+//! arcade games on their side), stereo sound, a joypad.
 //!
 //! libretro's callbacks are plain C functions with no user data, so what they share with romi
 //! lives in a global, and only one core can be loaded at a time.
 
 use anyhow::{Context, Result, bail};
+use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -17,6 +19,7 @@ const DEVICE_JOYPAD: c_uint = 1;
 /// Asks for every button at once as a bitmask, when the frontend says it supports that.
 const DEVICE_ID_JOYPAD_MASK: c_uint = 256;
 
+const ENV_SET_ROTATION: c_uint = 1;
 const ENV_GET_CAN_DUPE: c_uint = 3;
 const ENV_SET_MESSAGE: c_uint = 6;
 const ENV_SET_PERFORMANCE_LEVEL: c_uint = 8;
@@ -118,6 +121,11 @@ pub struct Frame {
 
 struct Shared {
     pixel_format: c_int,
+    /// Quarter turns counterclockwise to stand the picture upright.
+    rotation: c_uint,
+    /// The folders from `Dirs`, kept here while the core may still be using them.
+    system_dir: Option<CString>,
+    save_dir: Option<CString>,
     frame: Frame,
     /// The last frame's sound: interleaved left and right samples at the core's sample rate.
     audio: Vec<i16>,
@@ -126,6 +134,9 @@ struct Shared {
 
 static SHARED: Mutex<Shared> = Mutex::new(Shared {
     pixel_format: PIXEL_0RGB1555,
+    rotation: 0,
+    system_dir: None,
+    save_dir: None,
     frame: Frame { width: 0, height: 0, rgb: Vec::new() },
     audio: Vec::new(),
     buttons: 0,
@@ -142,8 +153,15 @@ extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
     // SAFETY: each command defines what `data` points to (libretro.h); only those are read or written.
     unsafe {
         match cmd & !ENV_FLAGS {
+            ENV_SET_ROTATION => shared().rotation = *(data as *const c_uint) % 4,
             ENV_GET_CAN_DUPE => *(data as *mut bool) = true,
-            ENV_GET_SYSTEM_DIRECTORY | ENV_GET_SAVE_DIRECTORY => *(data as *mut *const c_char) = std::ptr::null(),
+            // The strings stay put until the next core is loaded.
+            ENV_GET_SYSTEM_DIRECTORY => {
+                *(data as *mut *const c_char) = shared().system_dir.as_ref().map_or(std::ptr::null(), |d| d.as_ptr())
+            }
+            ENV_GET_SAVE_DIRECTORY => {
+                *(data as *mut *const c_char) = shared().save_dir.as_ref().map_or(std::ptr::null(), |d| d.as_ptr())
+            }
             ENV_SET_PIXEL_FORMAT => {
                 let format = *(data as *const c_int);
                 if !matches!(format, PIXEL_0RGB1555 | PIXEL_XRGB8888 | PIXEL_RGB565) {
@@ -179,7 +197,7 @@ extern "C" fn video(data: *const c_void, width: c_uint, height: c_uint, pitch: u
     let src = unsafe {
         std::slice::from_raw_parts(data as *const u8, pitch * (height as usize - 1) + width as usize * bytes_per_pixel)
     };
-    let format = s.pixel_format;
+    let (format, rotation) = (s.pixel_format, s.rotation);
     let frame = &mut s.frame;
     frame.width = width;
     frame.height = height;
@@ -189,6 +207,29 @@ extern "C" fn video(data: *const c_void, width: c_uint, height: c_uint, pitch: u
         let line = &src[row * pitch..][..width as usize * bytes_per_pixel];
         to_rgb(format, line, &mut frame.rgb);
     }
+    if rotation != 0 {
+        *frame = rotate(frame, rotation);
+    }
+}
+
+/// The frame turned `quarter_turns` quarter turns counterclockwise.
+fn rotate(frame: &Frame, quarter_turns: c_uint) -> Frame {
+    let (w, h) = (frame.width as usize, frame.height as usize);
+    let (turned_w, turned_h) = if quarter_turns % 2 == 1 { (h, w) } else { (w, h) };
+    let mut rgb = vec![0; frame.rgb.len()];
+    for y in 0..h {
+        for x in 0..w {
+            let (tx, ty) = match quarter_turns {
+                1 => (y, w - 1 - x),
+                2 => (w - 1 - x, h - 1 - y),
+                3 => (h - 1 - y, x),
+                _ => (x, y),
+            };
+            let to = (ty * turned_w + tx) * 3;
+            rgb[to..to + 3].copy_from_slice(&frame.rgb[(y * w + x) * 3..][..3]);
+        }
+    }
+    Frame { width: turned_w as u32, height: turned_h as u32, rgb }
 }
 
 /// Appends one row of the core's pixels as RGB.
@@ -246,6 +287,16 @@ extern "C" fn input_state(port: c_uint, device: c_uint, _index: c_uint, id: c_ui
 
 // ---- a loaded core ----
 
+/// Folders a core is given. Without them, cores fall back to the ROM's folder, and some write
+/// there.
+#[derive(Default)]
+pub struct Dirs {
+    /// Where BIOS files and the core's own data are (RetroArch's system folder).
+    pub system: Option<PathBuf>,
+    /// Where the core keeps what it writes itself, like FinalBurn Neo's NVRAM and high scores.
+    pub saves: Option<PathBuf>,
+}
+
 pub struct Core {
     api: Api,
     /// The core's name and version, e.g. "mGBA 0.11".
@@ -260,16 +311,25 @@ pub struct Core {
 }
 
 impl Core {
-    /// Loads the core at `core_path` and starts `rom` in it.
-    pub fn load(core_path: &Path, rom: &Path) -> Result<Core> {
+    /// Loads the core at `core_path` and starts `rom` in it, with `dirs` as its folders.
+    pub fn load(core_path: &Path, rom: &Path, dirs: &Dirs) -> Result<Core> {
         if LOADED.swap(true, Ordering::SeqCst) {
             bail!("a core is already loaded");
         }
-        Core::open(core_path, rom).inspect_err(|_| LOADED.store(false, Ordering::SeqCst))
+        Core::open(core_path, rom, dirs).inspect_err(|_| LOADED.store(false, Ordering::SeqCst))
     }
 
-    fn open(core_path: &Path, rom: &Path) -> Result<Core> {
-        *shared() = Shared { pixel_format: PIXEL_0RGB1555, frame: Frame::default(), audio: Vec::new(), buttons: 0 };
+    fn open(core_path: &Path, rom: &Path, dirs: &Dirs) -> Result<Core> {
+        let c_path = |d: &Option<PathBuf>| d.as_ref().and_then(|d| CString::new(d.as_os_str().as_encoded_bytes()).ok());
+        *shared() = Shared {
+            pixel_format: PIXEL_0RGB1555,
+            rotation: 0,
+            system_dir: c_path(&dirs.system),
+            save_dir: c_path(&dirs.saves),
+            frame: Frame::default(),
+            audio: Vec::new(),
+            buttons: 0,
+        };
         // SAFETY: loading a core runs its initializers; libretro cores are made to be loaded this way.
         let lib = unsafe { libloading::Library::new(core_path) }
             .with_context(|| format!("can't load {}", core_path.display()))?;
@@ -368,9 +428,46 @@ pub fn core_in(argv: &[String]) -> Option<PathBuf> {
     })
 }
 
-/// Whether romi can open this ROM itself (it can't unpack archives yet).
-pub fn can_open(rom: &Path) -> bool {
-    !rom.extension().is_some_and(|e| e.eq_ignore_ascii_case("zip") || e.eq_ignore_ascii_case("7z"))
+/// Whether the core at `core` can be given this ROM. romi can't unpack archives yet, so a zip or 7z
+/// only goes to a core that opens them itself, as arcade cores like FinalBurn Neo do.
+pub fn can_open(core: &Path, rom: &Path) -> bool {
+    let Some(ext) = rom.extension().map(|e| e.to_string_lossy().to_lowercase()) else { return true };
+    if ext != "zip" && ext != "7z" {
+        return true;
+    }
+    info(core).is_some_and(|info| info.extensions.contains(&ext))
+}
+
+/// What a core says about itself before it's started.
+#[derive(Clone)]
+pub struct Info {
+    /// Its name without the version, as RetroArch names folders after it ("FinalBurn Neo").
+    pub name: String,
+    /// The file extensions it opens, lowercased.
+    extensions: Vec<String>,
+}
+
+/// What the core at `core` says about itself, or None if it isn't a core. Asking loads the core,
+/// which takes a moment for big ones, so each is asked once.
+pub fn info(core: &Path) -> Option<Info> {
+    static KNOWN: Mutex<BTreeMap<PathBuf, Option<Info>>> = Mutex::new(BTreeMap::new());
+    let mut known = KNOWN.lock().unwrap_or_else(|e| e.into_inner());
+    known.entry(core.to_path_buf()).or_insert_with(|| read_info(core).ok()).clone()
+}
+
+fn read_info(path: &Path) -> Result<Info> {
+    // SAFETY: as in `Core::open`. libretro allows asking for system info before `retro_init`, and
+    // the strings are copied out before the library is closed again.
+    unsafe {
+        let lib = libloading::Library::new(path)?;
+        let mut info = std::mem::zeroed::<SystemInfo>();
+        lib.get::<unsafe extern "C" fn(*mut SystemInfo)>(b"retro_get_system_info\0")?(&mut info);
+        let text = |p: *const c_char| {
+            if p.is_null() { String::new() } else { CStr::from_ptr(p).to_string_lossy().into_owned() }
+        };
+        let extensions = text(info.valid_extensions).to_lowercase().split('|').map(str::to_string).collect();
+        Ok(Info { name: text(info.library_name), extensions })
+    }
 }
 
 // ---- scripted input ----
@@ -440,6 +537,38 @@ mod tests {
         assert!(Script::parse("10 jump").unwrap_err().to_string().contains("no button called \"jump\""));
         assert!(Script::parse("20 a\n10 b").is_err());
         assert!(Script::parse("soon a").is_err());
+    }
+
+    #[test]
+    fn rotation_turns_frames_counterclockwise() {
+        // Two pixels side by side, 1 on the left and 2 on the right.
+        let frame = Frame { width: 2, height: 1, rgb: vec![1, 1, 1, 2, 2, 2] };
+        let turned = |n| {
+            let f = rotate(&frame, n);
+            (f.width, f.height, f.rgb.chunks(3).map(|p| p[0]).collect::<Vec<_>>())
+        };
+        // A quarter turn counterclockwise lifts the right end to the top.
+        assert_eq!(turned(1), (1, 2, vec![2, 1]));
+        assert_eq!(turned(2), (2, 1, vec![2, 1]));
+        assert_eq!(turned(3), (1, 2, vec![1, 2]));
+    }
+
+    #[test]
+    fn rotation_keeps_every_pixel_of_a_rectangle() {
+        let frame = Frame { width: 3, height: 2, rgb: (0..18).collect() };
+        let back = rotate(&rotate(&frame, 1), 3);
+        assert_eq!((back.width, back.height), (3, 2));
+        assert_eq!(back.rgb, frame.rgb);
+        assert_eq!(rotate(&rotate(&frame, 2), 2).rgb, frame.rgb);
+    }
+
+    #[test]
+    fn archives_only_go_to_cores_that_open_them() {
+        let no_core = Path::new("/nonexistent/core_libretro.so");
+        assert!(can_open(no_core, Path::new("game.gba")));
+        assert!(can_open(no_core, Path::new("rom")));
+        assert!(!can_open(no_core, Path::new("game.ZIP")));
+        assert!(!can_open(no_core, Path::new("game.7z")));
     }
 
     #[test]

@@ -20,7 +20,6 @@ use ratatui::crossterm::{execute, terminal};
 use ratatui::layout::Rect;
 use std::collections::{HashSet, VecDeque};
 use std::io::Write;
-use std::path::Path;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use std::thread::JoinHandle;
@@ -51,8 +50,7 @@ pub struct Embedded {
 }
 
 impl Embedded {
-    pub fn start(game: usize, core: &Path, rom: &Path, volume: f32) -> Result<Embedded> {
-        let core = Core::load(core, rom)?;
+    pub fn start(game: usize, core: Core, volume: f32) -> Result<Embedded> {
         let (shared, thread) = Shared::start(core, volume)?;
         // Key releases are needed to know when a button is let go.
         let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;

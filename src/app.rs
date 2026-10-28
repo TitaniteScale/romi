@@ -15,8 +15,8 @@ use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::widgets::ListState;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 use std::process::Child;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
@@ -177,6 +177,8 @@ pub struct App {
     pub running: Option<Running>,
     /// A game played inside romi, in the middle panel.
     pub embedded: Option<crate::embedded::Embedded>,
+    /// Cores seen to start in a separate romi, which are safe to load into this one.
+    cores_tried: HashSet<PathBuf>,
     pub pad: PadState,
     pub show_details: bool,
     pub terminal_job: Option<TerminalJob>,
@@ -247,6 +249,7 @@ impl App {
             status: None,
             running: None,
             embedded: None,
+            cores_tried: HashSet::new(),
             pad,
             terminal_job: None,
             covers: None,
@@ -1393,17 +1396,56 @@ impl App {
     /// The core and ROM to play a game inside romi with, if it runs through a libretro core.
     fn embeddable(&self, g: usize) -> Option<(PathBuf, PathBuf)> {
         let game = &self.lib.games[g];
-        let rom = game.path.clone().filter(|r| crate::retro::can_open(r))?;
+        let rom = game.path.clone()?;
         let core = crate::retro::core_in(&game.launch.prepare().ok()?.argv)?;
-        core.is_file().then_some((core, rom))
+        (core.is_file() && crate::retro::can_open(&core, &rom)).then_some((core, rom))
     }
 
     fn play_here(&mut self, g: usize) {
         let Some((core, rom)) = self.embeddable(g) else { return };
+        if let Err(e) = self.try_core(&core, &rom) {
+            return self.set_status(Level::Error, format!("{}: {e}", self.lib.games[g].name));
+        }
         let volume = f32::from(self.cfg.volume.min(100)) / 100.0;
-        match crate::embedded::Embedded::start(g, &core, &rom, volume) {
+        let started = crate::live::load(&self.cfg, &core, &rom)
+            .and_then(|core| crate::embedded::Embedded::start(g, core, volume));
+        match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),
+        }
+    }
+
+    /// Starts the core in a separate romi for a frame, the first time it's played here. A core
+    /// that wants what romi can't give it can crash while loading (Flycast, which only draws
+    /// with OpenGL or Vulkan, does), and in this process that would take the TUI down with it.
+    fn try_core(&mut self, core: &Path, rom: &Path) -> Result<(), String> {
+        if self.cores_tried.contains(core) {
+            return Ok(());
+        }
+        let exe = std::env::current_exe().map_err(|e| e.to_string())?;
+        let out = std::process::Command::new(exe)
+            .arg("run")
+            .arg(rom)
+            .arg("--core")
+            .arg(core)
+            .args(["--frames", "1"])
+            .env("ROMI_CONFIG", &self.cfg_path)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .map_err(|e| e.to_string())?;
+        match out.status.code() {
+            Some(0) => {
+                self.cores_tried.insert(core.to_path_buf());
+                Ok(())
+            }
+            Some(_) => {
+                let err = String::from_utf8_lossy(&out.stderr);
+                let last = err.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("the core didn't start");
+                Err(last.trim_start_matches("romi: ").to_string())
+            }
+            None => {
+                Err("the core crashed while starting; it may only draw with OpenGL or Vulkan, which romi can't".into())
+            }
         }
     }
 

@@ -71,6 +71,12 @@ pub struct Include {
 }
 
 impl Config {
+    /// The folder libretro cores romi runs get as their system folder, for BIOS files and their
+    /// own data: the first of `bios_dirs` that exists (RetroArch's, unless changed).
+    pub fn system_dir(&self) -> Option<PathBuf> {
+        self.bios_dirs.iter().map(|d| expand_path(d)).find(|d| d.is_dir())
+    }
+
     fn merge(&mut self, inc: Include) {
         for (k, v) in inc.vars {
             self.vars.entry(k).or_insert_with(|| expand_tilde(&v));
