@@ -182,6 +182,18 @@ It's built in steps, and the first one pays off without any of the TUI work:
    against the core's memory every frame. Showing an unlock only needs the achievement list.
    Recording it on the user's account needs a login token from their password, because the web API
    key romi has now only reads.
+8. **Launch animation**: a wireframe of the system (a console and a CRT, or a cabinet) builds itself
+   out of lines, then the camera dives into its screen and lands on the cells the game is drawn in.
+   Each game's file name seeds how the lines enter (pen trace, reverse explode, scan flash, fly in,
+   dots then lines, vortex) and in what order.
+   - ✓ **Prototype** (`cargo run --release --example wireframe`): an NES and a TV, drawn through
+     shared memory like live play, with a stand-in picture for the game. At 1280×720 (half a
+     2560×1440 terminal's pixels) a frame takes about 8 ms to draw, and the glass lands within 2 px
+     of the game's cells. Models are JSON: vertices in cm, edges, and the screen's four corners.
+   - Still to do: run it while the core loads, with a key to skip and a setting to turn it off; a
+     model per system; hide lines behind the glass once the game shows on it, since the TV's back
+     shows through for a moment. It has only been run in a pseudo-terminal so far, with its frames
+     read back from shared memory, so it still needs watching in Ghostty and kitty.
 
 The spike settled 60 fps in Ghostty. Still to check: kitty and other terminals, and how much input
 lag there is.
