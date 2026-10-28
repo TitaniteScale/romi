@@ -52,7 +52,7 @@ impl Emulators {
         let mut default = game.default_run.clone();
         default.name = match others.iter().find(is_default) {
             Some(e) => e.name.clone(),
-            None => crate::ui::runs_label(&default.command),
+            None => crate::tui::ui::runs_label(&default.command),
         };
         let mut options = vec![default];
         options.extend(others.iter().filter(|e| !is_default(e)).cloned());

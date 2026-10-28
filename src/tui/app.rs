@@ -1,7 +1,6 @@
 //! App state and input handling. Keyboard and controller both funnel into the same `Op`s.
 
 use crate::config::{self, Config, Emulator, LaunchMode};
-use crate::cover::Covers;
 use crate::emulators::Emulators;
 use crate::filter::{self, Filter};
 use crate::gamepad::{PadAction, PadEvent};
@@ -11,6 +10,7 @@ use crate::library::Library;
 use crate::session::Session;
 use crate::sort::Sort;
 use crate::state::State;
+use crate::tui::cover::Covers;
 use fuzzy_matcher::FuzzyMatcher;
 use fuzzy_matcher::skim::SkimMatcherV2;
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
@@ -176,7 +176,7 @@ pub struct App {
     pub status: Option<Status>,
     pub running: Option<Running>,
     /// A game played inside romi, in the middle panel.
-    pub embedded: Option<crate::embedded::Embedded>,
+    pub embedded: Option<crate::emu::embedded::Embedded>,
     /// Cores seen to start in a separate romi, which are safe to load into this one.
     cores_tried: HashSet<PathBuf>,
     pub pad: PadState,
@@ -215,7 +215,7 @@ pub struct App {
     /// The stats screen, while it's open.
     pub stats: Option<crate::stats::Stats>,
     /// The achievements screen, while it's open.
-    pub cheevos: Option<crate::cheevos::Screen>,
+    pub cheevos: Option<crate::tui::cheevos::Screen>,
     /// What RetroAchievements has for the library: what was cached, then the refresh.
     pub achievements: crate::ra::Achievements,
     achievements_rx: Option<Receiver<Result<crate::ra::Achievements, String>>>,
@@ -847,7 +847,7 @@ impl App {
                 }
             }
             Op::ToggleDetails => self.show_details = !self.show_details,
-            Op::Achievements => self.cheevos = Some(crate::cheevos::Screen::default()),
+            Op::Achievements => self.cheevos = Some(crate::tui::cheevos::Screen::default()),
             Op::Stats => {
                 let (history, now) = (crate::stats::history(), crate::state::now());
                 self.stats = Some(crate::stats::Stats::compute(&self.lib, &self.state, &history, now));
@@ -1158,8 +1158,12 @@ impl App {
                     MenuItem::Achievements => self.apply(Op::Achievements),
                     MenuItem::GameAchievements => {
                         if let Some(g) = game {
-                            self.cheevos =
-                                Some(crate::cheevos::Screen::for_game(&self.cfg, &self.achievements, &self.lib, g));
+                            self.cheevos = Some(crate::tui::cheevos::Screen::for_game(
+                                &self.cfg,
+                                &self.achievements,
+                                &self.lib,
+                                g,
+                            ));
                         }
                     }
                     MenuItem::Details => self.apply(Op::ToggleDetails),
@@ -1397,8 +1401,8 @@ impl App {
     fn embeddable(&self, g: usize) -> Option<(PathBuf, PathBuf)> {
         let game = &self.lib.games[g];
         let rom = game.path.clone()?;
-        let core = crate::retro::core_in(&game.launch.prepare().ok()?.argv)?;
-        (core.is_file() && crate::retro::can_open(&core, &rom)).then_some((core, rom))
+        let core = crate::emu::libretro::core_in(&game.launch.prepare().ok()?.argv)?;
+        (core.is_file() && crate::emu::libretro::can_open(&core, &rom)).then_some((core, rom))
     }
 
     fn play_here(&mut self, g: usize) {
@@ -1407,8 +1411,8 @@ impl App {
             return self.set_status(Level::Error, format!("{}: {e}", self.lib.games[g].name));
         }
         let volume = self.cfg.volume_gain();
-        let started = crate::runner::load(&self.cfg, &core, &rom)
-            .and_then(|core| crate::embedded::Embedded::start(g, core, volume));
+        let started = crate::emu::runner::load(&self.cfg, &core, &rom)
+            .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume));
         match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),

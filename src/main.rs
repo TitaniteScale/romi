@@ -1,14 +1,9 @@
 mod add;
-mod app;
 mod archive;
 mod art;
-mod audio;
-mod cheevos;
 mod cli;
 mod config;
-mod controls;
-mod cover;
-mod embedded;
+mod emu;
 mod emucfg;
 mod emulators;
 mod files;
@@ -16,15 +11,11 @@ mod filter;
 mod gamepad;
 mod hooks;
 mod init;
-mod kitty;
 mod launch;
 mod library;
-mod live;
 mod meta;
 mod overrides;
 mod ra;
-mod retro;
-mod runner;
 mod session;
 mod sort;
 mod state;
@@ -32,10 +23,9 @@ mod stats;
 mod steam;
 mod text;
 mod titles;
-mod ui;
+mod tui;
 
 use anyhow::Result;
-use app::{App, TerminalJob};
 use gamepad::{PadAction, PadEvent};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, DisableFocusChange, EnableFocusChange, Event, KeyEventKind};
@@ -48,6 +38,7 @@ use std::io::{Write, stdout};
 use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
+use tui::app::{App, TerminalJob};
 
 fn main() {
     cli::complete();
@@ -87,7 +78,7 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
         } else {
             Some(ratatui_image::picker::Picker::halfblocks())
         };
-        app.covers = picker.map(|p| cover::Covers::new(p, &app.cfg));
+        app.covers = picker.map(|p| tui::cover::Covers::new(p, &app.cfg));
     }
     // Terminals that don't understand the query may have echoed part of it. Nothing is drawn yet,
     // so wiping the screen keeps it in sync with ratatui's (empty) buffer.
@@ -133,7 +124,7 @@ fn terminal_answers() -> bool {
 
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, rx: &Receiver<PadEvent>) -> Result<()> {
     while !app.quit {
-        terminal.draw(|f| ui::draw(f, app))?;
+        terminal.draw(|f| tui::ui::draw(f, app))?;
         app.pump_embedded();
         // A game in the middle panel needs a new frame every 16ms.
         let wait = if app.embedded.is_some() { Duration::from_millis(4) } else { Duration::from_millis(20) };

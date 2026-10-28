@@ -1,12 +1,12 @@
 //! Drawing. Only terminal palette colors and modifiers are used, so romi follows your theme.
 
-use crate::app::{App, Level, OSK, PadState, Pane, ViewKind};
 use crate::art::Kind;
-use crate::cover::Cover;
 use crate::filter::ROWS as FILTER_ROWS;
 use crate::sort::Sort;
 use crate::state::now;
 use crate::text;
+use crate::tui::app::{App, Level, OSK, PadState, Pane, ViewKind};
+use crate::tui::cover::Cover;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect, Size};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -664,7 +664,7 @@ fn draw_embedded(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     f.render_widget(block, area);
     let [screen, hint] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
     if let Some(cells) = embedded.place(screen) {
-        crate::kitty::placeholders(f.buffer_mut(), cells, crate::embedded::IMAGE);
+        crate::emu::kitty::placeholders(f.buffer_mut(), cells, crate::emu::embedded::IMAGE);
     }
     let text = "Esc, or hold Select+Start, to stop";
     f.render_widget(Paragraph::new(Span::styled(text, Style::new().dim())).alignment(Alignment::Center), hint);

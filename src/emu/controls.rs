@@ -1,7 +1,7 @@
 //! Game input: the keyboard and controllers, as libretro joypad buttons. Holding Select and Start
 //! together quits, from either.
 
-use crate::retro::button;
+use crate::emu::libretro::button;
 use gilrs::{Axis, Button, Gilrs};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use std::collections::HashSet;

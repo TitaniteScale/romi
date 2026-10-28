@@ -5,10 +5,10 @@
 //! romi scales each frame to the exact pixel size of its cells itself, nearest neighbour, because
 //! a terminal scaling it would smooth the pixel art.
 
-use crate::controls::Controls;
-use crate::kitty;
-use crate::retro::{Core, Frame};
-use crate::runner::Shared;
+use crate::emu::controls::Controls;
+use crate::emu::kitty;
+use crate::emu::libretro::{Core, Frame};
+use crate::emu::runner::Shared;
 use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;

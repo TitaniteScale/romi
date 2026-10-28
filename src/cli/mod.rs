@@ -10,7 +10,8 @@ use crate::meta::Meta;
 use crate::session::{self, Session};
 use crate::state::{State, now};
 use crate::text;
-use crate::{app, art, steam};
+use crate::tui::app;
+use crate::{art, steam};
 use anyhow::{Context, Result, bail};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 use clap_complete::engine::{ArgValueCompleter, CompletionCandidate};
@@ -849,7 +850,7 @@ fn run_core(
                 Some(Err(e)) => return fail(exit::CONFIG, format!("{name}: {e:#}")),
                 None => Vec::new(),
             };
-            match crate::retro::core_in(&argv) {
+            match crate::emu::libretro::core_in(&argv) {
                 Some(c) => c,
                 None => return fail(exit::USAGE, format!("{name} doesn't run through a libretro core; pass --core")),
             }
@@ -858,28 +859,29 @@ fn run_core(
     if !core.is_file() {
         return fail(exit::UNAVAILABLE, format!("no core at {}", config::tilde(&core)));
     }
-    if !crate::retro::can_open(&core, &rom) {
+    if !crate::emu::libretro::can_open(&core, &rom) {
         let why = "this core can't open 7z files, and romi can only unpack zips; extract it first";
         return fail(exit::UNAVAILABLE, format!("{}: {why}", rom.display()));
     }
     let script = match input {
         Some(path) => {
             let text = std::fs::read_to_string(path).with_context(|| format!("can't read {}", path.display()))?;
-            crate::retro::Script::parse(&text).or_else(|e| fail(exit::USAGE, format!("{}: {e:#}", path.display())))?
+            crate::emu::libretro::Script::parse(&text)
+                .or_else(|e| fail(exit::USAGE, format!("{}: {e:#}", path.display())))?
         }
-        None => crate::retro::Script::default(),
+        None => crate::emu::libretro::Script::default(),
     };
 
     if live {
-        let emu = crate::runner::load(cfg, &core, &rom)?;
-        return crate::live::play(emu, &name, cfg.volume_gain());
+        let emu = crate::emu::runner::load(cfg, &core, &rom)?;
+        return crate::emu::live::play(emu, &name, cfg.volume_gain());
     }
     // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared
     // before the core, so it's removed after the core has shut down and written its last.
     let saves = crate::files::TempDir::new("saves").context("can't make a save folder in /tmp")?;
-    let dirs = crate::retro::Dirs { system: cfg.system_dir(), saves: Some(saves.path().to_path_buf()) };
-    let mut emu = crate::retro::Core::load(&core, &rom, &dirs)?;
-    let mut sound = wav.map(|path| crate::audio::Wav::create(path, emu.sample_rate)).transpose()?;
+    let dirs = crate::emu::libretro::Dirs { system: cfg.system_dir(), saves: Some(saves.path().to_path_buf()) };
+    let mut emu = crate::emu::libretro::Core::load(&core, &rom, &dirs)?;
+    let mut sound = wav.map(|path| crate::emu::audio::Wav::create(path, emu.sample_rate)).transpose()?;
     let mut samples = Vec::new();
     let started = Instant::now();
     for n in 0..frames {

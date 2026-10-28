@@ -9,10 +9,10 @@
 //! The game runs on its own thread (see `runner`), and the terminal shows the newest frame whenever
 //! it can, so a slow terminal drops frames rather than slowing the game. F4 mutes the sound.
 
-use crate::controls::Controls;
-use crate::kitty;
-use crate::retro::{Core, Frame};
-use crate::runner::Shared;
+use crate::emu::controls::Controls;
+use crate::emu::kitty;
+use crate::emu::libretro::{Core, Frame};
+use crate::emu::runner::Shared;
 use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -291,7 +291,7 @@ impl View {
         let bytes = match self.transfer {
             Transfer::Shm => {
                 let name = format!("/romi-{pid}-{}", self.sent);
-                crate::kitty::write_shm(&name, pixels)?;
+                crate::emu::kitty::write_shm(&name, pixels)?;
                 self.check_read(Handoff::Shm(name.clone()));
                 write!(out, "\x1b_G{keys},t=s,S={};{}\x1b\\", pixels.len(), BASE64.encode(&name))?;
                 pixels.len()
@@ -450,7 +450,7 @@ impl Handoff {
     /// Deletes it; true if it was still there.
     fn remove(&self) -> bool {
         match self {
-            Handoff::Shm(name) => crate::kitty::remove_shm(name),
+            Handoff::Shm(name) => crate::emu::kitty::remove_shm(name),
             Handoff::File(path) => std::fs::remove_file(path).is_ok(),
         }
     }

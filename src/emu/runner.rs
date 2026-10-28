@@ -2,9 +2,9 @@
 //! sound), with the newest frame kept for whatever draws it. `romi run --live` and the TUI's middle
 //! panel both play through this, and draw the frames their own way.
 
-use crate::audio;
 use crate::config::Config;
-use crate::retro::{Core, Dirs, Frame};
+use crate::emu::audio;
+use crate::emu::libretro::{Core, Dirs, Frame};
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 /// Loads a core to play `rom` with. It gets RetroArch's system folder and RetroArch's save folder
 /// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways.
 pub fn load(cfg: &Config, core: &Path, rom: &Path) -> Result<Core> {
-    let saves = crate::retro::info(core).and_then(|info| crate::emucfg::retroarch_save_dir(&info.name, rom));
+    let saves = crate::emu::libretro::info(core).and_then(|info| crate::emucfg::retroarch_save_dir(&info.name, rom));
     if let Some(dir) = &saves {
         std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;
     }
@@ -69,7 +69,7 @@ impl Shared {
         self.quit.store(true, Ordering::SeqCst);
     }
 
-    /// Holds these buttons (bits from `retro::button`) from the next frame on.
+    /// Holds these buttons (bits from `libretro::button`) from the next frame on.
     pub fn set_buttons(&self, buttons: u16) {
         self.buttons.store(buttons, Ordering::Relaxed);
     }
