@@ -200,3 +200,17 @@ Smaller items that fit between phases.
 - **An AUR package**: the recipe is ready in `packaging/aur`, to publish once v0.1.0 is tagged.
 - **A waybar module**, if it turns out to be wanted: games usually run full screen, hiding the bar, so
   it's not planned. `romi status --json` already has what one needs.
+- **Aspect ratio for games played in romi**: frames are shown with square pixels, but cores give the
+  aspect ratio the picture is meant to have (`Geometry::aspect_ratio` in `emu/libretro.rs`, read and
+  unused). CPS-1/2 games (384×224, meant for 4:3) come out too wide.
+- **7z ROMs in romi**: zips are unpacked for cores that can't open them, 7z files aren't. Only cores
+  that open 7z themselves (FinalBurn Neo) can play them.
+- **MAME in romi**: its core crashed while starting, before cores got a system and save folder. Not
+  tried since; FinalBurn Neo covers most arcade sets.
+
+Code to tidy, when it gets in the way:
+
+- **One controller reader**: the TUI's thread (`gamepad.rs`) and each game played in romi
+  (`emu/controls.rs`) open their own `Gilrs`, so starting a game reopens the controllers. It works;
+  sharing one would mean handing the devices between the two.
+- **Splitting `tui/app.rs`** (about 1,600 lines): menus, search and launching could each be a file.
