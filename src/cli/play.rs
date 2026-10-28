@@ -243,6 +243,7 @@ pub(super) fn run_core(
             "frames": frames,
             "width": frame.width,
             "height": frame.height,
+            "pixel_aspect": if frame.pixel_aspect > 0.0 { frame.pixel_aspect } else { 1.0 },
             "fps": emu.fps,
             "elapsed_secs": elapsed.as_secs_f64(),
             "screenshot": screenshot,

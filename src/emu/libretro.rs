@@ -117,12 +117,40 @@ pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub rgb: Vec<u8>,
+    /// How wide each pixel is meant to look, for its height: under 1 for arcade boards that squeeze
+    /// a wide picture onto a 4:3 screen. 0 is the same as 1, square.
+    pub pixel_aspect: f64,
+}
+
+impl Frame {
+    /// The size the frame is meant to be seen at, in square pixels as tall as the frame.
+    pub fn display_size(&self) -> (f64, f64) {
+        let par = if self.pixel_aspect > 0.0 { self.pixel_aspect } else { 1.0 };
+        (f64::from(self.width) * par, f64::from(self.height))
+    }
+
+    /// The frame scaled to exactly `w`×`h`, nearest neighbour, so pixels stay sharp.
+    pub fn resample(&self, w: u32, h: u32) -> Vec<u8> {
+        let (fw, fh) = (self.width as usize, self.height as usize);
+        let (w, h) = (w as usize, h as usize);
+        let xs: Vec<usize> = (0..w).map(|x| x * fw / w * 3).collect();
+        let mut out = Vec::with_capacity(w * h * 3);
+        for y in 0..h {
+            let row = &self.rgb[y * fh / h * fw * 3..][..fw * 3];
+            for &x in &xs {
+                out.extend_from_slice(&row[x..x + 3]);
+            }
+        }
+        out
+    }
 }
 
 struct Shared {
     pixel_format: c_int,
     /// Quarter turns counterclockwise to stand the picture upright.
     rotation: c_uint,
+    /// The picture's base size and the aspect ratio it's meant to be shown at, from the core.
+    geometry: (c_uint, c_uint, f32),
     /// The folders from `Dirs`, kept here while the core may still be using them.
     system_dir: Option<CString>,
     save_dir: Option<CString>,
@@ -135,9 +163,10 @@ struct Shared {
 static SHARED: Mutex<Shared> = Mutex::new(Shared {
     pixel_format: PIXEL_0RGB1555,
     rotation: 0,
+    geometry: (0, 0, 0.0),
     system_dir: None,
     save_dir: None,
-    frame: Frame { width: 0, height: 0, rgb: Vec::new() },
+    frame: Frame { width: 0, height: 0, rgb: Vec::new(), pixel_aspect: 0.0 },
     audio: Vec::new(),
     buttons: 0,
 });
@@ -176,8 +205,11 @@ extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             | ENV_SET_VARIABLES
             | ENV_SET_SUPPORT_NO_GAME
             | ENV_SET_CONTROLLER_INFO
-            | ENV_SET_MEMORY_MAPS
-            | ENV_SET_GEOMETRY => {}
+            | ENV_SET_MEMORY_MAPS => {}
+            ENV_SET_GEOMETRY => {
+                let g = &*(data as *const Geometry);
+                shared().geometry = (g.base_width, g.base_height, g.aspect_ratio);
+            }
             // Everything else (core options, logging, bitmask input among them) is unsupported,
             // and cores fall back to their defaults.
             _ => return false,
@@ -197,7 +229,7 @@ extern "C" fn video(data: *const c_void, width: c_uint, height: c_uint, pitch: u
     let src = unsafe {
         std::slice::from_raw_parts(data as *const u8, pitch * (height as usize - 1) + width as usize * bytes_per_pixel)
     };
-    let (format, rotation) = (s.pixel_format, s.rotation);
+    let (format, rotation, geometry) = (s.pixel_format, s.rotation, s.geometry);
     let frame = &mut s.frame;
     frame.width = width;
     frame.height = height;
@@ -210,6 +242,21 @@ extern "C" fn video(data: *const c_void, width: c_uint, height: c_uint, pitch: u
     if rotation != 0 {
         *frame = rotate(frame, rotation);
     }
+    frame.pixel_aspect = pixel_aspect(geometry, rotation);
+}
+
+/// How wide the core means each pixel to look, for its height: the aspect ratio it gives the
+/// picture over the aspect ratio of its base size. The base size can differ from the frames (mGBA
+/// gives the Super Game Boy's border size for Game Boy games), so this, unlike the picture's
+/// aspect ratio, holds for every frame.
+fn pixel_aspect((w, h, aspect): (c_uint, c_uint, f32), rotation: c_uint) -> f64 {
+    // The aspect ratio is for the picture turned upright; the base size is from before.
+    let (w, h) = if rotation % 2 == 1 { (h, w) } else { (w, h) };
+    if aspect <= 0.0 || w == 0 || h == 0 {
+        return 1.0;
+    }
+    let par = f64::from(aspect) / (f64::from(w) / f64::from(h));
+    if (0.25..=4.0).contains(&par) { par } else { 1.0 }
 }
 
 /// The frame turned `quarter_turns` quarter turns counterclockwise.
@@ -229,7 +276,7 @@ fn rotate(frame: &Frame, quarter_turns: c_uint) -> Frame {
             rgb[to..to + 3].copy_from_slice(&frame.rgb[(y * w + x) * 3..][..3]);
         }
     }
-    Frame { width: turned_w as u32, height: turned_h as u32, rgb }
+    Frame { width: turned_w as u32, height: turned_h as u32, rgb, pixel_aspect: frame.pixel_aspect }
 }
 
 /// Appends one row of the core's pixels as RGB.
@@ -329,6 +376,7 @@ impl Core {
         *shared() = Shared {
             pixel_format: PIXEL_0RGB1555,
             rotation: 0,
+            geometry: (0, 0, 0.0),
             system_dir: c_path(&dirs.system),
             save_dir: c_path(&dirs.saves),
             frame: Frame::default(),
@@ -388,6 +436,7 @@ impl Core {
             }
             let mut av = AvInfo::default();
             sym!("retro_get_system_av_info", unsafe extern "C" fn(*mut AvInfo))(&mut av);
+            shared().geometry = (av.geometry.base_width, av.geometry.base_height, av.geometry.aspect_ratio);
             Ok(Core {
                 api,
                 name,
@@ -579,7 +628,7 @@ mod tests {
     #[test]
     fn rotation_turns_frames_counterclockwise() {
         // Two pixels side by side, 1 on the left and 2 on the right.
-        let frame = Frame { width: 2, height: 1, rgb: vec![1, 1, 1, 2, 2, 2] };
+        let frame = Frame { width: 2, height: 1, rgb: vec![1, 1, 1, 2, 2, 2], ..Frame::default() };
         let turned = |n| {
             let f = rotate(&frame, n);
             (f.width, f.height, f.rgb.chunks(3).map(|p| p[0]).collect::<Vec<_>>())
@@ -591,8 +640,36 @@ mod tests {
     }
 
     #[test]
+    fn pixels_are_as_wide_as_the_cores_aspect_ratio_makes_them() {
+        let close = |a: f64, b: f64| (a - b).abs() < 0.001;
+        // CPS-2: 384×224 shown at 4:3.
+        assert!(close(pixel_aspect((384, 224, 4.0 / 3.0), 0), 0.7778));
+        // mGBA gives the Super Game Boy's size for Game Boy games, whose pixels are square.
+        assert!(close(pixel_aspect((256, 224, 256.0 / 224.0), 0), 1.0));
+        // Ms. Pac-Man: 288×224 on its side, shown upright at 3:4.
+        assert!(close(pixel_aspect((288, 224, 0.75), 3), 0.9643));
+        // No aspect ratio means square pixels.
+        assert_eq!(pixel_aspect((256, 216, -1.0), 0), 1.0);
+    }
+
+    #[test]
+    fn frames_are_shown_as_wide_as_their_pixels() {
+        let frame = Frame { width: 384, height: 224, pixel_aspect: 0.7778, ..Frame::default() };
+        let (w, h) = frame.display_size();
+        assert!((w / h - 4.0 / 3.0).abs() < 0.001);
+        assert_eq!(Frame { width: 160, height: 144, ..Frame::default() }.display_size(), (160.0, 144.0));
+    }
+
+    #[test]
+    fn resampling_repeats_the_nearest_pixel() {
+        let frame = Frame { width: 2, height: 1, rgb: vec![1, 1, 1, 2, 2, 2], ..Frame::default() };
+        assert_eq!(frame.resample(4, 2), [[1u8; 6], [2; 6], [1; 6], [2; 6]].concat());
+        assert_eq!(frame.resample(3, 1), [1, 1, 1, 1, 1, 1, 2, 2, 2]);
+    }
+
+    #[test]
     fn rotation_keeps_every_pixel_of_a_rectangle() {
-        let frame = Frame { width: 3, height: 2, rgb: (0..18).collect() };
+        let frame = Frame { width: 3, height: 2, rgb: (0..18).collect(), ..Frame::default() };
         let back = rotate(&rotate(&frame, 1), 3);
         assert_eq!((back.width, back.height), (3, 2));
         assert_eq!(back.rgb, frame.rgb);

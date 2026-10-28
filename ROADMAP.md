@@ -157,6 +157,10 @@ It's built in steps, and the first one pays off without any of the TUI work:
      folder and its save folder for the core (headless runs get a fresh temporary one, so they
      repeat exactly). Cores that only draw with the GPU (Flycast) can crash while loading, so the
      TUI starts a core in a separate process the first time it's played.
+   - ✓ **Aspect ratio**: games are shown at the shape the core gives, not with square pixels, so
+     CPS-1/2 games (384×224) come out 4:3. romi works out how wide each pixel is from the core's
+     base size and aspect ratio, since cores like mGBA give a base size (the Super Game Boy's) that
+     isn't the frames'. Headless screenshots stay pixel for pixel.
 3. **Audio and input**: audio through `cpal`, resampled to the device rate and used to pace emulation.
    The controller already goes through `gilrs`. Playing on a keyboard needs key-release events, so it
    only works in terminals that support the Kitty keyboard protocol.
@@ -200,9 +204,6 @@ Smaller items that fit between phases.
 - **An AUR package**: the recipe is ready in `packaging/aur`, to publish once v0.1.0 is tagged.
 - **A waybar module**, if it turns out to be wanted: games usually run full screen, hiding the bar, so
   it's not planned. `romi status --json` already has what one needs.
-- **Aspect ratio for games played in romi**: frames are shown with square pixels, but cores give the
-  aspect ratio the picture is meant to have (`Geometry::aspect_ratio` in `emu/libretro.rs`, read and
-  unused). CPS-1/2 games (384×224, meant for 4:3) come out too wide.
 - **7z ROMs in romi**: zips are unpacked for cores that can't open them, 7z files aren't. Only cores
   that open 7z themselves (FinalBurn Neo) can play them.
 - **MAME in romi**: its core crashed while starting, before cores got a system and save folder. Not

@@ -51,7 +51,9 @@ with `--screenshot out.png`. It loads the libretro core from the game's `retroar
 the one given with `--core`, and takes a game name or a ROM file, so it works on a build fresh out
 of a ROM hack or decomp. `--input` holds buttons from a script of `<frame> <buttons...>` lines, each
 held until the next line (`300 start`, then `306` to let go). The same ROM, script and frame count
-always give the same picture, so screenshots can be compared between builds. `--wav out.wav` saves
+always give the same picture, so screenshots can be compared between builds. Screenshots are the
+core's pixels as they are; `--json` gives `pixel_aspect`, how wide each is meant to look (under 1 for
+arcade boards that squeeze a wide picture onto a 4:3 screen), and playing shows games at that shape. `--wav out.wav` saves
 the sound of the whole run, which comes out the same every time too. Only cores that draw in
 software work (most 2D systems, and arcade games through FinalBurn Neo). Zipped ROMs go as they are
 to cores that open zips themselves, like FinalBurn Neo, and are unpacked to /tmp for the rest, as

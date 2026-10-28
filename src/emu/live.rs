@@ -119,8 +119,10 @@ struct Layout {
     /// Cells the terminal stretches the picture over (Scale::Terminal only).
     cols: u16,
     rows: u16,
-    /// Whole-number scale (Scale::Integer only).
+    /// Whole-number scale of the height, and the size romi scales the frame to (Scale::Integer
+    /// only). The width follows the frame's shape, so pixels meant to be narrow stay narrow.
     factor: u32,
+    size: (u32, u32),
     /// The row for the status line.
     status_row: u16,
 }
@@ -133,8 +135,8 @@ struct View {
     scale: Scale,
     show_status: bool,
     layout: Option<Layout>,
-    /// Size of the frame the layout was worked out for.
-    laid_out_for: (u32, u32),
+    /// Size and pixel shape of the frame the layout was worked out for.
+    laid_out_for: (u32, u32, u64),
     controls: Controls,
     /// Numbers the shared memory objects and temp files.
     sent: u64,
@@ -164,7 +166,7 @@ impl View {
             scale: Scale::Terminal,
             show_status: true,
             layout: None,
-            laid_out_for: (0, 0),
+            laid_out_for: (0, 0, 0),
             controls: Controls::new(),
             sent: 0,
             pending: VecDeque::new(),
@@ -237,7 +239,8 @@ impl View {
         Ok(())
     }
 
-    fn lay_out(&self, width: u32, height: u32) -> Result<Layout> {
+    fn lay_out(&self, frame: &Frame) -> Result<Layout> {
+        let (width, height) = frame.display_size();
         let size = terminal::window_size()?;
         let (cols, rows) = (u32::from(size.columns.max(1)), u32::from(size.rows.max(1)));
         let (cell_w, cell_h) = kitty::cell_size(&size);
@@ -246,19 +249,20 @@ impl View {
         let mut layout = Layout { status_row: (rows - 1) as u16, ..Layout::default() };
         match self.scale {
             Scale::Terminal => {
-                let fit = (area_w as f64 / width as f64).min(area_h as f64 / height as f64);
-                let c = ((width as f64 * fit / cell_w as f64).round() as u32).clamp(1, cols);
-                let r = ((height as f64 * fit / cell_h as f64).round() as u32).clamp(1, usable_rows);
+                let fit = (area_w as f64 / width).min(area_h as f64 / height);
+                let c = ((width * fit / cell_w as f64).round() as u32).clamp(1, cols);
+                let r = ((height * fit / cell_h as f64).round() as u32).clamp(1, usable_rows);
                 layout.cols = c as u16;
                 layout.rows = r as u16;
                 layout.col = ((cols - c) / 2) as u16;
                 layout.row = ((usable_rows - r) / 2) as u16;
             }
             Scale::Integer => {
-                let factor = (area_w / width).min(area_h / height).max(1);
-                let left = area_w.saturating_sub(width * factor) / 2;
-                let top = area_h.saturating_sub(height * factor) / 2;
-                layout.factor = factor;
+                let factor = (area_w as f64 / width).min(area_h as f64 / height).floor().max(1.0);
+                let size = ((width * factor).round() as u32, frame.height * factor as u32);
+                let left = area_w.saturating_sub(size.0) / 2;
+                let top = area_h.saturating_sub(size.1) / 2;
+                (layout.factor, layout.size) = (factor as u32, size);
                 (layout.col, layout.x) = ((left / cell_w) as u16, left % cell_w);
                 (layout.row, layout.y) = ((top / cell_h) as u16, top % cell_h);
             }
@@ -267,17 +271,19 @@ impl View {
     }
 
     fn draw(&mut self, frame: &Frame) -> Result<()> {
-        if self.layout.is_none() || self.laid_out_for != (frame.width, frame.height) {
-            self.layout = Some(self.lay_out(frame.width, frame.height)?);
-            self.laid_out_for = (frame.width, frame.height);
+        let shape = (frame.width, frame.height, frame.pixel_aspect.to_bits());
+        if self.layout.is_none() || self.laid_out_for != shape {
+            self.layout = Some(self.lay_out(frame)?);
+            self.laid_out_for = shape;
         }
         let layout = self.layout.as_ref().unwrap();
         let scaled;
         let (pixels, w, h) = match self.scale {
             Scale::Terminal => (&frame.rgb, frame.width, frame.height),
             Scale::Integer => {
-                scaled = scale_up(frame, layout.factor);
-                (&scaled, frame.width * layout.factor, frame.height * layout.factor)
+                let (w, h) = layout.size;
+                scaled = frame.resample(w, h);
+                (&scaled, w, h)
             }
         };
         let mut keys = format!("a=T,i={IMAGE},p={IMAGE},q=2,C=1,f=24,s={w},v={h}");
@@ -421,25 +427,6 @@ fn put_chunked(out: &mut Vec<u8>, keys: &str, data: &str) {
     }
 }
 
-/// The frame made `factor` times bigger, each pixel a square of copies.
-fn scale_up(frame: &Frame, factor: u32) -> Vec<u8> {
-    let (w, f) = (frame.width as usize, factor as usize);
-    let mut out = Vec::with_capacity(frame.rgb.len() * f * f);
-    let mut line = Vec::with_capacity(w * f * 3);
-    for row in frame.rgb.chunks_exact(w * 3) {
-        line.clear();
-        for px in row.as_chunks::<3>().0 {
-            for _ in 0..f {
-                line.extend_from_slice(px);
-            }
-        }
-        for _ in 0..f {
-            out.extend_from_slice(&line);
-        }
-    }
-    out
-}
-
 /// A frame left for the terminal to pick up.
 enum Handoff {
     Shm(String),
@@ -468,14 +455,6 @@ impl Drop for View {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn scaling_up_repeats_each_pixel_in_a_square() {
-        let frame = Frame { width: 2, height: 1, rgb: vec![1, 1, 1, 2, 2, 2] };
-        let px = |v: u8| [v, v, v];
-        let row = [px(1), px(1), px(2), px(2)].concat();
-        assert_eq!(scale_up(&frame, 2), [row.clone(), row].concat());
-    }
 
     #[test]
     fn direct_images_are_split_into_chunks() {
