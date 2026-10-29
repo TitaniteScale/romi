@@ -1,7 +1,7 @@
 # Maintainer: Jake Eaker <jacob.eaker@gmail.com>
 
 pkgname=romi
-pkgver=0.1.0
+pkgver=0.2.0
 pkgrel=1
 pkgdesc="A terminal game launcher for ROMs, native ports and Steam, driven by keyboard or controller"
 arch=('x86_64' 'aarch64')
@@ -16,7 +16,7 @@ optdepends=(
   'emulationstation-de: system definitions and emulators for romi init, names from its gamelists'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('2de1dd0fb400e7f6aa09af346ef728187824a758859cd6a3a1b65184ab687462')
+sha256sums=('186e46f5857a0505a2cf6e27f2b0983a300b72384e001508d0899e9a0731c557')
 
 prepare() {
   cd "$pkgname-$pkgver"
@@ -43,6 +43,7 @@ package() {
   install -Dm755 target/release/romi -t "$pkgdir/usr/bin/"
   install -Dm644 LICENSE -t "$pkgdir/usr/share/licenses/$pkgname/"
   install -Dm644 README.md ROADMAP.md default-config.jsonc -t "$pkgdir/usr/share/doc/$pkgname/"
+  install -Dm644 docs/*.md -t "$pkgdir/usr/share/doc/$pkgname/docs/"
   install -Dm644 examples/couch/* -t "$pkgdir/usr/share/doc/$pkgname/examples/couch/"
   install -Dm644 packaging/completions/romi.bash "$pkgdir/usr/share/bash-completion/completions/romi"
   install -Dm644 packaging/completions/romi.fish "$pkgdir/usr/share/fish/vendor_completions.d/romi.fish"
