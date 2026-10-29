@@ -1,0 +1,43 @@
+# Achievements
+
+## RetroAchievements
+
+With your username in the config and your web API key (from Settings on retroachievements.org) in
+a file of its own, romi shows each game's achievements in the details pane: how many there are,
+what they're worth, how many you've earned, and your best award.
+
+```jsonc
+"retroachievements": { "username": "you" }
+```
+
+The key goes in `~/.config/romi/retroachievements.key` (`chmod 600` it), or `"key_file"` says
+where; `RA_API_KEY` in the environment beats both. Keeping it out of `config.json` keeps it out of
+your dotfiles. The TUI refreshes your progress when it starts, and `romi achievements` refreshes it
+and lists your games that have achievements.
+
+romi only shows achievements; the emulator earns them, so each one needs RetroAchievements turned
+on and your login. `romi check` tells you which aren't set up.
+
+## The achievements screen
+
+`A`, Start → Achievements, or Achievements… in a game's menu lists your games that have
+achievements with your progress in each. ←/→ (or LB/RB) narrow it to a system, Tab (or X) to a
+status (in progress, not started, finished, or needing another dump), and `/` (or Select) searches
+by name. Opening a game lists its achievements: which you've earned and when, their points, how
+rare they are, and which are progression, win conditions or missable. They're fetched when you open
+the game and cached, so they show at once next time.
+
+## Steam achievements
+
+Steam achievements show there too, with no setup: romi reads them from the Steam client's own cache
+(`appcache/stats`), which covers games played on this machine. Hidden ones stay hidden until
+earned, and how rare each is comes from Steam's public percentages when you open the game.
+
+## How games are matched
+
+Games are matched the way RetroArch does it, by hashing the ROM, for arcade sets (the set name) and
+cartridges (the ROM, minus a copier header, in N64's native byte order), so a game only shows
+achievements if your dump can earn them. When it can't but another version of the game can (often
+a "Rev 1"), the details pane says so and links RetroAchievements' list of supported dumps. Disc
+systems and the DS are matched by title. The first refresh hashes every cartridge, which reads a
+few GB; after that only new or changed files are read. Everything is cached in `~/.cache/romi/ra`.

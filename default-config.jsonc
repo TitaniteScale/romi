@@ -42,7 +42,7 @@
   // world), "jp", or "auto" to go by your locale.
   "region": "auto",
 
-  // Commands run when a game starts and stops, here and per system (see the README).
+  // Commands run when a game starts and stops, here and per system (see docs/config.md).
   // "hooks": {
   //   "on_launch": ["playerctl pause", "powerprofilesctl set performance"],
   //   "on_exit": ["powerprofilesctl set balanced"]

@@ -8,7 +8,7 @@
 __pycache__/
 .pytest_cache/
 
-# makepkg output, from testing the AUR package
-/packaging/aur/src/
-/packaging/aur/pkg/
-/packaging/aur/*.tar.*
+# makepkg output, from building the Arch package
+/packaging/arch/src/
+/packaging/arch/pkg/
+/packaging/arch/*.tar.*

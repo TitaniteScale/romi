@@ -213,7 +213,8 @@ Smaller items that fit between phases.
 - **More descriptions**: Wikipedia's summary API needs no key, but matching titles to articles is
   hit-or-miss. ScreenScraper and TheGamesDB need keys.
 - **SteamGridDB** (free key) for covers on PC ports and pinball tables.
-- **An AUR package**: the recipe is ready in `packaging/aur`, to publish once v0.1.0 is tagged.
+- **An AUR package**: the AUR isn't taking new packages. Until it does, the recipe in `packaging/arch`
+  builds with `makepkg -si`.
 - **A waybar module**, if it turns out to be wanted: games usually run full screen, hiding the bar, so
   it's not planned. `romi status --json` already has what one needs.
 - **7z ROMs in romi**: zips are unpacked for cores that can't open them, 7z files aren't. Only cores
