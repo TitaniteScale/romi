@@ -205,7 +205,12 @@ pub(super) fn run_core(
     };
 
     if live {
-        let emu = crate::emu::runner::load(cfg, &core, &rom)?;
+        // The whole terminal, less the status line.
+        let shown = ratatui::crossterm::terminal::window_size().ok().map(|s| {
+            let (_, cell_h) = crate::emu::kitty::cell_size(&s);
+            u32::from(s.rows.saturating_sub(1)) * cell_h
+        });
+        let emu = crate::emu::runner::load(cfg, &core, &rom, shown)?;
         return crate::emu::live::play(emu, &name, cfg.volume_gain());
     }
     // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared
@@ -215,10 +220,12 @@ pub(super) fn run_core(
         system: cfg.system_dir(),
         saves: Some(saves.path().to_path_buf()),
         save_file: None,
-        // The same options as playing it, so a run shows what playing would.
+        // The same options as playing it, so a run shows what playing would, at the console's
+        // size, so its screenshots are the same whatever the terminal.
         options: crate::emu::libretro::info(&core)
             .map(|info| crate::emucfg::retroarch_core_options(&info.name, &rom))
             .unwrap_or_default(),
+        shown_height: None,
     };
     let mut emu = crate::emu::libretro::Core::load(&core, &rom, &dirs)?;
     let mut sound = wav.map(|path| crate::emu::audio::Wav::create(path, emu.sample_rate)).transpose()?;
@@ -234,6 +241,7 @@ pub(super) fn run_core(
     }
     let elapsed = started.elapsed();
     let sound_len = sound.map(|s| s.finish()).transpose()?;
+    emu.finish_frame();
     let frame = emu.frame();
     if let Some(path) = screenshot {
         let Some(img) = image::RgbImage::from_raw(frame.width, frame.height, frame.rgb) else {

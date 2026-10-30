@@ -14,6 +14,8 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use std::fs::File;
 use std::io::{BufWriter, Seek, SeekFrom, Write};
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// Sound kept queued ahead of the device. Less risks gaps when a frame runs late; more puts the
@@ -38,6 +40,8 @@ pub struct Output {
     frame_time: f64,
     /// How much was queued before the last frame's sound.
     ahead: Duration,
+    /// Samples (left and right together) the device has played as silence for want of sound.
+    dry: Arc<AtomicU64>,
 }
 
 impl Output {
@@ -55,11 +59,12 @@ impl Output {
         let (queue, from_queue) = rtrb::RingBuffer::new(capacity);
         let fixed = cpal::BufferSize::Fixed((u64::from(rate) * PERIOD.as_millis() as u64 / 1000) as u32);
         let mut config = cpal::StreamConfig { channels, sample_rate: rate, buffer_size: fixed };
+        let dry = Arc::new(AtomicU64::new(0));
         let stream = match supported.sample_format() {
-            cpal::SampleFormat::F32 => build::<f32>(&device, &mut config, from_queue),
-            cpal::SampleFormat::I16 => build::<i16>(&device, &mut config, from_queue),
-            cpal::SampleFormat::I32 => build::<i32>(&device, &mut config, from_queue),
-            cpal::SampleFormat::U8 => build::<u8>(&device, &mut config, from_queue),
+            cpal::SampleFormat::F32 => build::<f32>(&device, &mut config, from_queue, dry.clone()),
+            cpal::SampleFormat::I16 => build::<i16>(&device, &mut config, from_queue, dry.clone()),
+            cpal::SampleFormat::I32 => build::<i32>(&device, &mut config, from_queue, dry.clone()),
+            cpal::SampleFormat::U8 => build::<u8>(&device, &mut config, from_queue, dry.clone()),
             other => bail!("the sound device wants {other} samples, which romi can't make"),
         }?;
         stream.play().context("can't start the sound")?;
@@ -73,6 +78,7 @@ impl Output {
             scratch: Vec::new(),
             frame_time: 1.0 / fps,
             ahead: Duration::ZERO,
+            dry,
         };
         output.pad();
         Ok(output)
@@ -87,6 +93,12 @@ impl Output {
     /// How much sound was queued before the last frame's.
     pub fn ahead(&self) -> Duration {
         self.ahead
+    }
+
+    /// How much silence the device has played so far because there was no sound queued: gaps in
+    /// the sound, heard as crackles, or as stutters when they're long.
+    pub fn dry(&self) -> Duration {
+        Duration::from_secs_f64(self.dry.load(Ordering::Relaxed) as f64 / f64::from(self.rate))
     }
 
     /// Queues a frame's sound (interleaved left and right samples at the core's rate), `volume`
@@ -128,21 +140,30 @@ impl Output {
 }
 
 /// A stream that plays from `queue`, putting left and right in the device's first two channels
-/// (or mixing them, for a mono device). Asks for `config`'s buffer size, or the device's own if
-/// it won't take that.
-fn build<T>(device: &cpal::Device, config: &mut cpal::StreamConfig, queue: rtrb::Consumer<f32>) -> Result<cpal::Stream>
+/// (or mixing them, for a mono device), and counting into `dry` the samples it had none for.
+/// Asks for `config`'s buffer size, or the device's own if it won't take that.
+fn build<T>(
+    device: &cpal::Device,
+    config: &mut cpal::StreamConfig,
+    queue: rtrb::Consumer<f32>,
+    dry: Arc<AtomicU64>,
+) -> Result<cpal::Stream>
 where
     T: cpal::SizedSample + cpal::FromSample<f32>,
 {
-    let queue = std::sync::Arc::new(std::sync::Mutex::new(queue));
+    let queue = Arc::new(std::sync::Mutex::new(queue));
     let open = |config: cpal::StreamConfig| {
-        let queue = queue.clone();
+        let (queue, dry) = (queue.clone(), dry.clone());
         let channels = usize::from(config.channels);
         device.build_output_stream(
             config,
             move |out: &mut [T], _: &cpal::OutputCallbackInfo| {
                 // Only this callback ever locks it, so it never waits.
                 let mut queue = queue.lock().unwrap_or_else(|e| e.into_inner());
+                let short = (out.len() / channels.max(1)).saturating_sub(queue.slots() / 2);
+                if short > 0 {
+                    dry.fetch_add(short as u64, Ordering::Relaxed);
+                }
                 for frame in out.chunks_mut(channels) {
                     let (l, r) = match queue.slots() >= 2 {
                         true => (queue.pop().unwrap_or(0.0), queue.pop().unwrap_or(0.0)),

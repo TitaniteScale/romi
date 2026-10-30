@@ -17,8 +17,10 @@ use std::time::{Duration, Instant};
 /// Loads a core to play `rom` with. It gets RetroArch's system folder and RetroArch's save folder
 /// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways. The
 /// game's own save goes where RetroArch keeps it too, so a game saved in romi carries on in
-/// RetroArch and back, and the core runs with the options RetroArch has for it and the game.
-pub fn load(cfg: &Config, core: &Path, rom: &Path) -> Result<Core> {
+/// RetroArch and back, and the core runs with the options RetroArch has for it and the game. With
+/// `shown_height`, how many screen pixels tall the game will be, 3D cores draw at about that size
+/// if `sharp_3d` is on.
+pub fn load(cfg: &Config, core: &Path, rom: &Path, shown_height: Option<u32>) -> Result<Core> {
     let name = crate::emu::libretro::info(core).map(|info| info.name);
     let saves = name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom));
     if let Some(dir) = &saves {
@@ -26,7 +28,8 @@ pub fn load(cfg: &Config, core: &Path, rom: &Path) -> Result<Core> {
     }
     let save_file = save_file(saves.as_deref(), rom);
     let options = name.map(|name| crate::emucfg::retroarch_core_options(&name, rom)).unwrap_or_default();
-    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file, options })
+    let shown_height = shown_height.filter(|_| cfg.sharp_3d);
+    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file, options, shown_height })
 }
 
 /// Where RetroArch keeps a game's save: the ROM's name with `.srm`, in the save folder, or next to
@@ -70,8 +73,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Shared {
     /// Starts `core` on its own thread, running until `stop`, with its sound `volume` loud. A
-    /// `paused` core waits for `resume` before its first frame. With `cheevos`, its achievements
-    /// are checked after every frame.
+    /// `paused` core warms up (see `WarmUp`), then waits for `resume` before its first frame that's
+    /// seen. With `cheevos`, its achievements are checked after every frame.
     pub fn start(
         core: Core,
         volume: f32,
@@ -198,6 +201,7 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
     let mut next = Instant::now();
     // How long after its start each frame is handed over (see `hold_for`).
     let mut hold = Duration::ZERO;
+    let mut warm = WarmUp::default();
     let mut saved = Instant::now();
     let mut cheevos = cheevos.and_then(|setup| start_cheevos(setup, shared));
     let tell = |client: &cheevos::Client| {
@@ -217,6 +221,12 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
             saved = Instant::now();
         }
         if shared.paused.load(Ordering::Relaxed) {
+            if !warm.done() {
+                let started = Instant::now();
+                core.run_frame(Input::default());
+                warm.ran(started.elapsed(), period);
+                continue;
+            }
             if let Some(client) = &mut cheevos {
                 client.idle();
                 tell(client);
@@ -257,8 +267,8 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
         }
         shared.ready.notify_one();
         if let Some(made) = &shared.made {
-            let sound_ahead = sound.as_ref().map(|s| s.ahead());
-            lock(made).push(timing::Made { started, ran, done: Instant::now(), sound_ahead });
+            let (sound_ahead, sound_dry) = (sound.as_ref().map(|s| s.ahead()), sound.as_ref().map(|s| s.dry()));
+            lock(made).push(timing::Made { started, ran, done: Instant::now(), sound_ahead, sound_dry });
         }
         next += wait;
         let now = Instant::now();
@@ -274,6 +284,31 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
     drop(cheevos);
 }
 
+/// A core's first frames, run while it waits behind the launch animation, muted and unseen. Some
+/// cores take far longer over their first frames than the rest (Flycast compiles its shaders:
+/// 100 ms a frame), which stuttered the game as it came on, and ran its sound dry. Once a few in
+/// a row run quickly, or after a second of the game, which starts black, it's ready.
+#[derive(Default)]
+struct WarmUp {
+    frames: u32,
+    quick: u32,
+}
+
+impl WarmUp {
+    /// Quick frames in a row that say the core's warmed up, and the most frames run to get there.
+    const QUICK: u32 = 5;
+    const MOST: u32 = 60;
+
+    fn ran(&mut self, took: Duration, period: Duration) {
+        self.frames += 1;
+        self.quick = if took < period / 2 { self.quick + 1 } else { 0 };
+    }
+
+    fn done(&self) -> bool {
+        self.quick >= WarmUp::QUICK || self.frames >= WarmUp::MOST
+    }
+}
+
 /// How long after its start to hand a frame over, given the last answer and how long this one
 /// took. Some cores take much longer over some frames than others (Flycast: 2 to 12 ms), and
 /// handing each over as soon as it was done spaced them as unevenly, which looks choppy. Held
@@ -287,6 +322,23 @@ fn hold_for(last: Duration, took: Duration, period: Duration) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cores_warm_up_until_frames_come_quickly_or_a_second_has_gone() {
+        let period = Duration::from_millis(16);
+        let mut warm = WarmUp::default();
+        for took in [100, 100, 3, 3, 100, 3, 3, 3, 3] {
+            warm.ran(Duration::from_millis(took), period);
+            assert!(!warm.done(), "a slow frame starts the count again");
+        }
+        warm.ran(Duration::from_millis(3), period);
+        assert!(warm.done());
+        let mut slow = WarmUp::default();
+        for _ in 0..WarmUp::MOST {
+            slow.ran(Duration::from_millis(100), period);
+        }
+        assert!(slow.done());
+    }
 
     #[test]
     fn frames_are_held_as_long_as_slow_ones_take_and_no_more_than_most_of_a_frame() {

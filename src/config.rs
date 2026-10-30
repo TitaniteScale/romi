@@ -44,6 +44,9 @@ pub struct Config {
     /// Black edges a game leaves round its picture (most N64 games do) are cropped off in the
     /// middle panel (see `emu::crop`).
     pub crop_borders: bool,
+    /// Games that draw with the GPU draw about as big as they're shown, rather than at the
+    /// console's size, so 3D looks sharp (see `emu::options`).
+    pub sharp_3d: bool,
     pub systems: Vec<SystemConfig>,
     pub games: Vec<GameConfig>,
     /// Tweaks to any game (ROM, hand-added or Steam) by its key, as `romi list` shows it.
@@ -214,6 +217,7 @@ impl Default for Config {
             corner_radius: 0,
             screen_filter: crate::emu::screen::Filter::None,
             crop_borders: true,
+            sharp_3d: true,
             systems: Vec::new(),
             games: Vec::new(),
             overrides: HashMap::new(),

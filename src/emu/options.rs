@@ -2,6 +2,10 @@
 //! default, and asks for by key as it runs. romi answers with what's set for the core in RetroArch
 //! (see `emucfg::retroarch_core_options`), so a game plays the same in both, or else the core's
 //! default.
+//!
+//! The exception is how big a 3D core draws. Drawn at the console's size (640×480) and scaled
+//! up to the panel, a pixel at a time, 3D games look blocky, so romi asks for the size closest to
+//! the panel's instead, when it's told how tall that is, up to `MAX_DRAWN`.
 
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -136,26 +140,65 @@ fn from_legacy(key: String, value: &str) -> Declared {
     Declared { key, values: choices.split('|').map(str::to_string).collect(), default: None }
 }
 
+/// How tall a frame the core draws with `value` for the option `key`, for the options that say.
+fn drawn_height(key: &str, value: &str) -> Option<u32> {
+    match key {
+        // "1280x960"
+        "reicast_internal_resolution" | "flycast_internal_resolution" | "mupen64plus-43screensize" => {
+            value.split_once('x')?.1.trim().parse().ok()
+        }
+        // "2x", or "1x(native)": the PlayStation's 240 lines, so many times over.
+        "beetle_psx_hw_internal_resolution" => Some(value.split('x').next()?.trim().parse::<u32>().ok()? * 240),
+        _ => None,
+    }
+}
+
+/// The tallest 3D is drawn, four times the consoles' 240 lines. Every frame is read back from the
+/// GPU and scaled on the CPU, so drawing bigger costs time a frame doesn't have: Flycast drawing
+/// at 2880×2160, for a panel 2000 pixels tall, took 16 ms over a frame, and the game slowed and its
+/// sound broke up. At 960 it's under a millisecond, and the picture at most twice as big again on
+/// screen, which is still sharp.
+const MAX_DRAWN: u32 = 960;
+
+/// The value of a size option that draws at least `height` tall (or `MAX_DRAWN`, if that's less),
+/// as little over as there is, or else the tallest up to `MAX_DRAWN`. None for an option that
+/// isn't a size, or offers nothing that small.
+fn fitted(d: &Declared, height: u32) -> Option<&String> {
+    let height = height.min(MAX_DRAWN);
+    let sizes: Vec<(u32, &String)> =
+        d.values.iter().filter_map(|v| Some((drawn_height(&d.key, v)?, v))).filter(|&(h, _)| h <= MAX_DRAWN).collect();
+    let tall_enough = sizes.iter().filter(|(h, _)| *h >= height).min_by_key(|(h, _)| *h);
+    tall_enough.or(sizes.iter().max_by_key(|(h, _)| *h)).map(|(_, v)| *v)
+}
+
 /// The options a game is played with.
 #[derive(Default)]
 pub struct Options {
     /// What's set in RetroArch for the core and the game.
     chosen: BTreeMap<String, String>,
+    /// How tall the game is shown, in screen pixels, to draw 3D at about that size.
+    shown_height: Option<u32>,
     /// The value given for each key, kept while the core may still hold it.
     values: BTreeMap<String, CString>,
 }
 
 impl Options {
-    pub fn new(chosen: BTreeMap<String, String>) -> Options {
-        Options { chosen, values: BTreeMap::new() }
+    /// Options as `chosen` in RetroArch, for a game shown `shown_height` pixels tall, if 3D is to
+    /// be drawn at about that size.
+    pub fn new(chosen: BTreeMap<String, String>, shown_height: Option<u32>) -> Options {
+        Options { chosen, shown_height, values: BTreeMap::new() }
     }
 
     /// Takes the options a core declared: each is what's chosen for it, if the core allows that
-    /// value, or else its default.
+    /// value, or else its default. A size a 3D core draws at is fitted to how tall it's shown.
     pub fn declare(&mut self, declared: Vec<Declared>) {
         for d in declared {
+            let fitted = self.shown_height.and_then(|h| fitted(&d, h));
+            if let Some(value) = fitted {
+                super::libretro::note(&format!("romi: {} = {value}, to draw about as tall as it's shown", d.key));
+            }
             let chosen = self.chosen.get(&d.key).filter(|v| d.values.is_empty() || d.values.contains(v));
-            let value = chosen.or(d.default.as_ref()).or(d.values.first());
+            let value = fitted.or(chosen).or(d.default.as_ref()).or(d.values.first());
             if let Some(value) = value.and_then(|v| CString::new(v.as_str()).ok()) {
                 self.values.insert(d.key, value);
             }
@@ -185,7 +228,7 @@ mod tests {
     fn options_are_what_retroarch_has_if_the_core_allows_it_or_else_the_default() {
         let chosen = [("cpu", "dynamic_recompiler"), ("res", "9999x9999"), ("extra", "on")]
             .map(|(k, v)| (k.to_string(), v.to_string()));
-        let mut options = Options::new(chosen.into_iter().collect());
+        let mut options = Options::new(chosen.into_iter().collect(), None);
         let declare = |key: &str, values: &[&str], default: Option<&str>| Declared {
             key: key.into(),
             values: values.iter().map(|v| v.to_string()).collect(),
@@ -201,6 +244,38 @@ mod tests {
         assert_eq!(value(&mut options, "audio").as_deref(), Some("on"), "the first is the default");
         assert_eq!(value(&mut options, "extra").as_deref(), Some("on"), "never declared, but set");
         assert_eq!(value(&mut options, "nothing"), None);
+    }
+
+    #[test]
+    fn three_d_is_drawn_about_as_tall_as_its_shown() {
+        let declare = |key: &str, values: &[&str]| Declared {
+            key: key.into(),
+            values: values.iter().map(|v| v.to_string()).collect(),
+            default: Some(values[0].into()),
+        };
+        let chosen = [("mupen64plus-43screensize".to_string(), "640x480".to_string())];
+        let mut options = Options::new(chosen.into_iter().collect(), Some(910));
+        options.declare(vec![
+            declare("mupen64plus-43screensize", &["640x480", "320x240", "1280x960", "960x720", "1920x1440"]),
+            declare("beetle_psx_hw_internal_resolution", &["1x(native)", "2x", "4x", "8x"]),
+            declare("reicast_internal_resolution", &["640x480", "800x600"]),
+            declare("mupen64plus-cpucore", &["dynamic_recompiler", "pure_interpreter"]),
+        ]);
+        assert_eq!(value(&mut options, "mupen64plus-43screensize").as_deref(), Some("1280x960"));
+        assert_eq!(value(&mut options, "beetle_psx_hw_internal_resolution").as_deref(), Some("4x"));
+        assert_eq!(value(&mut options, "reicast_internal_resolution").as_deref(), Some("800x600"), "the tallest");
+        assert_eq!(value(&mut options, "mupen64plus-cpucore").as_deref(), Some("dynamic_recompiler"));
+        // A bigger panel gets no more than `MAX_DRAWN`.
+        let mut big = Options::new(BTreeMap::new(), Some(2000));
+        big.declare(vec![
+            declare("reicast_internal_resolution", &["640x480", "1280x960", "1920x1440", "2880x2160"]),
+            declare("beetle_psx_hw_internal_resolution", &["1x(native)", "2x", "4x", "8x"]),
+        ]);
+        assert_eq!(value(&mut big, "reicast_internal_resolution").as_deref(), Some("1280x960"));
+        assert_eq!(value(&mut big, "beetle_psx_hw_internal_resolution").as_deref(), Some("4x"));
+        let mut not_sized = Options::new(BTreeMap::new(), None);
+        not_sized.declare(vec![declare("mupen64plus-43screensize", &["640x480", "1280x960"])]);
+        assert_eq!(value(&mut not_sized, "mupen64plus-43screensize").as_deref(), Some("640x480"));
     }
 
     #[test]

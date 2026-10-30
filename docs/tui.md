@@ -103,6 +103,13 @@ area it has drawn in covers most of the screen, only that area is shown. It only
 again, if the game draws into an edge. `"crop_borders": false` (or Options → Crop black edges)
 shows the whole picture, edges and all.
 
+Games that draw with the GPU (N64, Dreamcast, PlayStation) draw about as big as they're shown,
+rather than at the console's 640×480 scaled up, so 3D looks sharp: romi picks the core's
+resolution option (Flycast's internal resolution, Mupen64Plus's screen size, Beetle PSX HW's
+internal resolution) closest to the panel's height, at least as tall, up to 960 lines (bigger
+costs more time than a frame has, as each is read back from the GPU). RetroArch's own setting for
+it is left as it is. `"sharp_3d": false` (or Options → Sharp 3D) draws at RetroArch's setting.
+
 `"screen_filter"` gives the picture an old screen's look: `"scanlines"`, `"crt"` (scanlines and a
 phosphor mask of red, green and blue columns) or `"lcd"` (a dark grid between the pixels, like a
 handheld's). romi draws it into each frame after scaling it, so it works the same in any terminal,

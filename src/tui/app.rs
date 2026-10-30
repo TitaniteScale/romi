@@ -225,6 +225,8 @@ pub struct App {
     pub running: Option<Running>,
     /// A game played inside romi, in the middle panel.
     pub embedded: Option<crate::emu::embedded::Embedded>,
+    /// The middle panel, where a game played here goes, as it was last drawn.
+    pub middle: ratatui::layout::Rect,
     /// The colors the launch animation picks from, and whether the terminal's background is light.
     pub look: crate::emu::wireframe::Look,
     /// What the terminal said its colors are, when romi started.
@@ -308,6 +310,7 @@ impl App {
             status: None,
             running: None,
             embedded: None,
+            middle: ratatui::layout::Rect::default(),
             look: crate::emu::wireframe::Look::new(None, Default::default()),
             terminal_colors: Default::default(),
             swap_confirm,
@@ -1531,12 +1534,23 @@ impl App {
             crop: self.cfg.crop_borders,
             badges: self.cfg.retroachievements.badges,
         };
-        let started = crate::emu::runner::load(&self.cfg, &core, &rom)
+        let started = crate::emu::runner::load(&self.cfg, &core, &rom, self.shown_height())
             .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume, launch, look, cheevos));
         match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),
         }
+    }
+
+    /// About how many screen pixels tall a game played here will be: the middle panel's inside,
+    /// less the hint under it, or as tall as fits its width for a 4:3 picture, the shape of the
+    /// systems that draw with the GPU.
+    fn shown_height(&self) -> Option<u32> {
+        let size = ratatui::crossterm::terminal::window_size().ok()?;
+        let (cell_w, cell_h) = crate::emu::kitty::cell_size(&size);
+        let width = u32::from(self.middle.width.saturating_sub(2)) * cell_w;
+        let height = u32::from(self.middle.height.saturating_sub(3)) * cell_h;
+        Some(height.min(width * 3 / 4)).filter(|&h| h > 0)
     }
 
     /// What a game played here needs for its achievements: the RetroAchievements login and the

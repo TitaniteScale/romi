@@ -28,7 +28,8 @@ the next is never seen. With `ROMI_FRAME_LOG` set to a file, a game played in th
 ran, when romi took it, scaled and filtered it, copied it to shared memory and wrote it out, and
 when the terminal read it (it deletes the shared memory then, which romi watches for). A summary
 goes beside it, with `.txt` for the extension: how evenly frames were made, sent and read (gaps
-more than half a frame late are the ones that show), and how long each step took. The TUI says
+more than half a frame late are the ones that show), how long each step took, and how often the
+sound ran dry (heard as crackles, or as stutters when the gaps are long). The TUI says
 where they went in its status bar.
 
 `frame_cost` times getting a frame ready, the copy to shared memory included, at panel sizes from

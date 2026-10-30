@@ -745,6 +745,8 @@ pub struct Dirs {
     pub save_file: Option<PathBuf>,
     /// Core options set for the core and the game, by key (see `options`).
     pub options: BTreeMap<String, String>,
+    /// How tall the game is shown, in screen pixels, for 3D cores to draw at about that size.
+    pub shown_height: Option<u32>,
 }
 
 pub struct Core {
@@ -799,7 +801,7 @@ impl Core {
             hw: None,
             hw_frame: None,
             max_size: (0, 0),
-            options: Some(Options::new(dirs.options.clone())),
+            options: Some(Options::new(dirs.options.clone(), dirs.shown_height)),
         };
         LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()).clear();
         // SAFETY: loading a core runs its initializers; libretro cores are made to be loaded this way.
@@ -970,15 +972,26 @@ impl Core {
         }
         // SAFETY: the game is loaded, and only one thread drives a core.
         unsafe { (self.api.run)() }
+        let drawn = shared().hw_frame.take().filter(|&(w, h)| w > 0 && h > 0);
+        self.read_frame(drawn);
+    }
+
+    /// Reads back what a core that draws with the GPU drew, if it drew a frame (`drawn`, its size),
+    /// and makes the frame it's given back the last frame (see `gl::Context::read`).
+    fn read_frame(&mut self, drawn: Option<(c_uint, c_uint)>) {
         let (Some(gl), Some(hw)) = (&mut self.gl, &self.hw) else { return };
         let mut s = shared();
-        let Some((w, h)) = s.hw_frame.take().filter(|&(w, h)| w > 0 && h > 0) else { return };
         let (rotation, geometry) = (s.rotation, s.geometry);
         let frame = &mut s.frame;
-        gl.read((w, h), hw.bottom_left, &mut frame.rgb);
-        let (w, h) = (w.min(gl.size().0), h.min(gl.size().1));
-        (frame.width, frame.height) = (w, h);
+        let Some(size) = gl.read(drawn.map(|size| (size, hw.bottom_left)), &mut frame.rgb) else { return };
+        (frame.width, frame.height) = size;
         upright(frame, rotation, geometry);
+    }
+
+    /// Takes the frame a core that draws with the GPU is still reading back, if it is, so the last
+    /// frame is the one drawn last.
+    pub fn finish_frame(&mut self) {
+        self.read_frame(None);
     }
 
     /// The last frame the core drew.

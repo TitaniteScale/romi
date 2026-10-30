@@ -441,16 +441,24 @@ impl Embedded {
 /// filtered, its corners rounded if they're to be (clear, so the terminal's background shows
 /// there). Gives back their format: RGB (24) or RGBA (32).
 pub fn game_pixels(frame: &Frame, (w, h): (u32, u32), look: Appearance, pixels: &mut Vec<u8>) -> u8 {
-    let sizes = ((w as usize, h as usize), (frame.width as usize, frame.height as usize));
     let bpp = if look.corners > 0.0 { 4 } else { 3 };
     frame.resample_into(w, h, bpp, pixels);
-    screen::apply(pixels, bpp, sizes.0, sizes.1, look.filter);
+    screen::apply(pixels, bpp, (w as usize, h as usize), console_size(frame), look.filter);
     if bpp == 3 {
         return 24;
     }
     let (fw, fh) = (f64::from(w), f64::from(h));
     wireframe::round_corners(pixels, w as usize, [0.0, 0.0, fw, fh], look.corners * fh);
     32
+}
+
+/// The picture's size on the console that made it, for the screen filter: the frame's own, or for
+/// a 3D game drawn bigger than the console did (see `sharp_3d`), that many times smaller. Consoles
+/// drew about 240 lines, so a frame well over that is taken as 240 drawn bigger, and the
+/// scanlines and phosphor mask stay the size they were on a TV.
+fn console_size(frame: &Frame) -> (usize, usize) {
+    let times = (f64::from(frame.height) / 240.0).round().max(1.0) as usize;
+    (frame.width as usize / times, frame.height as usize / times)
 }
 
 impl Drop for Embedded {

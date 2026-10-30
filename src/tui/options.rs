@@ -12,6 +12,7 @@ pub enum Setting {
     Corners,
     Filter,
     Crop,
+    Sharp,
     Animation,
     Covers,
     Screens,
@@ -20,11 +21,12 @@ pub enum Setting {
     Confirm,
 }
 
-pub const SETTINGS: [Setting; 10] = [
+pub const SETTINGS: [Setting; 11] = [
     Setting::Volume,
     Setting::Corners,
     Setting::Filter,
     Setting::Crop,
+    Setting::Sharp,
     Setting::Animation,
     Setting::Covers,
     Setting::Screens,
@@ -43,6 +45,7 @@ impl Setting {
             Setting::Corners => "Corners",
             Setting::Filter => "Screen filter",
             Setting::Crop => "Crop black edges",
+            Setting::Sharp => "Sharp 3D",
             Setting::Animation => "Launch animation",
             Setting::Covers => "Covers",
             Setting::Screens => "Title screens",
@@ -59,6 +62,7 @@ impl Setting {
             Setting::Corners => &["corner_radius"],
             Setting::Filter => &["screen_filter"],
             Setting::Crop => &["crop_borders"],
+            Setting::Sharp => &["sharp_3d"],
             Setting::Animation => &["launch_animation", "enabled"],
             Setting::Covers => &["art", "show"],
             Setting::Screens => &["art", "screens"],
@@ -75,6 +79,7 @@ impl Setting {
             Setting::Corners => json!(cfg.corner_radius),
             Setting::Filter => json!(cfg.screen_filter.name()),
             Setting::Crop => json!(cfg.crop_borders),
+            Setting::Sharp => json!(cfg.sharp_3d),
             Setting::Animation => json!(cfg.launch_animation.enabled),
             Setting::Covers => json!(cfg.art.show),
             Setting::Screens => json!(cfg.art.screens),
@@ -92,7 +97,12 @@ impl Setting {
             Setting::Filter => Filter::ALL.map(|f| json!(f.name())).to_vec(),
             Setting::Accent => ACCENTS.map(|a| json!(a)).to_vec(),
             Setting::Borders => BORDERS.map(|b| json!(b)).to_vec(),
-            Setting::Crop | Setting::Animation | Setting::Covers | Setting::Screens | Setting::Confirm => {
+            Setting::Crop
+            | Setting::Sharp
+            | Setting::Animation
+            | Setting::Covers
+            | Setting::Screens
+            | Setting::Confirm => {
                 vec![json!(true), json!(false)]
             }
         }
@@ -123,6 +133,7 @@ impl Setting {
             Setting::Corners => format!("round, {}%", cfg.corner_radius.min(50)),
             Setting::Filter => cfg.screen_filter.name().into(),
             Setting::Crop => on(cfg.crop_borders),
+            Setting::Sharp => on(cfg.sharp_3d),
             Setting::Animation => on(cfg.launch_animation.enabled),
             Setting::Covers => on(cfg.art.show),
             Setting::Screens => on(cfg.art.screens),

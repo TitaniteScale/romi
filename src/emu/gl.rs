@@ -2,6 +2,12 @@
 //! made through EGL, current on whichever thread runs the core, and a framebuffer the core draws
 //! each frame into, read back into memory to be shown like any other frame.
 //!
+//! A frame is read back without waiting for it: the GPU copies it into a buffer while the core
+//! goes on, and it's taken from there after the next frame is drawn. Waiting stalled the core for
+//! as long as the GPU took to finish drawing, which, on a GPU shared with a terminal showing the
+//! game big, was most of a frame, and the game fell behind its sound. It costs a frame's delay.
+//! (OpenGL ES 2 has no buffers to copy into, so there it waits.)
+//!
 //! libEGL is opened the first time a core asks, so romi still runs where there's none. It draws on
 //! the GPU with a screen plugged in, which on a laptop with two is the one the desktop is on, so
 //! the other can stay asleep; failing that, any GPU EGL lists, or Mesa's surfaceless display. GL's
@@ -53,6 +59,10 @@ const GL_UNSIGNED_BYTE: u32 = 0x1401;
 const GL_PIXEL_PACK_BUFFER: u32 = 0x88EB;
 const GL_PACK_ALIGNMENT: u32 = 0x0D05;
 const GL_PACK_ROW_LENGTH: u32 = 0x0D02;
+const GL_STREAM_READ: u32 = 0x88E1;
+const GL_MAP_READ_BIT: u32 = 0x0001;
+const GL_SYNC_GPU_COMMANDS_COMPLETE: u32 = 0x9117;
+const GL_SYNC_FLUSH_COMMANDS_BIT: u32 = 0x0001;
 const GL_RENDERER: u32 = 0x1F01;
 const GL_VERSION: u32 = 0x1F02;
 
@@ -181,14 +191,15 @@ struct Fns {
     get_error: unsafe extern "C" fn() -> u32,
 }
 
+macro_rules! gl {
+    ($name:literal) => {
+        // SAFETY: each field's type is the signature of the GL function of that name.
+        unsafe { function(CStr::from_bytes_with_nul(concat!($name, "\0").as_bytes()).unwrap())? }
+    };
+}
+
 impl Fns {
     fn load() -> Result<Fns> {
-        macro_rules! gl {
-            ($name:literal) => {
-                // SAFETY: each field's type is the signature of the GL function of that name.
-                unsafe { function(CStr::from_bytes_with_nul(concat!($name, "\0").as_bytes()).unwrap())? }
-            };
-        }
         Ok(Fns {
             gen_framebuffers: gl!("glGenFramebuffers"),
             delete_framebuffers: gl!("glDeleteFramebuffers"),
@@ -206,6 +217,56 @@ impl Fns {
             get_error: gl!("glGetError"),
         })
     }
+}
+
+/// The GL functions for reading frames back without waiting (OpenGL 3.2, or ES 3): buffers for
+/// the GPU to copy them into, and fences to tell when it has.
+struct AsyncFns {
+    gen_buffers: unsafe extern "C" fn(i32, *mut u32),
+    delete_buffers: unsafe extern "C" fn(i32, *const u32),
+    buffer_data: unsafe extern "C" fn(u32, isize, *const c_void, u32),
+    map_buffer_range: unsafe extern "C" fn(u32, isize, isize, u32) -> *const c_void,
+    unmap_buffer: unsafe extern "C" fn(u32) -> u8,
+    fence_sync: unsafe extern "C" fn(u32, u32) -> *const c_void,
+    client_wait_sync: unsafe extern "C" fn(*const c_void, u32, u64) -> u32,
+    delete_sync: unsafe extern "C" fn(*const c_void),
+    flush: unsafe extern "C" fn(),
+}
+
+impl AsyncFns {
+    fn load() -> Result<AsyncFns> {
+        Ok(AsyncFns {
+            gen_buffers: gl!("glGenBuffers"),
+            delete_buffers: gl!("glDeleteBuffers"),
+            buffer_data: gl!("glBufferData"),
+            map_buffer_range: gl!("glMapBufferRange"),
+            unmap_buffer: gl!("glUnmapBuffer"),
+            fence_sync: gl!("glFenceSync"),
+            client_wait_sync: gl!("glClientWaitSync"),
+            delete_sync: gl!("glDeleteSync"),
+            flush: gl!("glFlush"),
+        })
+    }
+}
+
+/// Frames read back without waiting: two buffers, one the GPU copies the newest frame into while
+/// the one before is taken from the other.
+struct Readback {
+    fns: AsyncFns,
+    buffers: [u32; 2],
+    /// How many bytes each buffer has room for.
+    room: [usize; 2],
+    /// The frame being copied, if one is.
+    copying: Option<Copying>,
+}
+
+struct Copying {
+    /// Which buffer it's going into.
+    buffer: usize,
+    size: (usize, usize),
+    bottom_left: bool,
+    /// Signalled once the GPU has copied it.
+    fence: *const c_void,
 }
 
 /// The GL or EGL function called `name`, as a function pointer of type `F`.
@@ -235,6 +296,8 @@ pub struct Context {
     size: (u32, u32),
     /// The last frame read back, as the GPU gives it: RGBA, bottom row first.
     pixels: Vec<u8>,
+    /// For reading frames back without waiting, where GL can.
+    readback: Option<Readback>,
 }
 
 // SAFETY: an EGL context can be made current on any thread, once no other thread has it current,
@@ -307,8 +370,25 @@ impl Context {
                 bail!("EGL can't use a context without a surface ({error:#x})");
             }
             let fns = Fns::load()?;
-            let mut gl =
-                Context { display, context, fns, request, fbo: 0, buffers: [0; 2], size: (0, 0), pixels: Vec::new() };
+            let readback = match request.api {
+                Api::Gles(major, _) if major < 3 => None,
+                _ => AsyncFns::load().ok().map(|fns| {
+                    let mut buffers = [0; 2];
+                    (fns.gen_buffers)(2, buffers.as_mut_ptr());
+                    Readback { fns, buffers, room: [0; 2], copying: None }
+                }),
+            };
+            let mut gl = Context {
+                display,
+                context,
+                fns,
+                request,
+                fbo: 0,
+                buffers: [0; 2],
+                size: (0, 0),
+                pixels: Vec::new(),
+                readback,
+            };
             (gl.fns.gen_framebuffers)(1, &mut gl.fbo);
             (gl.fns.gen_renderbuffers)(2, gl.buffers.as_mut_ptr());
             gl.resize(size)?;
@@ -382,31 +462,76 @@ impl Context {
         Ok(())
     }
 
-    /// Reads back the `w`×`h` frame the core drew, into `rgb` as packed RGB, top row first. A core
-    /// drawing with GL's usual bottom-left origin (`bottom_left`) has it upside down.
-    pub fn read(&mut self, (w, h): (u32, u32), bottom_left: bool, rgb: &mut Vec<u8>) {
-        let (w, h) = (w.min(self.size.0) as usize, h.min(self.size.1) as usize);
-        self.pixels.resize(w * h * 4, 0);
+    /// Reads back the frame the core just drew, if it drew one (`drawn`: its size, and whether
+    /// it's upside down, drawn with GL's usual bottom-left origin), and puts a frame into `rgb`,
+    /// as packed RGB, top row first: the one before this, which the GPU has had a frame to copy,
+    /// or this one, where GL can only wait for it. Gives the size of the frame put there, if any.
+    pub fn read(&mut self, drawn: Option<((u32, u32), bool)>, rgb: &mut Vec<u8>) -> Option<(u32, u32)> {
+        let drawn = drawn
+            .map(|((w, h), bottom_left)| ((w.min(self.size.0) as usize, h.min(self.size.1) as usize), bottom_left));
         let f = &self.fns;
-        // SAFETY: GL calls with the context current; `pixels` holds exactly w×h RGBA pixels, packed
-        // with no padding, which is what the pack settings ask for.
+        // SAFETY: GL calls with the context current. Buffers are given room for the frames copied
+        // into them, and read only while mapped, within the size mapped.
         unsafe {
             // The core may have left these set for its own reads.
             (f.bind_buffer)(GL_PIXEL_PACK_BUFFER, 0);
             (f.pixel_storei)(GL_PACK_ALIGNMENT, 4);
             (f.pixel_storei)(GL_PACK_ROW_LENGTH, 0);
             (f.bind_framebuffer)(GL_FRAMEBUFFER, self.fbo);
-            (f.read_pixels)(0, 0, w as i32, h as i32, GL_RGBA, GL_UNSIGNED_BYTE, self.pixels.as_mut_ptr().cast());
-            // OpenGL ES 2 has no row length to set; the error is left for no one.
-            (f.get_error)();
-        }
-        rgb.clear();
-        rgb.reserve(w * h * 3);
-        for row in 0..h {
-            let y = if bottom_left { h - 1 - row } else { row };
-            for px in self.pixels[y * w * 4..][..w * 4].as_chunks::<4>().0 {
-                rgb.extend_from_slice(&px[..3]);
+            let Some(rb) = &mut self.readback else {
+                let ((w, h), bottom_left) = drawn?;
+                self.pixels.resize(w * h * 4, 0);
+                (f.read_pixels)(0, 0, w as i32, h as i32, GL_RGBA, GL_UNSIGNED_BYTE, self.pixels.as_mut_ptr().cast());
+                // OpenGL ES 2 has no row length to set; the error is left for no one.
+                (f.get_error)();
+                repack(&self.pixels, (w, h), bottom_left, rgb);
+                return Some((w as u32, h as u32));
+            };
+            let a = &rb.fns;
+            let last = rb.copying.take();
+            if let Some(((w, h), bottom_left)) = drawn {
+                let buffer = last.as_ref().map_or(0, |c| 1 - c.buffer);
+                let bytes = w * h * 4;
+                (f.bind_buffer)(GL_PIXEL_PACK_BUFFER, rb.buffers[buffer]);
+                if rb.room[buffer] < bytes {
+                    (a.buffer_data)(GL_PIXEL_PACK_BUFFER, bytes as isize, std::ptr::null(), GL_STREAM_READ);
+                    rb.room[buffer] = bytes;
+                }
+                (f.read_pixels)(0, 0, w as i32, h as i32, GL_RGBA, GL_UNSIGNED_BYTE, std::ptr::null_mut());
+                let fence = (a.fence_sync)(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+                // Sent to the GPU now, so it's copied while the core goes on.
+                (a.flush)();
+                rb.copying = Some(Copying { buffer, size: (w, h), bottom_left, fence });
             }
+            let mut shown = None;
+            if let Some(c) = last {
+                // Done long since, as a rule; this waits at most a second for it.
+                (a.client_wait_sync)(c.fence, GL_SYNC_FLUSH_COMMANDS_BIT, 1_000_000_000);
+                (a.delete_sync)(c.fence);
+                let bytes = c.size.0 * c.size.1 * 4;
+                (f.bind_buffer)(GL_PIXEL_PACK_BUFFER, rb.buffers[c.buffer]);
+                let mapped = (a.map_buffer_range)(GL_PIXEL_PACK_BUFFER, 0, bytes as isize, GL_MAP_READ_BIT);
+                if !mapped.is_null() {
+                    repack(std::slice::from_raw_parts(mapped.cast::<u8>(), bytes), c.size, c.bottom_left, rgb);
+                    shown = Some((c.size.0 as u32, c.size.1 as u32));
+                }
+                (a.unmap_buffer)(GL_PIXEL_PACK_BUFFER);
+            }
+            (f.bind_buffer)(GL_PIXEL_PACK_BUFFER, 0);
+            shown
+        }
+    }
+}
+
+/// `pixels`, a `w`×`h` frame as GL reads it back (RGBA, bottom row first if `bottom_left`), into
+/// `rgb` as packed RGB, top row first.
+fn repack(pixels: &[u8], (w, h): (usize, usize), bottom_left: bool, rgb: &mut Vec<u8>) {
+    rgb.clear();
+    rgb.reserve(w * h * 3);
+    for row in 0..h {
+        let y = if bottom_left { h - 1 - row } else { row };
+        for px in pixels[y * w * 4..][..w * 4].as_chunks::<4>().0 {
+            rgb.extend_from_slice(&px[..3]);
         }
     }
 }
@@ -417,6 +542,12 @@ impl Drop for Context {
         // SAFETY: the objects are this context's; it's made current to delete them, then let go.
         unsafe {
             if self.make_current().is_ok() {
+                if let Some(rb) = &mut self.readback {
+                    if let Some(c) = rb.copying.take() {
+                        (rb.fns.delete_sync)(c.fence);
+                    }
+                    (rb.fns.delete_buffers)(2, rb.buffers.as_ptr());
+                }
                 (self.fns.delete_framebuffers)(1, &self.fbo);
                 (self.fns.delete_renderbuffers)(2, self.buffers.as_ptr());
             }

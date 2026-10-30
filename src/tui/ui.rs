@@ -108,6 +108,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
             cols.push(Constraint::Percentage(34));
         }
         let areas = Layout::horizontal(cols).split(body);
+        app.middle = areas[1];
         draw_systems(f, app, &theme, areas[0]);
         if app.embedded.is_some() {
             draw_embedded(f, app, &theme, areas[1]);

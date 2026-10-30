@@ -52,7 +52,8 @@ const MIN_FOR_GRID: usize = 3;
 const MIN_FOR_MASK: usize = 3;
 
 /// Applies `filter` to a picture `w`×`h` pixels of `bpp` bytes each (RGB or RGBA; opacity is left
-/// alone), scaled nearest neighbour, as `Frame::resample` does, from a frame `fw`×`fh`.
+/// alone), scaled nearest neighbour, as `Frame::resample` does, from a picture `fw`×`fh` on the
+/// console (the frame's own size, or less for a 3D game drawn bigger: see `game_pixels`).
 pub fn apply(pixels: &mut [u8], bpp: usize, (w, h): (usize, usize), (fw, fh): (usize, usize), filter: Filter) {
     if filter == Filter::None || w == 0 || h == 0 || fw == 0 || fh == 0 {
         return;
@@ -111,6 +112,11 @@ fn scanlines(rows: &[(usize, usize)]) -> Vec<u32> {
     }
     rows.iter()
         .map(|&(i, len)| {
+            // A row a single screen pixel tall has no room for a scanline; dimmed as a top, it
+            // stood out as a dark line among the rest.
+            if len < MIN_FOR_SCANLINES {
+                return ONE;
+            }
             let t = i as f64 / len as f64;
             fixed(1.0 - SCANLINE * (1.0 - (std::f64::consts::PI * t).sin()))
         })
@@ -146,6 +152,19 @@ mod tests {
         assert_eq!(runs(6, 2), [(0, 3), (1, 3), (2, 3), (0, 3), (1, 3), (2, 3)]);
         // 7 over 3 game pixels, as `Frame::resample` spreads them: 3, 2, 2.
         assert_eq!(runs(7, 3), [(0, 3), (1, 3), (2, 3), (0, 2), (1, 2), (0, 2), (1, 2)]);
+    }
+
+    #[test]
+    fn rows_one_screen_pixel_tall_get_no_scanline() {
+        // 5 screen rows for 3 game rows: two of two pixels and one of one.
+        let rows = runs(5, 3);
+        let light = scanlines(&rows);
+        for (&(_, len), &l) in rows.iter().zip(&light) {
+            if len == 1 {
+                assert_eq!(l, ONE);
+            }
+        }
+        assert!(light.iter().any(|&l| l < ONE), "the taller rows still get theirs");
     }
 
     #[test]

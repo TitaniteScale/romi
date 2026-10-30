@@ -32,6 +32,8 @@ pub struct Made {
     /// When it was handed over for drawing.
     pub done: Instant,
     pub sound_ahead: Option<Duration>,
+    /// The silence played so far for want of sound (see `audio::Output::dry`).
+    pub sound_dry: Option<Duration>,
 }
 
 /// A frame romi sent the terminal, and when each step of sending it was done.
@@ -105,13 +107,14 @@ impl Recorder {
         let epoch = made.first().map(|m| m.started).or(self.sent.first().map(|s| s.taken)).unwrap_or_else(Instant::now);
         let ms = |t: Instant| t.saturating_duration_since(epoch).as_secs_f64() * 1000.0;
         let mut csv = String::from(
-            "frame,made_ms,run_ms,sound_ahead_ms,taken_ms,prepared_ms,copied_ms,written_ms,read_ms,width,height,bytes\n",
+            "frame,made_ms,run_ms,sound_ahead_ms,sound_dry_ms,taken_ms,prepared_ms,copied_ms,written_ms,read_ms,width,height,bytes\n",
         );
         let sent: HashMap<u64, &Sent> = self.sent.iter().map(|s| (s.frame, s)).collect();
         for (i, m) in made.iter().enumerate() {
             let frame = i as u64 + 1;
             let ahead = m.sound_ahead.map(|d| format!("{}", d.as_millis())).unwrap_or_default();
-            let _ = write!(csv, "{frame},{:.3},{:.3},{ahead}", ms(m.done), m.ran.as_secs_f64() * 1000.0);
+            let dry = m.sound_dry.map(|d| format!("{}", d.as_millis())).unwrap_or_default();
+            let _ = write!(csv, "{frame},{:.3},{:.3},{ahead},{dry}", ms(m.done), m.ran.as_secs_f64() * 1000.0);
             match sent.get(&frame) {
                 Some(s) => {
                     let read = read.get(&frame).map(|&t| format!("{:.3}", ms(t))).unwrap_or_default();
@@ -282,6 +285,12 @@ fn summarize(about: &str, all_made: &[Made], sent: &[Sent], read: &HashMap<u64, 
             ahead.pct(0.0)
         );
     }
+    // Each frame that found more silence played than the last is a gap.
+    let dry: Vec<Duration> = made.iter().filter_map(|m| m.sound_dry).collect();
+    if let Some((first, last)) = dry.first().zip(dry.last()) {
+        let gaps = dry.windows(2).filter(|w| w[1] > w[0]).count();
+        let _ = writeln!(out, "          sound ran dry {gaps} times, {:.0} ms in all", ms(last.saturating_sub(*first)));
+    }
     out.push('\n');
     if sent.is_empty() {
         out.push_str("No frames were sent.\n");
@@ -371,6 +380,7 @@ mod tests {
                 ran: Duration::from_millis(2),
                 done: at(i * 16 + 2),
                 sound_ahead: None,
+                sound_dry: None,
             })
             .collect();
         let path = std::env::temp_dir().join(format!("romi-timing-test-{}.csv", std::process::id()));
@@ -401,8 +411,8 @@ mod tests {
         std::fs::remove_file(summary_path(&path)).unwrap();
         let rows: Vec<&str> = csv.lines().collect();
         assert_eq!(rows.len(), 5);
-        assert!(rows[1].starts_with("1,2.000,2.000,,3.000,8.000,10.000,11.000,,480,320,460800"), "{}", rows[1]);
-        assert_eq!(rows[3], "3,34.000,2.000,,,,,,,,,");
+        assert!(rows[1].starts_with("1,2.000,2.000,,,3.000,8.000,10.000,11.000,,480,320,460800"), "{}", rows[1]);
+        assert_eq!(rows[3], "3,34.000,2.000,,,,,,,,,,");
         assert!(summary.contains("3 frames, 1 never (25.0%)"), "{summary}");
         assert!(summary.contains("scaled and filtered in:   mean 5.00 ms"), "{summary}");
     }

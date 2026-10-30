@@ -315,6 +315,25 @@ is tried in a separate process first). In the order worth trying:
      a pad into all four ports (Flycast plugs in nothing, not even the VMU, until it's heard about
      every port), the sticks and analog triggers, cores' `printf`s kept off the screen, and
      keeping OpenMP loaded (unloading bsnes-hd took it with it, and its threads crashed romi).
+   - ✓ **Sharp 3D** (`"sharp_3d"`): drawn at 640×480 and scaled up to the panel, 3D looked
+     blocky, so cores' resolution options (Flycast's, Mupen's, Beetle PSX HW's) are set to the
+     one closest to the panel's height, at least as tall, up to 960 lines: 1280×960 for a 910 px
+     panel. Scanlines and the phosphor mask stay at the console's 240 lines, as they were on a
+     TV, which also fixed rows one screen pixel tall being dimmed as if they were a scanline's
+     top. Uncapped, a 3800×2280 window (a 4K screen at 2× scale) got Flycast drawing at
+     1920×1440, and Monkey Ball ran at 50 fps with its sound breaking up.
+   - ✓ **Frames read back from the GPU without waiting**: with the game big in Ghostty on a 4K
+     screen, Ghostty and the compositor keep the Radeon 890M 95% busy even for a SNES game, and
+     waiting for the GPU to finish each of Flycast's frames took 11–16 ms, so Monkey Ball fell
+     behind its sound even at 640×480. Frames are now copied into a buffer while the core goes
+     on, and taken a frame later: its frames went from 17 ms to 4, a steady 60 fps. The frame
+     log counts the sound's gaps (`sound ran dry`).
+   - ✓ **Warming up**: Flycast's first frames take 100 ms each (it compiles shaders), which
+     stuttered the game as it came on and ran its sound dry. Cores now run their first frames,
+     muted and unseen, behind the launch animation, until a few in a row come quickly.
+     Monkey Ball still has six dark seconds of slow frames as it loads after the Naomi BIOS:
+     with threaded rendering, Flycast waits 100 ms for a frame the game isn't drawing. RetroArch
+     gets the same.
    - Still to do: Vulkan (Mupen's ParaLLEl-RDP, Flycast's and Beetle's Vulkan renderers, which
      some people pick in RetroArch, and which then won't start); the PlayStation controller type
      from RetroArch's remap files (`input_libretro_device_p1`), since Ape Escape needs a DualShock;
