@@ -208,8 +208,9 @@
   // a system to change that.
   // RetroAchievements: put your username here and your web API key (retroachievements.org →
   // Settings) in ~/.config/romi/retroachievements.key, and the details pane shows each game's
-  // achievements and your progress.
-  // "retroachievements": { "username": "you" },
+  // achievements and your progress. "badges" shows an achievement's badge in the notice when it
+  // unlocks in a game played in romi.
+  // "retroachievements": { "username": "you", "badges": true },
 
   // Where game info comes from besides ES-DE: RetroArch's databases (genre, year, players,
   // descriptions) matched by ROM checksum, plus an optional MAME category list (catver.ini) for

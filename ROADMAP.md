@@ -207,7 +207,11 @@ It's built in steps, and the first one pays off without any of the TUI work:
    run a frame, so memory is laid out after frames, again whenever the core gives a new map, and
    achievements aren't started before the first frame; before that, every GBA achievement that
    reads EWRAM was turned off (found playing Pokémon Emerald).
-   - Still to do: badges in the notices (rcheevos gives their URLs); progress and challenge
+   - ✓ **Badges** in the notices, downloaded when an unlock comes in and cached; the notice
+     waits up to half a second for one. Drawn like the game, a Kitty image behind placeholder
+     cells, square, three rows tall, with the text beside it; long descriptions wrap.
+     `"retroachievements": { "badges": false }` turns them off (in the config only, for now).
+   - Still to do: progress and challenge
      indicators, and leaderboards (rcheevos sends the events, romi ignores them); rich presence
      is sent but not shown; `romi run --live` and headless `romi run` (where a scripted run
      earning an achievement would make a good regression test for ROM hacks); unlocks still

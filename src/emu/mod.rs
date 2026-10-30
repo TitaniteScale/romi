@@ -9,6 +9,7 @@ pub mod embedded;
 pub mod kitty;
 pub mod libretro;
 pub mod live;
+pub mod notice;
 pub mod runner;
 pub mod screen;
 pub mod wireframe;

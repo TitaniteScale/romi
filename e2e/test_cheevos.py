@@ -151,6 +151,40 @@ def test_achievements_unlock_while_a_game_plays_in_romi(start, sandbox, server):
     assert session["g"] == "1234" and len(server.calls("achievementsets")[0]["m"]) == 32
 
 
+# The badge's Kitty image id, as Kitty commands name it ("ach").
+BADGE_IMAGE = b"i=%d," % 0x616368
+
+
+def test_an_unlock_shows_its_badge_which_is_cached(start, sandbox, server):
+    set_up_an_nes_game(sandbox, server)
+    log_in(sandbox)
+    romi = start()
+    romi.keys("o")
+    romi.wait_for("Play in romi")
+    romi.keys("\r")
+    wait_for_unlock(romi, server)
+    assert server.badges == ["/Badge/5501.png"]
+    romi.wait_for(lambda: BADGE_IMAGE in romi.output, timeout=5)
+    # RGBA, so the badge's cells are clear around a square badge.
+    assert b"f=32," in romi.output.split(BADGE_IMAGE, 1)[1][:40]
+    assert (sandbox.home / ".cache/romi/ra/badges/5501.png").exists()
+
+
+def test_badges_can_be_turned_off(start, sandbox, server):
+    set_up_an_nes_game(sandbox, server)
+    config = json.loads(sandbox.config_path.read_text())
+    config["retroachievements"] = {"badges": False}
+    sandbox.write_config(config)
+    log_in(sandbox)
+    romi = start()
+    romi.keys("o")
+    romi.wait_for("Play in romi")
+    romi.keys("\r")
+    wait_for_unlock(romi, server)
+    romi.pump(1)
+    assert server.badges == [] and BADGE_IMAGE not in romi.output
+
+
 def test_memory_a_core_maps_on_its_first_frame_is_found(start, sandbox, server):
     # mGBA gives its memory map only once it has run a frame, after the launch animation, which
     # is when the achievements may have loaded. They were disabled for want of their memory.

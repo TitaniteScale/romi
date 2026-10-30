@@ -3,11 +3,22 @@ load a game's achievements and send unlocks to without an account. Point romi at
 ROMI_RA_HOST. Answers are shaped like the real server's (as rcheevos' own tests have them)."""
 
 import json
+import struct
 import threading
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs
 
 USER, PASSWORD, TOKEN = "Lantern", "hunter2", "T0KEN"
+
+
+def png(width, height, rgb):
+    """A PNG of one colour, made without an image library."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    rows = b"".join(b"\0" + bytes(rgb) * width for _ in range(height))
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
 
 
 class FakeRetroAchievements:
@@ -18,6 +29,8 @@ class FakeRetroAchievements:
         # Hashes that are this game; None means any.
         self.known_hashes = known_hashes
         self.requests = []
+        # Badges asked for, by path.
+        self.badges = []
         self.unlocked = set()
         fake = self
 
@@ -31,6 +44,15 @@ class FakeRetroAchievements:
                 data = json.dumps(answer).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def do_GET(self):
+                fake.badges.append(self.path)
+                data = png(64, 64, (200, 120, 40))
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
@@ -64,7 +86,8 @@ class FakeRetroAchievements:
                 return 200, {"Success": True, "GameId": 0}
             achievements = [
                 {"ID": i, "Title": t, "Description": f"Do {t.lower()}", "Flags": 3, "Points": pts, "MemAddr": cond,
-                 "Author": "Tester", "BadgeName": "00001", "Created": 1700000000, "Modified": 1700000000}
+                 "Author": "Tester", "BadgeName": f"{i}", "BadgeURL": f"{self.url}/Badge/{i}.png",
+                 "BadgeLockedURL": f"{self.url}/Badge/{i}_lock.png", "Created": 1700000000, "Modified": 1700000000}
                 for i, t, pts, cond in self.achievements
             ]
             return 200, {"Success": True, "GameId": self.game_id, "Title": self.title, "ConsoleId": self.console,

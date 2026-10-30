@@ -31,8 +31,10 @@ romi achievements logout
 The web API key can only read, so earning needs your password, once: romi swaps it for the login
 token the server gives, the way RetroArch does, and keeps only the token, in
 `~/.local/state/romi/retroachievements-login.json` (readable only by you). When a game starts, a
-notice over it says how many of its achievements you have; each unlock gets one of its own, and is
-sent to your account as it happens. If the server can't be reached, unlocks wait and go through
+notice over it says how many of its achievements you have; each unlock gets one of its own, with
+the achievement's badge, and is sent to your account as it happens. Badges are kept in
+`~/.cache/romi/ra/badges/` once shown; `"retroachievements": { "badges": false }` leaves them
+out. If the server can't be reached, unlocks wait and go through
 when it's back, as long as the game is still running.
 
 romi uses RetroAchievements' own library, rcheevos, so achievements are checked the same way as in

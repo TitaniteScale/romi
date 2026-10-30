@@ -1525,9 +1525,13 @@ impl App {
         let volume = self.cfg.volume_gain();
         let launch = self.launch_animation(g, &rom);
         let cheevos = self.cheevos_setup(g);
-        let (corners, filter) = (self.cfg.corners(), self.cfg.screen_filter);
+        let look = crate::emu::embedded::Appearance {
+            corners: self.cfg.corners(),
+            filter: self.cfg.screen_filter,
+            badges: self.cfg.retroachievements.badges,
+        };
         let started = crate::emu::runner::load(&self.cfg, &core, &rom)
-            .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume, launch, corners, filter, cheevos));
+            .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume, launch, look, cheevos));
         match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),

@@ -16,6 +16,42 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// `s` broken into lines of at most `width` characters, between words where it can be, and at
+/// most `max_lines` of them, the last ending in "…" if there was more.
+pub fn wrap(s: &str, width: usize, max_lines: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    for word in s.split_whitespace() {
+        let mut word: Vec<char> = word.chars().collect();
+        // A word too long for a line of its own is broken where the line ends.
+        while !word.is_empty() {
+            let used = line.chars().count();
+            let gap = usize::from(used > 0);
+            if used + gap + word.len() <= width {
+                if gap == 1 {
+                    line.push(' ');
+                }
+                line.extend(word.drain(..));
+            } else if used > 0 {
+                lines.push(std::mem::take(&mut line));
+            } else {
+                line.extend(word.drain(..width));
+                lines.push(std::mem::take(&mut line));
+            }
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    if lines.len() > max_lines {
+        let rest = lines.split_off(max_lines.saturating_sub(1)).join(" ");
+        lines.push(truncate(&rest, width));
+        lines.truncate(max_lines);
+    }
+    lines
+}
+
 /// A length of time to the nearest unit worth showing: "45s", "12m", "3h 20m".
 pub fn duration(secs: u64) -> String {
     match secs {
@@ -73,6 +109,15 @@ pub fn date(t: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wrapping_breaks_between_words_and_cuts_what_doesnt_fit() {
+        let s = "Help out Professor Birch with the help of your new little friend";
+        assert_eq!(wrap(s, 30, 3), ["Help out Professor Birch with", "the help of your new little", "friend"]);
+        assert_eq!(wrap(s, 30, 2), ["Help out Professor Birch with", "the help of your new little f…"]);
+        assert_eq!(wrap("Supercalifragilistic", 8, 3), ["Supercal", "ifragili", "stic"]);
+        assert_eq!(wrap("", 10, 2), Vec::<String>::new());
+    }
 
     #[test]
     fn counts_lengths_and_cuts() {

@@ -10,10 +10,11 @@
 //! first frames are the ones seen as the camera lands. The game's image is in place before the
 //! animation's goes, so the handover doesn't show.
 
-use crate::emu::cheevos::{self, Event as CheevoEvent};
+use crate::emu::cheevos;
 use crate::emu::controls::Controls;
 use crate::emu::kitty;
 use crate::emu::libretro::{Core, Frame};
+use crate::emu::notice::{self, Toast};
 use crate::emu::runner::Shared;
 use crate::emu::screen::{self, Filter};
 use crate::emu::wireframe::{self, Beam, Model, Painter, Picture, Plan, Settings, View};
@@ -36,58 +37,22 @@ use std::time::{Duration, Instant};
 pub const IMAGE: u32 = 0x72_6f_6d;
 /// The launch animation's image ("wir").
 const INTRO_IMAGE: u32 = 0x77_69_72;
+/// An achievement's badge, in a notice over the game ("ach").
+pub const BADGE_IMAGE: u32 = 0x61_63_68;
 /// Frames sent but maybe not read yet; older ones still around were never read and are removed.
 const PENDING: usize = 30;
 /// The animation is drawn at 1/this of the panel's pixels, and the terminal scales it up.
 const SHRINK: u32 = 2;
 const INTRO_FPS: f64 = 60.0;
 
-/// A notice over the game: an achievement unlocked, or the game's achievements loaded. The first
-/// line is its heading.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Toast {
-    pub lines: Vec<String>,
-    lasts: Duration,
-    /// When it went up, once it has.
-    shown: Option<Instant>,
-}
-
-impl Toast {
-    fn new(lines: Vec<String>, secs: u64) -> Toast {
-        Toast { lines, lasts: Duration::from_secs(secs), shown: None }
-    }
-
-    /// The notice for an achievement event, if it gets one, or else what to say in the status bar.
-    fn for_event(event: CheevoEvent) -> Result<Toast, Option<String>> {
-        let plural = |n: u32, one: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {one}s") };
-        match event {
-            CheevoEvent::Loaded { title, total: 0, .. } => {
-                Ok(Toast::new(vec![title, "No achievements for this game yet".into()], 4))
-            }
-            CheevoEvent::Loaded { title, unlocked, total, points, points_total } => Ok(Toast::new(
-                vec![
-                    title,
-                    format!(
-                        "{unlocked} of {} unlocked · {points} of {points_total} points",
-                        plural(total, "achievement")
-                    ),
-                ],
-                4,
-            )),
-            CheevoEvent::Unlocked { title, description, points, .. } => Ok(Toast::new(
-                vec![format!("Achievement unlocked · {}", plural(points, "point")), title, description],
-                5,
-            )),
-            CheevoEvent::Mastered { title } => {
-                Ok(Toast::new(vec!["Mastered".into(), title, "Every achievement unlocked".into()], 6))
-            }
-            CheevoEvent::Offline => {
-                Err(Some("Can't reach RetroAchievements; unlocks will be sent when it's back".into()))
-            }
-            CheevoEvent::Online => Err(Some("RetroAchievements is back; unlocks sent".into())),
-            CheevoEvent::Problem(p) => Err(Some(p)),
-        }
-    }
+/// How the game looks in the panel.
+#[derive(Debug, Clone, Copy)]
+pub struct Appearance {
+    /// How round the picture's corners are, as a fraction of its height.
+    pub corners: f64,
+    pub filter: Filter,
+    /// Achievement notices show the achievement's badge.
+    pub badges: bool,
 }
 
 /// What the launch animation needs to know to play.
@@ -142,23 +107,20 @@ pub struct Embedded {
     intro: Option<Intro>,
     /// The animation has ended, but its image is still up until the game's cells are drawn.
     intro_shown: bool,
-    /// How round the picture's corners are, as a fraction of its height.
-    corners: f64,
-    filter: Filter,
+    look: Appearance,
     /// Achievement notices still to show, the one showing first.
     toasts: VecDeque<Toast>,
 }
 
 impl Embedded {
-    /// Starts the game, after the launch animation if there's one, with corners `corners` of its
-    /// height round and `filter` over the picture, and its achievements checked with `cheevos`.
+    /// Starts the game, after the launch animation if there's one, looking as `look` says, and
+    /// its achievements checked with `cheevos`.
     pub fn start(
         game: usize,
         core: Core,
         volume: f32,
         launch: Option<Launch>,
-        corners: f64,
-        filter: Filter,
+        look: Appearance,
         cheevos: Option<cheevos::Setup>,
     ) -> Result<Embedded> {
         // With the animation, the game's cells are placed before it draws, in the shape it says.
@@ -189,8 +151,7 @@ impl Embedded {
             pending: VecDeque::new(),
             intro_shown: intro.is_some(),
             intro,
-            corners,
-            filter,
+            look,
             toasts: VecDeque::new(),
         })
     }
@@ -235,7 +196,7 @@ impl Embedded {
     pub fn cheevo_status(&mut self) -> Option<String> {
         let mut status = None;
         for event in self.shared.take_cheevo_events() {
-            match Toast::for_event(event) {
+            match Toast::for_event(event, self.look.badges) {
                 Ok(toast) => self.toasts.push_back(toast),
                 Err(say) => status = say.or(status),
             }
@@ -243,18 +204,35 @@ impl Embedded {
         status
     }
 
-    /// The notice to show over the game now, if there's one.
-    pub fn toast(&mut self) -> Option<&Toast> {
-        while self.toasts.front().is_some_and(|t| t.shown.is_some_and(|s| s.elapsed() >= t.lasts)) {
-            self.toasts.pop_front();
+    /// The notice to show over the game's `picture` now, if there's one, with its badge sent
+    /// for the cells it goes in.
+    pub fn place_toast(&mut self, picture: Rect) -> Option<notice::Layout> {
+        while self.toasts.front().is_some_and(Toast::over) {
+            if self.toasts.pop_front().is_some_and(|t| t.badge_sent.is_some()) {
+                let _ = write!(std::io::stdout(), "{}", kitty::delete(BADGE_IMAGE));
+            }
         }
-        // Notices wait for the launch animation, so the first one isn't missed.
-        if self.intro.is_some() {
+        // Notices wait for the launch animation, so the first one isn't missed, and for their
+        // badge, a little.
+        if self.intro.is_some() || !self.toasts.front()?.ready() {
             return None;
         }
+        let cell = terminal::window_size().map_or((8, 16), |size| kitty::cell_size(&size));
         let toast = self.toasts.front_mut()?;
-        toast.shown.get_or_insert_with(Instant::now);
-        Some(toast)
+        toast.show();
+        let layout = toast.layout(picture, cell)?;
+        if let Some(cells) = layout.badge
+            && toast.badge_sent != Some(cells)
+            && let Some(badge) = toast.badge()
+        {
+            toast.badge_sent = Some(cells);
+            let size = (u32::from(cells.width) * cell.0, u32::from(cells.height) * cell.1);
+            let pixels = notice::badge_pixels(&badge, size);
+            if let Err(e) = self.send(BADGE_IMAGE, cells, &pixels, size, 32) {
+                crate::emu::cheevos::note(&format!("can't show a badge: {e:#}"));
+            }
+        }
+        Some(layout)
     }
 
     /// Stops the game, which saves it a last time, and says why that save failed if it did.
@@ -356,7 +334,7 @@ impl Embedded {
         ];
         let w = (f64::from(area.width) * cw).round() as usize;
         let h = (f64::from(area.height) * ch).round() as usize;
-        let view = View { corners: self.corners, ..View::new(w, h, target, cw) };
+        let view = View { corners: self.look.corners, ..View::new(w, h, target, cw) };
         let game = intro.game.as_ref().map(|f| Picture { rgb: &f.rgb, w: f.width as usize, h: f.height as usize });
         let pixels = intro.painter.paint(&intro.launch.model, &intro.plan, &view, t, game, intro.launch.beam);
         self.send(INTRO_IMAGE, area, pixels, (view.w as u32, view.h as u32), 32)?;
@@ -368,15 +346,15 @@ impl Embedded {
     fn send_game(&mut self, frame: &Frame) -> Result<()> {
         let Some((rect, (w, h))) = self.cells else { return Ok(()) };
         let sizes = ((w as usize, h as usize), (frame.width as usize, frame.height as usize));
-        if self.corners <= 0.0 {
+        if self.look.corners <= 0.0 {
             let mut pixels = frame.resample(w, h);
-            screen::apply(&mut pixels, 3, sizes.0, sizes.1, self.filter);
+            screen::apply(&mut pixels, 3, sizes.0, sizes.1, self.look.filter);
             return self.send(IMAGE, rect, &pixels, (w, h), 24);
         }
         let mut pixels = frame.resample_rgba(w, h);
-        screen::apply(&mut pixels, 4, sizes.0, sizes.1, self.filter);
+        screen::apply(&mut pixels, 4, sizes.0, sizes.1, self.look.filter);
         let (fw, fh) = (f64::from(w), f64::from(h));
-        wireframe::round_corners(&mut pixels, w as usize, [0.0, 0.0, fw, fh], self.corners * fh);
+        wireframe::round_corners(&mut pixels, w as usize, [0.0, 0.0, fw, fh], self.look.corners * fh);
         self.send(IMAGE, rect, &pixels, (w, h), 32)
     }
 
@@ -410,43 +388,10 @@ impl Drop for Embedded {
             let _ = thread.join();
         }
         let mut out = std::io::stdout();
-        let _ = write!(out, "{}{}", kitty::delete(IMAGE), kitty::delete(INTRO_IMAGE));
+        let _ = write!(out, "{}{}{}", kitty::delete(IMAGE), kitty::delete(INTRO_IMAGE), kitty::delete(BADGE_IMAGE));
         let _ = execute!(out, PopKeyboardEnhancementFlags);
         for name in &self.pending {
             kitty::remove_shm(name);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn achievement_events_become_notices_or_status() {
-        let loaded = CheevoEvent::Loaded {
-            title: "Pocket Lantern".into(),
-            unlocked: 3,
-            total: 25,
-            points: 20,
-            points_total: 310,
-        };
-        assert_eq!(
-            Toast::for_event(loaded).unwrap().lines,
-            ["Pocket Lantern", "3 of 25 achievements unlocked · 20 of 310 points"]
-        );
-        let none = CheevoEvent::Loaded { title: "Demo".into(), unlocked: 0, total: 0, points: 0, points_total: 0 };
-        assert_eq!(Toast::for_event(none).unwrap().lines[1], "No achievements for this game yet");
-        let unlocked = CheevoEvent::Unlocked {
-            title: "First Light".into(),
-            description: "Light the lantern".into(),
-            points: 1,
-            badge_url: None,
-        };
-        assert_eq!(
-            Toast::for_event(unlocked).unwrap().lines,
-            ["Achievement unlocked · 1 point", "First Light", "Light the lantern"]
-        );
-        assert_eq!(Toast::for_event(CheevoEvent::Problem("nope".into())), Err(Some("nope".into())));
     }
 }

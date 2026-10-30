@@ -701,33 +701,37 @@ fn draw_embedded(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let [screen, hint] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
     if let Some((cells, image)) = embedded.place(screen) {
         crate::emu::kitty::placeholders(f.buffer_mut(), cells, image);
-        if let Some(toast) = embedded.toast() {
-            draw_toast(f, theme, cells, &toast.lines);
+        if let Some(layout) = embedded.place_toast(cells) {
+            draw_toast(f, theme, &layout);
         }
     }
     let text = "Esc, or hold Select+Start, to stop";
     f.render_widget(Paragraph::new(Span::styled(text, Style::new().dim())).alignment(Alignment::Center), hint);
 }
 
-/// An achievement notice across the bottom of the game's picture, `lines` its heading and then
-/// what it's about.
-fn draw_toast(f: &mut Frame, theme: &Theme, picture: Rect, lines: &[String]) {
-    let longest = lines.iter().map(|l| l.chars().count()).max().unwrap_or(0) as u16;
-    let width = (longest + 4).min(picture.width);
-    let height = (lines.len() as u16 + 2).min(picture.height);
-    let area =
-        Rect { x: picture.x + (picture.width - width) / 2, y: picture.y + picture.height - height, width, height };
-    let text: Vec<Line> = lines
+/// An achievement notice across the bottom of the game's picture, laid out by `notice`: its
+/// badge, if it has one, in placeholder cells for the badge's image, and its lines beside it.
+fn draw_toast(f: &mut Frame, theme: &Theme, layout: &crate::emu::notice::Layout) {
+    use crate::emu::notice::Weight;
+    f.render_widget(Clear, layout.area);
+    f.render_widget(theme.block("", true), layout.area);
+    if let Some(cells) = layout.badge {
+        crate::emu::kitty::placeholders(f.buffer_mut(), cells, crate::emu::embedded::BADGE_IMAGE);
+    }
+    let lines: Vec<Line> = layout
+        .lines
         .iter()
-        .enumerate()
-        .map(|(i, l)| match i {
-            0 => Line::from(Span::styled(l.clone(), Style::new().fg(theme.accent).bold())),
-            1 => Line::from(Span::styled(l.clone(), Style::new().bold())),
-            _ => Line::raw(l.clone()),
+        .map(|(text, weight)| {
+            let style = match weight {
+                Weight::Heading => Style::new().fg(theme.accent).bold(),
+                Weight::Bold => Style::new().bold(),
+                Weight::Plain => Style::new(),
+            };
+            Line::from(Span::styled(text.clone(), style))
         })
         .collect();
-    f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new(text).alignment(Alignment::Center).block(theme.block("", true)), area);
+    let alignment = if layout.centered { Alignment::Center } else { Alignment::Left };
+    f.render_widget(Paragraph::new(lines).alignment(alignment), layout.text);
 }
 
 fn draw_empty(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {

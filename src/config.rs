@@ -554,11 +554,13 @@ pub struct RetroAchievementsConfig {
     /// A file holding your web API key (retroachievements.org → Settings → Keys), kept out of
     /// this file so the config can be shared. `RA_API_KEY` in the environment overrides it.
     pub key_file: String,
+    /// Show an achievement's badge in the notice when it unlocks in a game played in romi.
+    pub badges: bool,
 }
 
 impl Default for RetroAchievementsConfig {
     fn default() -> Self {
-        Self { username: None, key_file: "~/.config/romi/retroachievements.key".into() }
+        Self { username: None, key_file: "~/.config/romi/retroachievements.key".into(), badges: true }
     }
 }
 

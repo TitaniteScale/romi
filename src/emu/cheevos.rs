@@ -173,7 +173,7 @@ extern "C" fn on_http(
             match request(&agent, &user_agent, &url, post.as_deref(), content_type.as_deref()) {
                 Ok(answer) => break answer,
                 Err(e) => {
-                    log(&format!("request failed: {e:#}"));
+                    note(&format!("request failed: {e:#}"));
                     match tries.next() {
                         Some(wait) => std::thread::sleep(*wait),
                         None => break (RETRYABLE_CLIENT_ERROR, Vec::new()),
@@ -247,7 +247,8 @@ const LOG_VAR: &str = "ROMI_RA_LOG";
 /// How long to wait before trying a request again that never got an answer, each time.
 const RETRY_AFTER: [Duration; 2] = [Duration::from_millis(500), Duration::from_secs(1)];
 
-fn log(message: &str) {
+/// Writes `message` to the `ROMI_RA_LOG` file, when it's set.
+pub fn note(message: &str) {
     use std::io::Write;
     let Ok(path) = std::env::var(LOG_VAR) else { return };
     if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
@@ -257,7 +258,7 @@ fn log(message: &str) {
 
 extern "C" fn on_log(_rust: *mut c_void, message: *const c_char) {
     if let Some(message) = text(message) {
-        log(&message);
+        note(&message);
     }
 }
 
