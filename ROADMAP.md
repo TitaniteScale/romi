@@ -336,7 +336,7 @@ is tried in a separate process first). In the order worth trying:
      gets the same.
    - Still to do: Vulkan (Mupen's ParaLLEl-RDP, Flycast's and Beetle's Vulkan renderers, which
      some people pick in RetroArch, and which then won't start); the PlayStation controller type
-     from RetroArch's remap files (`input_libretro_device_p1`), since Ape Escape needs a DualShock;
+     from RetroArch's remap files, since Ape Escape needs a DualShock (see 8);
      a core that changes its frame rate with `SET_SYSTEM_AV_INFO` keeps the old one for pacing;
      Dolphin and PPSSPP aren't installed here, so they're untried; Naomi needs `naomi.zip`.
 2. ✓ **Core options** (`GET_VARIABLE`, which romi answers with "no" now, so every core runs on its
@@ -353,6 +353,28 @@ is tried in a separate process first). In the order worth trying:
    backend and can stream its output over PipeWire, so romi may only need to read that stream; not
    tried yet. The emulator keeps its own sound, controller, saves and achievements, so romi is just
    the window. Costs more latency and has many moving parts.
+
+## 8. Controls for games played in romi
+
+Every game played in romi gets the same fixed layout (`emu/controls.rs`): the pad's buttons by
+position, SNES-style, and RetroArch's default keys. Every controller is merged into player 1, and
+the core sees nothing on the other ports. Emulators that run on their own keep their own controls,
+and as more systems play in romi, this is where their controls end up.
+
+1. **RetroArch's remap files**, read the way core options are: from `input_remapping_directory`
+   (`config/remaps` by default), in the core's folder, the game's `.rmp`, else its folder's, else
+   the core's, the first one found winning, as in RetroArch. Skipped when
+   `input_remap_binds_enable` is off. The `input_playerN_btn_*` lines say which button each of the
+   pad's buttons sends, and `input_libretro_device_pN` the controller type, which Ape Escape needs
+   to be a DualShock. That way, remaps made in RetroArch carry over. There are none on this machine
+   yet, so the tests need one made up.
+2. **Remapping in the TUI**, for a system or a single game, using the controller or the keyboard:
+   "press the button for A", one button at a time, with what the button does in the game next to
+   it ("B — Jump"). Cores say that as they start (`SET_INPUT_DESCRIPTORS`), so romi would remember it
+   from the last time the game was played. A single game's remap is saved in `overrides.jsonc`, and
+   it wins over the system's, which wins over a RetroArch remap file, which wins over the default.
+3. **More than one player**: each controller on a port of its own, in the order they connected,
+   with a screen to swap them. The remap screen is the natural place for it.
 
 ## Filling the gaps, any time
 
