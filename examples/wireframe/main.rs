@@ -14,7 +14,7 @@
 //! the same seed. Keys: any key skips ahead, r replays, n tries a new seed, q or Esc quits.
 //!
 //! The game's extension picks the model, as its system does in romi: the Game Boy, the NES or the
-//! SNES with a TV, or the TV on its own.
+//! SNES with a TV, an arcade cabinet for a .zip, or the TV on its own.
 //! `--model` reads another, such as one made from a downloaded model by the wireframe-import
 //! example.
 
@@ -136,6 +136,7 @@ fn built_in(game: &str) -> &'static str {
         "gb" | "gbc" => "gb",
         "nes" | "fds" => "nes",
         "sfc" | "smc" => "snes",
+        "zip" => "arcade",
         _ => "",
     };
     wireframe::for_system(system)

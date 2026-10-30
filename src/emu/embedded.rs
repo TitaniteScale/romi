@@ -92,11 +92,14 @@ pub struct Embedded {
     intro: Option<Intro>,
     /// The animation has ended, but its image is still up until the game's cells are drawn.
     intro_shown: bool,
+    /// How round the picture's corners are, as a fraction of its height.
+    corners: f64,
 }
 
 impl Embedded {
-    /// Starts the game, after the launch animation if there's one.
-    pub fn start(game: usize, core: Core, volume: f32, launch: Option<Launch>) -> Result<Embedded> {
+    /// Starts the game, after the launch animation if there's one, with corners `corners` of its
+    /// height round.
+    pub fn start(game: usize, core: Core, volume: f32, launch: Option<Launch>, corners: f64) -> Result<Embedded> {
         // With the animation, the game's cells are placed before it draws, in the shape it says.
         let shape = if launch.is_some() { core.display_size() } else { (0.0, 0.0) };
         let (shared, thread) = Shared::start(core, volume, launch.is_some())?;
@@ -125,6 +128,7 @@ impl Embedded {
             pending: VecDeque::new(),
             intro_shown: intro.is_some(),
             intro,
+            corners,
         })
     }
 
@@ -248,18 +252,24 @@ impl Embedded {
         ];
         let w = (f64::from(area.width) * cw).round() as usize;
         let h = (f64::from(area.height) * ch).round() as usize;
-        let view = View::new(w, h, target, cw);
+        let view = View { corners: self.corners, ..View::new(w, h, target, cw) };
         let game = intro.game.as_ref().map(|f| Picture { rgb: &f.rgb, w: f.width as usize, h: f.height as usize });
         let pixels = intro.painter.paint(&intro.launch.model, &intro.plan, &view, t, game, intro.launch.beam);
         self.send(INTRO_IMAGE, area, pixels, (view.w as u32, view.h as u32), 32)?;
         Ok(true)
     }
 
-    /// Sends a game frame scaled to the game's cells.
+    /// Sends a game frame scaled to the game's cells, its corners rounded if they're to be: clear,
+    /// so the terminal's background shows there.
     fn send_game(&mut self, frame: &Frame) -> Result<()> {
         let Some((rect, (w, h))) = self.cells else { return Ok(()) };
-        let pixels = frame.resample(w, h);
-        self.send(IMAGE, rect, &pixels, (w, h), 24)
+        if self.corners <= 0.0 {
+            return self.send(IMAGE, rect, &frame.resample(w, h), (w, h), 24);
+        }
+        let mut pixels = frame.resample_rgba(w, h);
+        let (fw, fh) = (f64::from(w), f64::from(h));
+        wireframe::round_corners(&mut pixels, w as usize, [0.0, 0.0, fw, fh], self.corners * fh);
+        self.send(IMAGE, rect, &pixels, (w, h), 32)
     }
 
     /// Replaces image `id`, `w`×`h` pixels of RGB (24) or RGBA (32), stretched over `rect`.

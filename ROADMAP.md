@@ -212,11 +212,18 @@ It's built in steps, and the first one pays off without any of the TUI work:
      behind the glass fade as the game comes on. `examples/wireframe/models/build.sh` makes every
      wireframe again; the importer's `--pieces` and `--drop` left out the SNES's controller and
      the NES's grip ridges.
-   - Still to do: a PC and an arcade cabinet; the DS (two screens); rounded glass, to match
-     rounded corners in live play. Lines behind a part show through it, which
-     gets busy on the Game Boy; hiding them would need the faces as well as the lines. The importer can't read
-     Draco-compressed or quantized glTF, and draws no outline along the sides of smooth round
-     parts like knobs, only their ends.
+   - ✓ **Arcade cabinet**: `arcade.json`, from J-Toastie's model, for arcade boards and the Neo
+     Geo (`arcade`, `mame`, `fbneo`, `neogeo`, `cps1` to `cps3`).
+   - ✓ **Rounded corners**: `"corner_radius"` rounds the corners of a game in the middle panel,
+     as a percentage of its height (0, square, by default). romi already scales each frame to its
+     cells' pixels, so the corners are cut there, smoothly, and left clear for the terminal's
+     background. The animation's last frame has the same corners, so the handover doesn't show.
+   - Still to do: a PC; the DS (two screens); the picture's corners while the camera dives in
+     (square until it lands); rounded corners in `romi run --live`, where the terminal does the
+     scaling. Lines behind a part show through it, which gets busy on the Game Boy; hiding them
+     would need the faces as well as the lines. The importer can't read Draco-compressed or
+     quantized glTF, and draws no outline along the sides of smooth round parts like knobs, only
+     their ends.
    - ✓ **In romi**: Game Boy and Game Boy Color games played in the middle panel start with it,
      across the whole panel. The core waits until the game starts fading in on the glass, so its
      first frames are the ones the camera lands on, and the animation's image goes only once the

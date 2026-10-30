@@ -129,6 +129,16 @@ impl Frame {
         (f64::from(self.width) * par, f64::from(self.height))
     }
 
+    /// The same as `resample`, with a fourth byte a pixel for opacity, all opaque.
+    pub fn resample_rgba(&self, w: u32, h: u32) -> Vec<u8> {
+        let rgb = self.resample(w, h);
+        let mut out = Vec::with_capacity(rgb.len() / 3 * 4);
+        for &[r, g, b] in rgb.as_chunks::<3>().0 {
+            out.extend_from_slice(&[r, g, b, 255]);
+        }
+        out
+    }
+
     /// The frame scaled to exactly `w`×`h`, nearest neighbour, so pixels stay sharp.
     pub fn resample(&self, w: u32, h: u32) -> Vec<u8> {
         let (fw, fh) = (self.width as usize, self.height as usize);

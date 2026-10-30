@@ -1416,7 +1416,7 @@ impl App {
         let volume = self.cfg.volume_gain();
         let launch = self.launch_animation(g, &rom);
         let started = crate::emu::runner::load(&self.cfg, &core, &rom)
-            .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume, launch));
+            .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume, launch, self.cfg.corners()));
         match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),

@@ -30,6 +30,8 @@ import pyte
 
 REPO = Path(__file__).resolve().parent.parent
 ALT_SCREEN = re.compile(rb"(\x1b\[\?1049[hl])")
+# Kitty graphics commands, which pyte would otherwise print as text.
+GRAPHICS = re.compile(rb"\x1b_G[^\x1b]*\x1b\\")
 
 ROMS = {
     "gba": ["Advance Wars (USA).gba", "Metroid Fusion (USA).gba"],
@@ -172,6 +174,8 @@ class Romi:
         self.stream = pyte.ByteStream(self.screen)
         # Everything romi wrote, for what pyte doesn't show, like Kitty graphics.
         self.output = bytearray()
+        # The start of a graphics command, until the rest of it comes.
+        self.partial = b""
         env = sandbox.env if sandbox else dict(os.environ)
         env["TERM"] = "xterm-256color"
         argv = [binary(), *args]
@@ -207,6 +211,9 @@ class Romi:
                     os.write(self.fd, b"\x1b[0n")
             # pyte has no alternate screen. Switching either way starts from a blank one, which is
             # what a real terminal shows here, since nothing ran in the main screen before romi.
+            data = GRAPHICS.sub(b"", self.partial + data)
+            start = data.rfind(b"\x1b_G")
+            self.partial, data = (data[start:], data[:start]) if start >= 0 else (b"", data)
             for i, part in enumerate(ALT_SCREEN.split(data)):
                 if i % 2:
                     self.screen.reset()

@@ -65,9 +65,13 @@
   // How loud games played inside romi ("Play in romi", `romi run --live`) are: 0 (silent) to 100.
   "volume": 100,
 
-  // A wireframe of the system (a Game Boy, an NES or SNES with a TV, or a TV) that builds itself
-  // before a game played inside romi starts. "colors" lists the colors it picks from, like
-  // ["#9fe3ff", "#ffb547"]; empty uses the terminal's own palette.
+  // How round the corners of a game played in romi's middle panel are, as a percentage of its
+  // height: 0 is square, as the game drew it, and about 4 is an old TV's.
+  "corner_radius": 0,
+
+  // A wireframe of the system (a Game Boy, an NES or SNES with a TV, an arcade cabinet, or a TV)
+  // that builds itself before a game played inside romi starts. "colors" lists the colors it picks
+  // from, like ["#9fe3ff", "#ffb547"]; empty uses the terminal's own palette.
   "launch_animation": { "enabled": true, "colors": [] },
 
   "systems": [

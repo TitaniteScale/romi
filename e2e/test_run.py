@@ -111,7 +111,7 @@ INTRO_IMAGE = b"i=%d," % 0x776972
 GAME_IMAGE = b"i=%d," % 0x726F6D
 
 
-def play_a_game_boy_game(start, sandbox, launch_animation=None):
+def play_a_game_boy_game(start, sandbox, **settings):
     source = sandbox.home / "blank.c"
     source.write_text(DRAWING_CORE)
     core = sandbox.home / "blank_libretro.so"
@@ -121,8 +121,7 @@ def play_a_game_boy_game(start, sandbox, launch_animation=None):
     config = json.loads(json.dumps(CONFIG))
     config["volume"] = 0
     config["systems"] = [{"id": "gb", "name": "Game Boy", "extensions": ["gb"], "command": f"true -L {core} {{rom}}"}]
-    if launch_animation is not None:
-        config["launch_animation"] = launch_animation
+    config.update(settings)
     sandbox.write_config(config)
 
     romi = start()
@@ -144,7 +143,14 @@ def test_a_game_boy_game_starts_with_its_wireframe(start, sandbox):
 
 
 def test_the_launch_animation_can_be_turned_off(start, sandbox):
-    out = play_a_game_boy_game(start, sandbox, {"enabled": False})
+    out = play_a_game_boy_game(start, sandbox, launch_animation={"enabled": False})
     assert INTRO_IMAGE not in out
-    assert GAME_IMAGE in out
+    # Square corners, so plain RGB.
+    assert b"f=24," in out.split(GAME_IMAGE, 1)[1][:100]
+
+
+def test_round_corners_clear_the_corners_of_the_picture(start, sandbox):
+    # The game's frames are RGBA, so the corners can be clear.
+    out = play_a_game_boy_game(start, sandbox, launch_animation={"enabled": False}, corner_radius=4)
+    assert b"f=32," in out.split(GAME_IMAGE, 1)[1][:100]
 

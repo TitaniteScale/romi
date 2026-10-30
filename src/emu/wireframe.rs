@@ -44,6 +44,7 @@ pub fn for_system(system: &str) -> &'static str {
         "gb" | "gbc" => include_str!("wireframes/gameboy.json"),
         "nes" | "famicom" | "fds" => include_str!("wireframes/nes.json"),
         "snes" | "snesna" | "sfc" | "satellaview" | "sufami" => include_str!("wireframes/snes.json"),
+        "arcade" | "mame" | "fbneo" | "neogeo" | "cps1" | "cps2" | "cps3" => include_str!("wireframes/arcade.json"),
         _ => include_str!("wireframes/tv.json"),
     }
 }
@@ -82,12 +83,15 @@ pub struct View {
     pub target: [f64; 4],
     /// Its pixels per pixel of the browser prototype, which assumes 8×16 cells.
     pub unit: f64,
+    /// How round the game's corners are once it has landed, as a fraction of its height, to match
+    /// how it's shown afterwards.
+    pub corners: f64,
 }
 
 impl View {
     /// A `w`×`h` picture whose cells are `cell_w` of its pixels wide.
     pub fn new(w: usize, h: usize, target: [f64; 4], cell_w: f64) -> View {
-        View { w: w.max(1), h: h.max(1), target, unit: cell_w / 8.0 }
+        View { w: w.max(1), h: h.max(1), target, unit: cell_w / 8.0, corners: 0.0 }
     }
 }
 
@@ -569,6 +573,7 @@ impl Painter {
         if let Some(picture) = game.filter(|p| shown > 0.0 && p.w > 0 && p.h > 0 && p.rgb.len() >= p.w * p.h * 3) {
             if t >= plan.zoom_end {
                 blit_rect(&mut self.rgba, w, h, picture, view.target);
+                round_corners(&mut self.rgba, w, view.target, view.corners * view.target[3]);
             } else if let [Some(a), Some(b), Some(c), Some(d)] = model.picture.map(|p| cam.project(p)) {
                 blit_quad(&mut self.rgba, w, h, picture, [a, b, c, d], shown as f32);
             }
@@ -930,6 +935,39 @@ fn invert(m: [f64; 9]) -> Option<[f64; 9]> {
     ])
 }
 
+/// Rounds the corners of the rectangle `[x, y, w, h]` in an RGBA picture `width` pixels wide to
+/// radius `r` (all in pixels), smoothly: a pixel on the edge keeps as much of its opacity as the
+/// rounded rectangle covers of it, and one outside it is clear.
+pub fn round_corners(rgba: &mut [u8], width: usize, [x, y, w, h]: [f64; 4], r: f64) {
+    let r = r.min(w / 2.0).min(h / 2.0);
+    if r <= 0.0 || width == 0 {
+        return;
+    }
+    let height = rgba.len() / 4 / width;
+    let pixels =
+        |from: f64, to: f64, size: usize| (from.floor().max(0.0) as usize)..(to.ceil().max(0.0) as usize).min(size);
+    // Each corner: its circle's middle, and which way is out.
+    for (cx, cy, sx, sy) in [
+        (x + r, y + r, -1.0, -1.0),
+        (x + w - r, y + r, 1.0, -1.0),
+        (x + w - r, y + h - r, 1.0, 1.0),
+        (x + r, y + h - r, -1.0, 1.0),
+    ] {
+        let xs = if sx < 0.0 { pixels(x, cx, width) } else { pixels(cx, x + w, width) };
+        for py in if sy < 0.0 { pixels(y, cy, height) } else { pixels(cy, y + h, height) } {
+            for px in xs.clone() {
+                let (dx, dy) = (px as f64 + 0.5 - cx, py as f64 + 0.5 - cy);
+                if dx * sx <= 0.0 || dy * sy <= 0.0 {
+                    continue;
+                }
+                let inside = (r - dx.hypot(dy) + 0.5).clamp(0.0, 1.0);
+                let a = &mut rgba[(py * width + px) * 4 + 3];
+                *a = (f64::from(*a) * inside).round() as u8;
+            }
+        }
+    }
+}
+
 /// Puts color `c` (0 to 255 a channel) at opacity `a` over an RGBA pixel. Kitty takes straight
 /// alpha, so the color isn't scaled by its opacity.
 pub fn over(px: &mut [u8], c: [f32; 3], a: f32) {
@@ -1146,8 +1184,24 @@ mod tests {
     }
 
     #[test]
+    fn rounded_corners_clear_the_corners_and_keep_the_edges() {
+        let (w, h) = (40, 30);
+        let mut rgba = vec![255; w * h * 4];
+        round_corners(&mut rgba, w, [0.0, 0.0, w as f64, h as f64], 10.0);
+        let alpha = |x: usize, y: usize| rgba[(y * w + x) * 4 + 3];
+        for (x, y) in [(0, 0), (w - 1, 0), (w - 1, h - 1), (0, h - 1)] {
+            assert_eq!(alpha(x, y), 0, "corner ({x}, {y})");
+        }
+        // The middle of each edge, and the middle, stay.
+        assert_eq!([alpha(w / 2, 0), alpha(0, h / 2), alpha(w / 2, h - 1), alpha(w / 2, h / 2)], [255; 4]);
+        // Along the curve, partly.
+        assert!((1..255).contains(&alpha(2, 3)), "{}", alpha(2, 3));
+        assert_eq!(rgba.iter().step_by(4).filter(|&&c| c != 255).count(), 0, "colors are left alone");
+    }
+
+    #[test]
     fn every_system_has_a_wireframe() {
-        for system in ["gb", "nes", "snes", "gba", "arcade"] {
+        for system in ["gb", "nes", "snes", "arcade", "gba"] {
             Model::load(for_system(system)).unwrap();
         }
     }

@@ -21,4 +21,4 @@ edges, scales them to real size, turns them, and adds the rectangle the game is 
 | [SNES](https://poly.pizza/m/7yVvvpp-ftQ)                       | [Gabriel Valdivia](https://poly.pizza/u/Gabriel%20Valdivia) | `src/emu/wireframes/snes.json`    |
 | [old tv](https://poly.pizza/m/9y-mTmCyefL)                     | [Justin Randall](https://poly.pizza/u/Justin%20Randall)     | all but `gameboy.json`            |
 | [Handheld videogame console](https://poly.pizza/m/5kxD7n4F3lv) | [Poly by Google](https://poly.pizza/u/Poly%20by%20Google)   | not made yet                      |
-| [Arcade Machine](https://poly.pizza/m/GLDkMhiynM)              | [J-Toastie](https://poly.pizza/u/J-Toastie)                 | not made yet                      |
+| [Arcade Machine](https://poly.pizza/m/GLDkMhiynM)              | [J-Toastie](https://poly.pizza/u/J-Toastie)                 | `src/emu/wireframes/arcade.json`  |

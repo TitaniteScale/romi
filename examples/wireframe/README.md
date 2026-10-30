@@ -19,7 +19,8 @@ cargo run --release --example wireframe
 
 The game's file name seeds the animation, so a game always builds the same way. Its extension picks
 the model: Game Boy games (`.gb`, `.gbc`) get the Game Boy, NES games (`.nes`) the NES and TV, SNES
-games (`.sfc`, `.smc`) the SNES and TV, and everything else the TV.
+games (`.sfc`, `.smc`) the SNES and TV, arcade games (`.zip`) the cabinet, and everything else the
+TV.
 
 ```sh
 cargo run --release --example wireframe -- "Some Game (USA).nes"
@@ -115,7 +116,7 @@ cargo run --release --example wireframe -- --model tv.json
 ## The models
 
 romi's models are in `src/emu/wireframes/`: `gameboy.json`, `nes.json` and `snes.json` (each
-console with the TV), and `tv.json` for every other system. `wireframe-import` made them from the
+console with the TV), `arcade.json`, and `tv.json` for every other system. `wireframe-import` made them from the
 downloaded originals in `models/` here. They're other people's work under CC BY 3.0, so each one is
 credited in [CREDITS.md](../../CREDITS.md), and a new one needs a line there too.
 

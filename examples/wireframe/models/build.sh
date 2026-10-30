@@ -13,6 +13,7 @@ trap 'rm -rf "$parts"' EXIT
 tv_credit='"old tv" by Justin Randall (https://poly.pizza/m/9y-mTmCyefL)'
 nes_credit='"NES" by Jason Toff (https://poly.pizza/m/bEUJNyZrdlp)'
 snes_credit='"SNES" by Gabriel Valdivia (https://poly.pizza/m/7yVvvpp-ftQ)'
+arcade_credit='"Arcade Machine" by J-Toastie (https://poly.pizza/m/GLDkMhiynM)'
 license='CC BY 3.0, made into a wireframe'
 
 # A 25" set on legs, facing -z in the file. Its knobs, buttons and logo are packed so tight that their
@@ -22,6 +23,10 @@ tv="--front -z --width 64 --min-part 2.5"
 # The Game Boy stands facing +x. Its picture is 10:9.
 $import "$models/gameboy/model.obj" --front x --height 14.8 --aspect 10:9 --system gb \
   --credit "\"Gameboy\" by Jason Toff (https://poly.pizza/m/dczUnD4aslM), $license" -o "$out/gameboy.json"
+
+# An upright cabinet facing +x, for arcade boards. The glass is the opening in its bezel.
+$import "$models/arcade-machine/ArcadeMachine.obj" --front x --height 178 --system arcade \
+  --credit "$arcade_credit, $license" -o "$out/arcade.json"
 
 # The TV on its own, for every system without a console of its own.
 $import "$models/old-tv/model.obj" $tv --system tv --credit "$tv_credit, $license" -o "$out/tv.json"

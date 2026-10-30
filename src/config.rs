@@ -36,6 +36,9 @@ pub struct Config {
     pub controller: ControllerConfig,
     /// How loud games played inside romi are, from 0 (silent) to 100.
     pub volume: u8,
+    /// How round the corners of a game played in the middle panel are, as a percentage of its
+    /// height: 0 is square, about 4 is an old TV's.
+    pub corner_radius: u8,
     pub systems: Vec<SystemConfig>,
     pub games: Vec<GameConfig>,
     /// Tweaks to any game (ROM, hand-added or Steam) by its key, as `romi list` shows it.
@@ -147,6 +150,11 @@ impl Config {
         f32::from(self.volume.min(100)) / 100.0
     }
 
+    /// `corner_radius` as a fraction of the picture's height, at most half of it.
+    pub fn corners(&self) -> f64 {
+        f64::from(self.corner_radius.min(50)) / 100.0
+    }
+
     /// The first system that lists `ext` among its file extensions.
     pub fn system_for_extension(&self, ext: &str) -> Option<&SystemConfig> {
         self.systems.iter().find(|s| s.extensions.iter().any(|e| e.eq_ignore_ascii_case(ext)))
@@ -198,6 +206,7 @@ impl Default for Config {
             theme: Theme::default(),
             controller: ControllerConfig::default(),
             volume: 100,
+            corner_radius: 0,
             systems: Vec::new(),
             games: Vec::new(),
             overrides: HashMap::new(),
