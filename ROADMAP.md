@@ -205,8 +205,15 @@ It's built in steps, and the first one pays off without any of the TUI work:
      out from the background are skipped, and light backgrounds get lines that don't burn white.
      `--colors` gives a list instead. A frame takes about 8 ms to draw, 1 ms more than the solid
      version.
-   - Still to do: wireframes from the other models (a TV with the NES or SNES beside it); rounded
-     glass, to match rounded corners in live play. Lines behind a part show through it, which
+   - ✓ **A TV for the rest**: `nes.json` and `snes.json` are the old TV with the console on the
+     floor in front, and `tv.json` the TV on its own, for every system without a console of its
+     own yet. A game that isn't the glass's shape (GBA's 3:2, an upright arcade game) sits in the
+     middle of it, from the size the core gives when it loads, and the camera lands on that. Lines
+     behind the glass fade as the game comes on. `examples/wireframe/models/build.sh` makes every
+     wireframe again; the importer's `--pieces` and `--drop` left out the SNES's controller and
+     the NES's grip ridges.
+   - Still to do: a PC and an arcade cabinet; the DS (two screens); rounded glass, to match
+     rounded corners in live play. Lines behind a part show through it, which
      gets busy on the Game Boy; hiding them would need the faces as well as the lines. The importer can't read
      Draco-compressed or quantized glTF, and draws no outline along the sides of smooth round
      parts like knobs, only their ends.
@@ -216,8 +223,7 @@ It's built in steps, and the first one pays off without any of the TUI work:
      game's is in the same place. Any key or button skips it; `"launch_animation"` turns it off or
      lists colors. The code is `src/emu/wireframe.rs`, which the prototype includes. About 52 fps
      in a pseudo-terminal sized like 2560×1440.
-   - Still to do: `romi run --live`; a model per system; hide lines behind the glass once the game
-     shows on it, since the TV's back shows through for a moment. mGBA draws Game Boy games that
+   - Still to do: `romi run --live`. mGBA draws Game Boy games that
      support the Super Game Boy with its border (8:7), a little wider than the Game Boy's glass
      (10:9), so the picture widens a few pixels as the camera lands. It has only been run in a
      pseudo-terminal so far, with its frames read back from shared memory, so it still needs

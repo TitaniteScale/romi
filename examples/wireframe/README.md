@@ -1,11 +1,11 @@
 # Wireframe launch animation
 
 romi's launch animation, played on its own over the whole terminal, for trying its options. A
-console builds itself out of lines (an NES and a TV, or a Game Boy), then the camera dives into its
+console builds itself out of lines (a Game Boy, or a TV with or without a console), then the camera dives into its
 screen and lands on the cells where live play draws the game. A test picture stands in for the game.
 
 The animation itself is in `src/emu/wireframe.rs`, which this includes. romi plays it in the middle
-panel before Game Boy games (see [Play in romi](../../docs/tui.md#play-in-romi)).
+panel before a game starts (see [Play in romi](../../docs/tui.md#play-in-romi)).
 
 It needs a terminal that takes Kitty graphics through shared memory, such as Ghostty or kitty.
 
@@ -18,7 +18,8 @@ cargo run --release --example wireframe
 ```
 
 The game's file name seeds the animation, so a game always builds the same way. Its extension picks
-the model: Game Boy games (`.gb`, `.gbc`) get the Game Boy, and everything else the NES and TV.
+the model: Game Boy games (`.gb`, `.gbc`) get the Game Boy, NES games (`.nes`) the NES and TV, SNES
+games (`.sfc`, `.smc`) the SNES and TV, and everything else the TV.
 
 ```sh
 cargo run --release --example wireframe -- "Some Game (USA).nes"
@@ -113,18 +114,16 @@ cargo run --release --example wireframe -- --model tv.json
 
 ## The models
 
-romi's models are in `src/emu/wireframes/`. `nes.json` was drawn by hand, and only this prototype
-uses it. `gameboy.json` was made by `wireframe-import` from a model in `models/` here, which holds
-the downloaded originals. They're other people's work under CC BY 3.0, so
-each one is credited in [CREDITS.md](../../CREDITS.md), and a new one needs a line there too.
+romi's models are in `src/emu/wireframes/`: `gameboy.json`, `nes.json` and `snes.json` (each
+console with the TV), and `tv.json` for every other system. `wireframe-import` made them from the
+downloaded originals in `models/` here. They're other people's work under CC BY 3.0, so each one is
+credited in [CREDITS.md](../../CREDITS.md), and a new one needs a line there too.
 
-To make `gameboy.json` again:
+`models/build.sh` makes them all again, and says how each was made: which way it faces, how big it
+is, and which pieces were left out. Run it from the repository's root:
 
 ```sh
-cargo run --release --example wireframe-import -- examples/wireframe/models/gameboy/model.obj \
-  --front x --height 14.8 --aspect 10:9 --system gb \
-  --credit '"Gameboy" by Jason Toff (https://poly.pizza/m/dczUnD4aslM), CC BY 3.0, made into a wireframe' \
-  -o src/emu/wireframes/gameboy.json
+examples/wireframe/models/build.sh
 ```
 
 ## Make a model from a downloaded one

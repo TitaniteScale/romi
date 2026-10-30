@@ -13,7 +13,8 @@
 //! The seed comes from the game's file name, and gives the same build as the browser prototype for
 //! the same seed. Keys: any key skips ahead, r replays, n tries a new seed, q or Esc quits.
 //!
-//! Game Boy games get the Game Boy, as in romi, and everything else the hand-drawn NES and TV.
+//! The game's extension picks the model, as its system does in romi: the Game Boy, the NES or the
+//! SNES with a TV, or the TV on its own.
 //! `--model` reads another, such as one made from a downloaded model by the wireframe-import
 //! example.
 
@@ -104,10 +105,12 @@ impl Args {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let model = match &args.model {
+    let mut model = match &args.model {
         Some(path) => Model::load(&fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?)?,
         None => Model::load(built_in(&args.game))?,
     };
+    // The stand-in game is drawn in the shape the model's glass is made for, as live play would.
+    model.fit(model.aspect);
     let listed = match args.colors.as_str() {
         "terminal" => None,
         list => Some(wireframe::parse_colors(list.split(','))?),
@@ -126,10 +129,16 @@ fn main() -> Result<()> {
     }
 }
 
-/// The model for a game, by its file's extension: romi's for its system, or the NES and TV.
+/// The model for a game, by its file's extension: romi's for its system, or the TV.
 fn built_in(game: &str) -> &'static str {
     let ext = std::path::Path::new(game).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
-    wireframe::for_system(&ext).unwrap_or(include_str!("../../src/emu/wireframes/nes.json"))
+    let system = match ext.as_str() {
+        "gb" | "gbc" => "gb",
+        "nes" | "fds" => "nes",
+        "sfc" | "smc" => "snes",
+        _ => "",
+    };
+    wireframe::for_system(system)
 }
 
 enum Next {

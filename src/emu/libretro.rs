@@ -461,6 +461,15 @@ impl Core {
     }
 
     /// The last frame the core drew.
+    /// The size the core says its picture is meant to be seen at, before it has drawn any: its
+    /// base size turned upright, in square pixels as tall as it is. Frames can still differ.
+    pub fn display_size(&self) -> (f64, f64) {
+        let s = shared();
+        let (w, h, _) = s.geometry;
+        let (w, h) = if s.rotation % 2 == 1 { (h, w) } else { (w, h) };
+        (f64::from(w) * pixel_aspect(s.geometry, s.rotation), f64::from(h))
+    }
+
     pub fn frame(&self) -> Frame {
         shared().frame.clone()
     }

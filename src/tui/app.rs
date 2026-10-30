@@ -1423,14 +1423,14 @@ impl App {
         }
     }
 
-    /// The launch animation for a game played here, if it's on and the game's system has a
-    /// wireframe. The ROM's file name seeds it, so a game always starts the same way.
+    /// The launch animation for a game played here, if it's on: its system's console, or a TV.
+    /// The ROM's file name seeds it, so a game always starts the same way.
     fn launch_animation(&self, g: usize, rom: &Path) -> Option<crate::emu::embedded::Launch> {
         use crate::emu::wireframe;
         if !self.cfg.launch_animation.enabled {
             return None;
         }
-        let model = wireframe::Model::load(wireframe::for_system(&self.lib.system_of(g).id)?).ok()?;
+        let model = wireframe::Model::load(wireframe::for_system(&self.lib.system_of(g).id)).ok()?;
         let seed = wireframe::fnv1a(&rom.file_name()?.to_string_lossy());
         Some(crate::emu::embedded::Launch { model, seed, beam: self.look.beam(seed) })
     }

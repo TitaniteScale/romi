@@ -24,6 +24,8 @@ use std::time::{Duration, Instant};
 
 /// Nothing closer to the camera than this (in cm) is drawn.
 const NEAR: f64 = 0.6;
+/// How far behind the glass (in cm) a line is hidden by the game's picture.
+const BEHIND: f64 = 0.5;
 /// Seconds the lines take to fade once the camera has landed.
 pub const FADE: f64 = 0.35;
 /// The ANSI colors a beam can be when the terminal says what they are: red, green, yellow, blue,
@@ -36,11 +38,13 @@ const CONTRAST: f64 = 3.0;
 /// How long to wait for the terminal to say what its colors are.
 const ASK_FOR: Duration = Duration::from_millis(300);
 
-/// The wireframe for a system, by its id, if there's one.
-pub fn for_system(system: &str) -> Option<&'static str> {
+/// The wireframe for a system, by its id: its own console's, or a TV for the rest.
+pub fn for_system(system: &str) -> &'static str {
     match system {
-        "gb" | "gbc" => Some(include_str!("wireframes/gameboy.json")),
-        _ => None,
+        "gb" | "gbc" => include_str!("wireframes/gameboy.json"),
+        "nes" | "famicom" | "fds" => include_str!("wireframes/nes.json"),
+        "snes" | "snesna" | "sfc" | "satellaview" | "sufami" => include_str!("wireframes/snes.json"),
+        _ => include_str!("wireframes/tv.json"),
     }
 }
 
@@ -205,10 +209,14 @@ pub struct Model {
     /// The glass's corners: top left, top right, bottom right, bottom left.
     screen: [usize; 4],
     pub aspect: (f64, f64),
+    /// Where the game goes, corners in the same order: the glass, or the middle of it in the
+    /// game's shape (see `fit`).
+    picture: [V3; 4],
     /// For each vertex, its edges and the vertex at their other end.
     adj: Vec<Vec<(usize, usize)>>,
     center: V3,
     radius: f64,
+    /// The middle of the picture, and its height.
     glass: V3,
     glass_h: f64,
 }
@@ -234,10 +242,12 @@ impl Model {
             adj[a].push((i, b));
             adj[b].push((i, a));
         }
-        let [tl, _, br, bl] = file.screen.map(|i| file.vertices[i]);
+        let picture = file.screen.map(|i| file.vertices[i]);
+        let [tl, _, br, bl] = picture;
         Ok(Model {
             screen: file.screen,
             aspect: (file.display_aspect[0], file.display_aspect[1]),
+            picture,
             adj,
             center,
             radius,
@@ -246,6 +256,23 @@ impl Model {
             v: file.vertices,
             e: file.edges,
         })
+    }
+
+    /// Puts the game's picture in the middle of the glass, as big as fits in the game's shape
+    /// (`w`×`h`), the way a TV shows a picture that isn't its own shape. The camera lands on it.
+    pub fn fit(&mut self, (w, h): (f64, f64)) {
+        let [tl, tr, _, bl] = self.screen.map(|i| self.v[i]);
+        let (across, down) = (sub(tr, tl), sub(bl, tl));
+        let (gw, gh) = (len(across), len(down));
+        if w <= 0.0 || h <= 0.0 || gw <= 0.0 || gh <= 0.0 {
+            return;
+        }
+        let k = (gw / w).min(gh / h);
+        let middle = add(tl, mul(add(across, down), 0.5));
+        let (a, d) = (mul(across, w * k / gw / 2.0), mul(down, h * k / gh / 2.0));
+        self.picture = [sub(sub(middle, a), d), sub(add(middle, a), d), add(add(middle, a), d), add(sub(middle, a), d)];
+        self.glass = middle;
+        self.glass_h = h * k;
     }
 }
 
@@ -464,10 +491,10 @@ impl Plan {
         let [x, y, w, h] = view.target;
         let want = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)];
         model
-            .screen
+            .picture
             .iter()
             .zip(want)
-            .filter_map(|(&i, (wx, wy))| cam.project(model.v[i]).map(|(px, py)| (px - wx).hypot(py - wy)))
+            .filter_map(|(&p, (wx, wy))| cam.project(p).map(|(px, py)| (px - wx).hypot(py - wy)))
             .fold(0.0, f64::max)
     }
 }
@@ -542,7 +569,7 @@ impl Painter {
         if let Some(picture) = game.filter(|p| shown > 0.0 && p.w > 0 && p.h > 0 && p.rgb.len() >= p.w * p.h * 3) {
             if t >= plan.zoom_end {
                 blit_rect(&mut self.rgba, w, h, picture, view.target);
-            } else if let [Some(a), Some(b), Some(c), Some(d)] = model.screen.map(|i| cam.project(model.v[i])) {
+            } else if let [Some(a), Some(b), Some(c), Some(d)] = model.picture.map(|p| cam.project(p)) {
                 blit_quad(&mut self.rgba, w, h, picture, [a, b, c, d], shown as f32);
             }
         }
@@ -551,7 +578,7 @@ impl Painter {
         if wire > 0.0 {
             self.lines.clear();
             self.dots.clear();
-            gather(model, plan, &cam, t, &mut self.lines, &mut self.dots);
+            gather(model, plan, &cam, t, shown, &mut self.lines, &mut self.dots);
             self.light.clear();
             self.light.resize(w * h, 0.0);
             let mut canvas = Canvas { light: &mut self.light, w, h };
@@ -598,16 +625,23 @@ fn vortex_at(model: &Model, p: V3, k: f64, jitter: f64) -> V3 {
     [c[0] + d2 * angle.cos(), y, c[2] + d2 * angle.sin()]
 }
 
-/// The lines and dots on screen at `t`, as screen positions and brightness.
+/// The lines and dots on screen at `t`, as screen positions and brightness. Lines behind the glass
+/// fade as the game comes on (`shown` of the way), since they'd be seen through the picture.
 fn gather(
     model: &Model,
     plan: &Plan,
     cam: &Cam,
     t: f64,
+    shown: f64,
     lines: &mut Vec<(P2, P2, f32)>,
     dots: &mut Vec<(P2, f32, f64)>,
 ) {
+    let behind = std::cell::Cell::new(1.0);
     let mut seg = |a: V3, b: V3, i: f64| {
+        let i = i * behind.get();
+        if i <= 0.0 {
+            return;
+        }
         let (mut a, mut b) = (cam.to_cam(a), cam.to_cam(b));
         if a[2] < NEAR && b[2] < NEAR {
             return;
@@ -634,6 +668,7 @@ fn gather(
         let e = ease_out(p);
         let (a, b) = if plan.from[i] { (model.v[b], model.v[a]) } else { (model.v[a], model.v[b]) };
         let mid = lerp(a, b, 0.5);
+        behind.set(if mid[2] < model.glass[2] - BEHIND { 1.0 - shown } else { 1.0 });
         match plan.style {
             Style::Pen => {
                 let tip = lerp(a, b, e);
@@ -1091,6 +1126,30 @@ mod tests {
         assert_eq!(Look::new(Some(vec![[1, 2, 3]]), terminal()).colors, [[1, 2, 3]]);
         assert_eq!(Look::new(None, TerminalColors::default()).colors, DEFAULT_COLORS);
         assert!(Look::new(None, TerminalColors { background: Some([0xfa; 3]), palette: vec![] }).light);
+    }
+
+    #[test]
+    fn a_picture_not_the_glasss_shape_sits_in_its_middle() {
+        let mut model = Model::load(
+            r#"{"display_aspect":[4,3],"screen":[0,1,2,3],"vertices":[[-4,6,0],[4,6,0],[4,0,0],[-4,0,0]],"edges":[[0,1]]}"#,
+        )
+        .unwrap();
+        // A wide game, as wide as the glass.
+        model.fit((3.0, 2.0));
+        let (top, bottom) = (3.0 + 8.0 / 3.0, 3.0 - 8.0 / 3.0);
+        let want = [[-4.0, top, 0.0], [4.0, top, 0.0], [4.0, bottom, 0.0], [-4.0, bottom, 0.0]];
+        assert!(model.picture.iter().zip(&want).all(|(p, q)| len(sub(*p, *q)) < 1e-9), "{:?}", model.picture);
+        // A tall one, as tall.
+        model.fit((3.0, 4.0));
+        assert_eq!(model.picture[0], [-2.25, 6.0, 0.0]);
+        assert_eq!((model.glass, model.glass_h), ([0.0, 3.0, 0.0], 6.0));
+    }
+
+    #[test]
+    fn every_system_has_a_wireframe() {
+        for system in ["gb", "nes", "snes", "gba", "arcade"] {
+            Model::load(for_system(system)).unwrap();
+        }
     }
 
     #[test]

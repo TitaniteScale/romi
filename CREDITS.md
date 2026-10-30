@@ -17,10 +17,8 @@ edges, scales them to real size, turns them, and adds the rectangle the game is 
 | Model                                                          | Author                                                      | Wireframe                         |
 | -------------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------- |
 | [Gameboy](https://poly.pizza/m/dczUnD4aslM)                    | [Jason Toff](https://poly.pizza/u/Jason%20Toff)             | `src/emu/wireframes/gameboy.json` |
-| [NES](https://poly.pizza/m/bEUJNyZrdlp)                        | [Jason Toff](https://poly.pizza/u/Jason%20Toff)             | not made yet                      |
-| [SNES](https://poly.pizza/m/7yVvvpp-ftQ)                       | [Gabriel Valdivia](https://poly.pizza/u/Gabriel%20Valdivia) | not made yet                      |
-| [old tv](https://poly.pizza/m/9y-mTmCyefL)                     | [Justin Randall](https://poly.pizza/u/Justin%20Randall)     | not made yet                      |
+| [NES](https://poly.pizza/m/bEUJNyZrdlp)                        | [Jason Toff](https://poly.pizza/u/Jason%20Toff)             | `src/emu/wireframes/nes.json`     |
+| [SNES](https://poly.pizza/m/7yVvvpp-ftQ)                       | [Gabriel Valdivia](https://poly.pizza/u/Gabriel%20Valdivia) | `src/emu/wireframes/snes.json`    |
+| [old tv](https://poly.pizza/m/9y-mTmCyefL)                     | [Justin Randall](https://poly.pizza/u/Justin%20Randall)     | all but `gameboy.json`            |
 | [Handheld videogame console](https://poly.pizza/m/5kxD7n4F3lv) | [Poly by Google](https://poly.pizza/u/Poly%20by%20Google)   | not made yet                      |
-
-`src/emu/wireframes/nes.json`, which only the prototype in `examples/wireframe` uses, was drawn by
-hand for romi and isn't based on any of these.
+| [Arcade Machine](https://poly.pizza/m/GLDkMhiynM)              | [J-Toastie](https://poly.pizza/u/J-Toastie)                 | not made yet                      |

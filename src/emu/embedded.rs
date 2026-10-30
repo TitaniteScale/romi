@@ -97,6 +97,8 @@ pub struct Embedded {
 impl Embedded {
     /// Starts the game, after the launch animation if there's one.
     pub fn start(game: usize, core: Core, volume: f32, launch: Option<Launch>) -> Result<Embedded> {
+        // With the animation, the game's cells are placed before it draws, in the shape it says.
+        let shape = if launch.is_some() { core.display_size() } else { (0.0, 0.0) };
         let (shared, thread) = Shared::start(core, volume, launch.is_some())?;
         // Key releases are needed to know when a button is let go.
         let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
@@ -116,7 +118,7 @@ impl Embedded {
             shared,
             thread: Some(thread),
             seen: 0,
-            shape: (0.0, 0.0),
+            shape,
             cells: None,
             controls: Controls::new(),
             sent: 0,
@@ -218,9 +220,10 @@ impl Embedded {
                 intro.game = Some(frame);
             }
         }
-        if self.shape.0 <= 0.0 {
+        if self.shape.0 <= 0.0 || self.shape.1 <= 0.0 {
             self.shape = intro.launch.model.aspect;
         }
+        intro.launch.model.fit(self.shape);
         let Some(area) = intro.area else { return Ok(true) };
         if t >= intro.end() {
             self.shared.resume();

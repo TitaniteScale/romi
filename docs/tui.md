@@ -80,9 +80,12 @@ for a moment, so one that crashes (Flycast, which only draws with OpenGL or Vulk
 instead of taking romi down. Sound plays through PulseAudio (or PipeWire's stand-in for it), or
 ALSA without either; `"volume"` in the config sets how loud, from 0 to 100.
 
-Game Boy and Game Boy Color games start with a launch animation: a wireframe Game Boy builds
-itself out of lines across the panel, then the camera dives into its screen as the game starts on
-it. The game's file name decides how it builds and its color, so a game always starts the same way.
+Games start with a launch animation: a wireframe of the system builds itself out of lines across
+the panel, then the camera dives into its screen as the game starts on it. Game Boy and Game Boy
+Color games get a Game Boy, NES and SNES games an old TV with the console in front of it, and every
+other system the TV on its own. A game that isn't the TV's shape sits in the middle of its glass,
+as on a real TV. The game's file name decides how it builds and its color, so a game always starts
+the same way.
 The color comes from the terminal's own palette (red, green, yellow, blue, magenta, cyan and their
 bright versions, leaving out any too close to the background), and the lines are drawn over the
 terminal's background. Any key or button skips it. To turn it off, or pick the colors yourself:

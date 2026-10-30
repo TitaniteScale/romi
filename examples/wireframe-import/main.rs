@@ -85,6 +85,13 @@ struct Args {
     /// Which candidate is the glass, by its number in the list printed.
     #[arg(long, default_value_t = 1)]
     glass: usize,
+    /// List the model's pieces (parts that don't touch), biggest first, with their numbers for --drop.
+    #[arg(long)]
+    pieces: bool,
+    /// Leave out these pieces, by their numbers in --pieces, like a controller in front of a
+    /// console: numbers and ranges, like 2,3,8-20.
+    #[arg(long, value_delimiter = ',', value_name = "N,...", value_parser = parse_range)]
+    drop: Vec<Vec<usize>>,
     /// The model has no screen, like a console to put beside a TV with --add.
     #[arg(long, conflicts_with = "glass")]
     no_glass: bool,
@@ -201,17 +208,54 @@ fn main() -> Result<()> {
     let (unit, up, front) = kind.conventions();
     let unit = args.unit.unwrap_or(unit);
     orient(&mut mesh.v, args.up.unwrap_or(up), args.front.unwrap_or(front), args.turn, unit.cm())?;
+    let faces_read = mesh.faces.len();
+    weld(&mut mesh);
+    let pieces = pieces(&mesh);
+    let drop: BTreeSet<usize> = args.drop.iter().flatten().copied().collect();
+    if let Some(&bad) = drop.iter().find(|&&n| !(1..=pieces.len()).contains(&n)) {
+        bail!("--drop {bad}: the pieces are numbered 1 to {}", pieces.len());
+    }
+    // Sizes are for what's kept, so --width and --height measure that.
+    let kept: Vec<usize> =
+        (1..=pieces.len()).filter(|n| !drop.contains(n)).flat_map(|n| pieces[n - 1].clone()).collect();
     if let Some((cm, k)) = args.width.map(|w| (w, 0)).or(args.height.map(|h| (h, 1))) {
-        let (lo, hi) = bounds(&mesh.v);
+        let (lo, hi) = faces_bounds(&mesh, &kept);
         ensure!(hi[k] > lo[k], "the model is flat, so it can't be scaled to a size");
         let k = cm / (hi[k] - lo[k]);
         mesh.v.iter_mut().for_each(|p| *p = scale(*p, k));
     }
-    let faces_read = mesh.faces.len();
-    weld(&mut mesh);
+    if args.pieces {
+        eprintln!("pieces (width × height × depth, and where their middle is):");
+        for (n, faces) in pieces.iter().enumerate() {
+            let (lo, hi) = faces_bounds(&mesh, faces);
+            let mid = lerp(lo, hi, 0.5);
+            eprintln!(
+                "  {}. {:.1} × {:.1} × {:.1} cm at ({:.1}, {:.1}, {:.1}), {} faces{}",
+                n + 1,
+                hi[0] - lo[0],
+                hi[1] - lo[1],
+                hi[2] - lo[2],
+                mid[0],
+                mid[1],
+                mid[2],
+                faces.len(),
+                if drop.contains(&(n + 1)) { "   dropped" } else { "" }
+            );
+        }
+    }
+    if !drop.is_empty() {
+        let keep: BTreeSet<usize> = kept.iter().copied().collect();
+        mesh.faces = mesh.faces.iter().enumerate().filter(|(f, _)| keep.contains(f)).map(|(_, f)| f.clone()).collect();
+        compact(&mut mesh);
+    }
     let (lo, hi) = bounds(&mesh.v);
     let size = sub(hi, lo);
-    eprintln!("read {}: {faces_read} faces, {} vertices once joined", args.input.display(), mesh.v.len());
+    eprintln!(
+        "read {}: {faces_read} faces in {} pieces, {} vertices once joined",
+        args.input.display(),
+        pieces.len(),
+        mesh.v.len()
+    );
     eprintln!("size {:.1} × {:.1} × {:.1} cm (width × height × depth)", size[0], size[1], size[2]);
     if size[0].max(size[1]) > 400.0 || size[0].max(size[1]) < 2.0 {
         eprintln!("  that looks wrong for a console or a TV: check --unit, or set --width or --height");
@@ -285,6 +329,18 @@ fn main() -> Result<()> {
         None => print!("{json}"),
     }
     Ok(())
+}
+
+/// A number, or a range of them like 8-20.
+fn parse_range(s: &str) -> Result<Vec<usize>, String> {
+    let bad = || format!("{s} isn't a number or a range like 8-20");
+    match s.split_once('-') {
+        Some((a, b)) => {
+            let (a, b): (usize, usize) = (a.trim().parse().map_err(|_| bad())?, b.trim().parse().map_err(|_| bad())?);
+            (a <= b).then(|| (a..=b).collect()).ok_or_else(bad)
+        }
+        None => Ok(vec![s.trim().parse().map_err(|_| bad())?]),
+    }
 }
 
 fn parse_aspect(s: &str) -> Result<(f64, f64)> {
@@ -670,6 +726,40 @@ fn weld(mesh: &mut Mesh) {
         }
     }
     mesh.lines = mesh.lines.iter().map(|l| l.map(|i| remap[i])).filter(|[a, b]| a != b).collect();
+}
+
+/// The model's pieces, parts whose faces don't touch, as lists of faces, biggest across first.
+fn pieces(mesh: &Mesh) -> Vec<Vec<usize>> {
+    let mut sets = Sets::new(mesh.v.len());
+    for face in &mesh.faces {
+        for &i in &face[1..] {
+            sets.join(face[0], i);
+        }
+    }
+    let mut by_root: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (f, face) in mesh.faces.iter().enumerate() {
+        by_root.entry(sets.find(face[0])).or_default().push(f);
+    }
+    let across = |faces: &Vec<usize>| {
+        let (lo, hi) = faces_bounds(mesh, faces);
+        len(sub(hi, lo))
+    };
+    let mut pieces: Vec<Vec<usize>> = by_root.into_values().collect();
+    pieces.sort_by(|a, b| across(b).total_cmp(&across(a)).then(a[0].cmp(&b[0])));
+    pieces
+}
+
+fn faces_bounds(mesh: &Mesh, faces: &[usize]) -> (V3, V3) {
+    bounds(&faces.iter().flat_map(|&f| &mesh.faces[f]).map(|&i| mesh.v[i]).collect::<Vec<_>>())
+}
+
+/// Drops the vertices no face or line uses.
+fn compact(mesh: &mut Mesh) {
+    let used: BTreeSet<usize> = mesh.faces.iter().flatten().chain(mesh.lines.iter().flatten()).copied().collect();
+    let index: HashMap<usize, usize> = used.iter().enumerate().map(|(n, &i)| (i, n)).collect();
+    mesh.v = used.iter().map(|&i| mesh.v[i]).collect();
+    mesh.faces.iter_mut().flatten().for_each(|i| *i = index[i]);
+    mesh.lines.iter_mut().flatten().for_each(|i| *i = index[i]);
 }
 
 /// The mesh's faces and which faces meet at each edge.
@@ -1160,6 +1250,27 @@ mod tests {
     }
 
     #[test]
+    fn pieces_that_dont_touch_come_apart_biggest_first() {
+        let mut mesh = boxed([0.0; 3], [1.0; 3], 1);
+        let small = boxed([5.0; 3], [5.5; 3], 1);
+        let n = mesh.v.len();
+        mesh.v.extend(small.v);
+        mesh.faces.extend(small.faces.into_iter().map(|f| f.into_iter().map(|i| i + n).collect()));
+        let mut big = boxed([-9.0; 3], [-6.0; 3], 1);
+        let n = big.v.len();
+        big.v.extend(mesh.v);
+        big.faces.extend(mesh.faces.into_iter().map(|f| f.into_iter().map(|i| i + n).collect()));
+        weld(&mut big);
+        let pieces = pieces(&big);
+        assert_eq!(pieces.iter().map(Vec::len).collect::<Vec<_>>(), [12, 12, 12]);
+        let across = |p: &Vec<usize>| big.v[big.faces[p[0]][0]][0];
+        assert!(across(&pieces[0]) < -5.0 && (0.0..=1.0).contains(&across(&pieces[1])));
+        big.faces = pieces[1].iter().map(|&f| big.faces[f].clone()).collect();
+        compact(&mut big);
+        assert_eq!(big.v.len(), 8);
+    }
+
+    #[test]
     fn an_open_surface_keeps_its_outline() {
         let mut mesh = boxed([0.0; 3], [1.0; 3], 3);
         mesh.faces.retain(|f| f.iter().all(|&i| mesh.v[i][2] == 1.0));
@@ -1227,6 +1338,13 @@ mod tests {
         assert!((tl[1] - bl[1] - 9.0 * INSET).abs() < 1e-9);
         assert!((tr[0] - tl[0] - 12.0 * INSET).abs() < 1e-9);
         assert!((tl[0] + tr[0] - 16.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn pieces_to_drop_can_be_ranges() {
+        assert_eq!(parse_range("8-10"), Ok(vec![8, 9, 10]));
+        assert_eq!(parse_range("3"), Ok(vec![3]));
+        assert!(parse_range("10-8").is_err() && parse_range("x").is_err());
     }
 
     #[test]
