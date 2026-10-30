@@ -9,6 +9,7 @@ python -m venv .venv && .venv/bin/pip install -r e2e/requirements.txt
 .venv/bin/python e2e/drive.py 100 30 keys:j shot   # print what the screen looks like
 cargo test --release frame_cost -- --ignored --nocapture   # how long a frame takes to get ready
 ROMI_FRAME_LOG=frames.csv romi                # time every frame of a game played in romi
+ROMI_CORE_LOG=core.log romi run game --frames 600 --screenshot out.png   # what a core says
 ```
 
 The end-to-end tests run romi in a pty with a small made-up library in a temporary home folder, so
@@ -101,6 +102,9 @@ A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 | `src/emu/embedded.rs`  | a game played in the TUI's middle panel, after its launch animation                |
 | `src/emu/wireframe.rs` | the launch animation: wireframe models, the seeded plan, drawing, terminal colors  |
 | `src/emu/kitty.rs`     | Kitty graphics: Unicode placeholders, shared memory                                |
+| `src/emu/gl.rs`        | OpenGL for cores that draw with the GPU: EGL with no window, reading frames back   |
+| `src/emu/options.rs`   | core options: what cores declare, answered with RetroArch's settings               |
+| `src/emu/core_log.c`   | takes what cores log (printf-style, which Rust can't take) for `ROMI_CORE_LOG`     |
 | `src/emu/timing.rs`    | `ROMI_FRAME_LOG`: when each frame was made, sent and read by the terminal          |
 | `e2e/drive.py`         | runs romi in a fake terminal with a virtual gamepad (tests and by hand)            |
 | `e2e/test_*.py`        | end-to-end tests of the TUI and the CLI                                            |

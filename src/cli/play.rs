@@ -215,13 +215,17 @@ pub(super) fn run_core(
         system: cfg.system_dir(),
         saves: Some(saves.path().to_path_buf()),
         save_file: None,
+        // The same options as playing it, so a run shows what playing would.
+        options: crate::emu::libretro::info(&core)
+            .map(|info| crate::emucfg::retroarch_core_options(&info.name, &rom))
+            .unwrap_or_default(),
     };
     let mut emu = crate::emu::libretro::Core::load(&core, &rom, &dirs)?;
     let mut sound = wav.map(|path| crate::emu::audio::Wav::create(path, emu.sample_rate)).transpose()?;
     let mut samples = Vec::new();
     let started = Instant::now();
     for n in 0..frames {
-        emu.run_frame(script.buttons_at(n));
+        emu.run_frame(crate::emu::libretro::Input::buttons(script.buttons_at(n)));
         if let Some(sound) = &mut sound {
             samples.clear();
             emu.audio(&mut samples);

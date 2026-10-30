@@ -1,7 +1,7 @@
-//! Game input: the keyboard and controllers, as libretro joypad buttons. Holding Select and Start
-//! together quits, from either.
+//! Game input: the keyboard and controllers, as a libretro pad's buttons, sticks and triggers.
+//! Holding Select and Start together quits, from either.
 
-use crate::emu::libretro::button;
+use crate::emu::libretro::{Input, button};
 use gilrs::{Axis, Button, Gilrs};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use std::collections::HashSet;
@@ -31,25 +31,43 @@ impl Controls {
         }
     }
 
-    /// The buttons held on the keyboard and every controller, or None once Select and Start have
-    /// been held together long enough to quit.
-    pub fn buttons(&mut self) -> Option<u16> {
-        let mut buttons = self.keys.iter().filter_map(|&k| key_button(k)).fold(0, |b, n| b | n);
+    /// What's held on the keyboard and every controller together, or None once Select and Start
+    /// have been held together long enough to quit.
+    pub fn input(&mut self) -> Option<Input> {
+        let mut input = self.keys.iter().fold(Input::default(), |mut input, &k| {
+            input.buttons |= key_button(k).unwrap_or(0);
+            add(&mut input.sticks[0], key_stick(k));
+            input
+        });
         if let Some(gilrs) = &mut self.gilrs {
             while gilrs.next_event().is_some() {}
             for (_, pad) in gilrs.gamepads() {
-                buttons |= pad_buttons(&pad);
+                let pad = pad_input(&pad);
+                input.buttons |= pad.buttons;
+                for (stick, more) in input.sticks.iter_mut().zip(pad.sticks) {
+                    add(stick, more);
+                }
+                for (trigger, more) in input.triggers.iter_mut().zip(pad.triggers) {
+                    *trigger = (*trigger).max(more);
+                }
             }
         }
         let quit = button("select").unwrap() | button("start").unwrap();
-        if buttons & quit == quit {
+        if input.buttons & quit == quit {
             if self.quit_held_since.get_or_insert_with(Instant::now).elapsed() >= QUIT_HOLD {
                 return None;
             }
         } else {
             self.quit_held_since = None;
         }
-        Some(buttons)
+        Some(input)
+    }
+}
+
+/// Adds one stick's push to another's, as far as a stick goes.
+fn add(stick: &mut [i16; 2], more: [i16; 2]) {
+    for (axis, more) in stick.iter_mut().zip(more) {
+        *axis = axis.saturating_add(more).clamp(-i16::MAX, i16::MAX);
     }
 }
 
@@ -74,9 +92,20 @@ fn key_button(code: KeyCode) -> Option<u16> {
     button(name)
 }
 
-/// The buttons held on one controller, in libretro's layout: A on the right face button, B on
-/// the bottom one, as on a Super Nintendo pad. The left stick works as the d-pad.
-fn pad_buttons(pad: &gilrs::Gamepad) -> u16 {
+/// The arrows also push the left stick all the way, so a keyboard can walk in 3D games.
+fn key_stick(code: KeyCode) -> [i16; 2] {
+    match code {
+        KeyCode::Up => [0, -i16::MAX],
+        KeyCode::Down => [0, i16::MAX],
+        KeyCode::Left => [-i16::MAX, 0],
+        KeyCode::Right => [i16::MAX, 0],
+        _ => [0, 0],
+    }
+}
+
+/// What's held on one controller, in libretro's layout: A on the right face button, B on the
+/// bottom one, as on a Super Nintendo pad.
+fn pad_input(pad: &gilrs::Gamepad) -> Input {
     const MAP: [(Button, &str); 14] = [
         (Button::East, "a"),
         (Button::South, "b"),
@@ -93,12 +122,17 @@ fn pad_buttons(pad: &gilrs::Gamepad) -> u16 {
         (Button::DPadLeft, "left"),
         (Button::DPadRight, "right"),
     ];
-    let mut buttons = MAP.iter().filter(|(b, _)| pad.is_pressed(*b)).fold(0, |acc, (_, n)| acc | button(n).unwrap());
-    let (x, y) = (pad.value(Axis::LeftStickX), pad.value(Axis::LeftStickY));
-    for (held, name) in [(x < -0.5, "left"), (x > 0.5, "right"), (y > 0.5, "up"), (y < -0.5, "down")] {
-        if held {
-            buttons |= button(name).unwrap();
-        }
+    let buttons = MAP.iter().filter(|(b, _)| pad.is_pressed(*b)).fold(0, |acc, (_, n)| acc | button(n).unwrap());
+    let axis = |a| (pad.value(a).clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
+    // gilrs has up as positive; libretro has down.
+    let stick = |x, y| [axis(x), axis(y).saturating_neg()];
+    let trigger = |b| {
+        let pressed = pad.button_data(b).map_or(0.0, |d| d.value());
+        (pressed.clamp(0.0, 1.0) * f32::from(i16::MAX)) as i16
+    };
+    Input {
+        buttons,
+        sticks: [stick(Axis::LeftStickX, Axis::LeftStickY), stick(Axis::RightStickX, Axis::RightStickY)],
+        triggers: [trigger(Button::LeftTrigger2), trigger(Button::RightTrigger2)],
     }
-    buttons
 }

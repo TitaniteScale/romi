@@ -291,13 +291,13 @@ lag there is.
 
 ## 7. Systems that need a GPU
 
-Playing in romi only works with cores that draw in software, handing over each frame in memory.
+Playing in romi only worked with cores that draw in software, handing over each frame in memory.
 Flycast (Dreamcast, Naomi), Dolphin (GameCube, Wii), PPSSPP (PSP), Mupen64Plus-Next (N64),
 Beetle PSX HW, Citra (3DS) and LRPS2 (PS2) ask for an OpenGL or Vulkan context to draw into
-(`SET_HW_RENDER`) instead. romi says no, and some crash at that (Flycast does, which is why a core
+(`SET_HW_RENDER`) instead. romi said no, and some crashed at that (Flycast did, which is why a core
 is tried in a separate process first). In the order worth trying:
 
-1. **GPU drawing for libretro cores**, as RetroArch does it but with no window: an OpenGL context
+1. ✓ **GPU drawing for libretro cores**, as RetroArch does it but with no window: an OpenGL context
    made through Mesa's EGL with no surface, a framebuffer the core draws into, and each frame read
    back from the GPU into the same shared-memory Kitty path as now. Screen filters, rounded
    corners, achievements and saves all come after that, so they'd carry over. OpenGL alone covers
@@ -306,11 +306,28 @@ is tried in a separate process first). In the order worth trying:
    seen. The fiddly parts: the GL version and profile each core asks for, and cores that draw on
    their own threads. Reading frames back is cheap at these sizes, even rendered above native
    resolution.
-2. **Core options** (`GET_VARIABLE`, which romi answers with "no" now, so every core runs on its
+   - ✓ **Done** (`src/emu/gl.rs`): libEGL opened when a core first asks, a context with no
+     surface on the GPU with a screen plugged in (EGL's device platform; Mesa's surfaceless one
+     otherwise), the framebuffer the core draws into, and the frame read back after each
+     `retro_run`, upside down as GL draws it. The context follows the core to whichever thread
+     runs it. Flycast (Crazy Taxi), Mupen64Plus-Next (Banjo-Kazooie, GLideN64 asking for GL 3.3
+     core) and Beetle PSX HW (GL 3.3 core) all play in the TUI. Getting there also took: plugging
+     a pad into all four ports (Flycast plugs in nothing, not even the VMU, until it's heard about
+     every port), the sticks and analog triggers, cores' `printf`s kept off the screen, and
+     keeping OpenMP loaded (unloading bsnes-hd took it with it, and its threads crashed romi).
+   - Still to do: Vulkan (Mupen's ParaLLEl-RDP, Flycast's and Beetle's Vulkan renderers, which
+     some people pick in RetroArch, and which then won't start); the PlayStation controller type
+     from RetroArch's remap files (`input_libretro_device_p1`), since Ape Escape needs a DualShock;
+     a core that changes its frame rate with `SET_SYSTEM_AV_INFO` keeps the old one for pacing;
+     Dolphin and PPSSPP aren't installed here, so they're untried; Naomi needs `naomi.zip`.
+2. ✓ **Core options** (`GET_VARIABLE`, which romi answers with "no" now, so every core runs on its
    defaults). On its own this lets romi pick the software renderers some cores still have:
    ParaLLEl/angrylion in Mupen64Plus-Next, and Dolphin's and PPSSPP's. Dolphin's is far too slow
    for full speed and the others depend on the CPU, so it's a stepping stone, but options are
-   worth having anyway.
+   worth having anyway. Done with GPU drawing, since Mupen64Plus crashed on its defaults when
+   asked nothing: cores get what RetroArch has for them (the core's `.opt`, then its folder's,
+   then the game's), where it's a value the core takes, and their own default otherwise.
+   Changing options from inside romi is still to come.
 3. **Any emulator's window, captured**: run a standalone emulator in a compositor with no screen
    and draw its frames in the panel. This is the only way for systems with no libretro core at
    all: Switch (Ryujinx), PS3 (RPCS3), Wii U (Cemu), PCSX2. Valve's `gamescope` has a headless

@@ -1559,8 +1559,8 @@ impl App {
     }
 
     /// Starts the core in a separate romi for a frame, the first time it's played here. A core
-    /// that wants what romi can't give it can crash while loading (Flycast, which only draws
-    /// with OpenGL or Vulkan, does), and in this process that would take the TUI down with it.
+    /// that wants what romi can't give it can crash while loading (Flycast did, before romi could
+    /// give it OpenGL), and in this process that would take the TUI down with it.
     fn try_core(&mut self, core: &Path, rom: &Path) -> Result<(), String> {
         if self.cores_tried.contains(core) {
             return Ok(());
@@ -1586,9 +1586,7 @@ impl App {
                 let last = err.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("the core didn't start");
                 Err(last.trim_start_matches("romi: ").to_string())
             }
-            None => {
-                Err("the core crashed while starting; it may only draw with OpenGL or Vulkan, which romi can't".into())
-            }
+            None => Err("the core crashed while starting (ROMI_CORE_LOG=file says what it was doing)".into()),
         }
     }
 

@@ -1,21 +1,32 @@
 //! A minimal libretro frontend: loads a core (the same `.so` RetroArch uses), gives it a ROM and
-//! runs it one frame at a time. Only what 2D cores need: software video (turned upright for
-//! arcade games on their side), stereo sound, a joypad.
+//! runs it one frame at a time. Video drawn in software or with OpenGL (see `gl`), turned upright
+//! for arcade games on their side; stereo sound; a joypad.
+//!
+//! What cores log goes to the file `ROMI_CORE_LOG` names, with the requests romi turned down.
 //!
 //! libretro's callbacks are plain C functions with no user data, so what they share with romi
 //! lives in a global, and only one core can be loaded at a time.
 
+use crate::emu::options::{Options, Variable};
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::ThreadId;
 
 // ---- the libretro ABI (libretro.h) ----
 
 const API_VERSION: c_uint = 1;
 const DEVICE_JOYPAD: c_uint = 1;
+const DEVICE_ANALOG: c_uint = 5;
+/// The analog device's indexes: its two sticks, and its buttons' analog values (the triggers).
+const ANALOG_LEFT: c_uint = 0;
+const ANALOG_RIGHT: c_uint = 1;
+const ANALOG_BUTTON: c_uint = 2;
+const ID_L2: c_uint = 12;
+const ID_R2: c_uint = 13;
 /// Asks for every button at once as a bitmask, when the frontend says it supports that.
 const DEVICE_ID_JOYPAD_MASK: c_uint = 256;
 
@@ -26,13 +37,25 @@ const ENV_SET_PERFORMANCE_LEVEL: c_uint = 8;
 const ENV_GET_SYSTEM_DIRECTORY: c_uint = 9;
 const ENV_SET_PIXEL_FORMAT: c_uint = 10;
 const ENV_SET_INPUT_DESCRIPTORS: c_uint = 11;
-const ENV_SET_VARIABLES: c_uint = 16;
+const ENV_SET_HW_RENDER: c_uint = 14;
+const ENV_GET_VARIABLE: c_uint = 15;
+pub const ENV_SET_VARIABLES: c_uint = 16;
 const ENV_GET_VARIABLE_UPDATE: c_uint = 17;
 const ENV_SET_SUPPORT_NO_GAME: c_uint = 18;
+const ENV_GET_LOG_INTERFACE: c_uint = 27;
 const ENV_GET_SAVE_DIRECTORY: c_uint = 31;
+const ENV_SET_SYSTEM_AV_INFO: c_uint = 32;
 const ENV_SET_CONTROLLER_INFO: c_uint = 35;
 const ENV_SET_MEMORY_MAPS: c_uint = 36;
 const ENV_SET_GEOMETRY: c_uint = 37;
+const ENV_SET_HW_SHARED_CONTEXT: c_uint = 44;
+const ENV_GET_CORE_OPTIONS_VERSION: c_uint = 52;
+pub const ENV_SET_CORE_OPTIONS: c_uint = 53;
+pub const ENV_SET_CORE_OPTIONS_INTL: c_uint = 54;
+const ENV_SET_CORE_OPTIONS_DISPLAY: c_uint = 55;
+const ENV_GET_PREFERRED_HW_RENDER: c_uint = 56;
+pub const ENV_SET_CORE_OPTIONS_V2: c_uint = 67;
+pub const ENV_SET_CORE_OPTIONS_V2_INTL: c_uint = 68;
 /// Flags a core may set on a command; the command is the same without them.
 const ENV_FLAGS: c_uint = 0x10000 | 0x20000;
 
@@ -82,6 +105,59 @@ pub type MemorySizeFn = unsafe extern "C" fn(c_uint) -> usize;
 
 /// What the video callback gets instead of pixels when the core renders with OpenGL or Vulkan.
 const HW_FRAME_BUFFER_VALID: *const c_void = usize::MAX as *const c_void;
+/// libretro's `RETRO_HW_CONTEXT_OPENGL`, the context romi says it prefers.
+const HW_CONTEXT_OPENGL: c_uint = 1;
+
+/// libretro.h's `retro_input_descriptor`: an input the game is played with, and what it does.
+#[repr(C)]
+struct InputDescriptor {
+    port: c_uint,
+    device: c_uint,
+    index: c_uint,
+    id: c_uint,
+    description: *const c_char,
+}
+
+/// libretro.h's `retro_hw_render_callback`: how a core asks to draw with the GPU. The core fills
+/// in what it wants, and the frontend the two functions it calls.
+#[repr(C)]
+struct HwRenderCallback {
+    context_type: c_uint,
+    context_reset: Option<unsafe extern "C" fn()>,
+    get_current_framebuffer: Option<extern "C" fn() -> usize>,
+    get_proc_address: Option<extern "C" fn(*const c_char) -> *const c_void>,
+    depth: bool,
+    stencil: bool,
+    bottom_left_origin: bool,
+    version_major: c_uint,
+    version_minor: c_uint,
+    cache_context: bool,
+    context_destroy: Option<unsafe extern "C" fn()>,
+    debug_context: bool,
+}
+
+/// What a core that draws with OpenGL asked for.
+#[derive(Clone, Copy)]
+struct Hw {
+    request: crate::emu::gl::Request,
+    /// Frames are drawn bottom row first, as GL does unless told otherwise.
+    bottom_left: bool,
+    /// Called once the context is made, to set up what the core draws with, and before it goes.
+    reset: Option<unsafe extern "C" fn()>,
+    destroy: Option<unsafe extern "C" fn()>,
+}
+
+extern "C" fn current_framebuffer() -> usize {
+    crate::emu::gl::framebuffer() as usize
+}
+
+extern "C" fn proc_address(name: *const c_char) -> *const c_void {
+    if name.is_null() {
+        return std::ptr::null();
+    }
+    // SAFETY: the core gives a function's name as a C string.
+    crate::emu::gl::proc_address(unsafe { CStr::from_ptr(name) })
+}
 
 #[repr(C)]
 struct SystemInfo {
@@ -168,6 +244,34 @@ pub fn button(name: &str) -> Option<u16> {
     BUTTONS.iter().position(|b| b.eq_ignore_ascii_case(name)).map(|i| 1 << i)
 }
 
+/// What's held on the pad for a frame.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Input {
+    /// Bits from `button`.
+    pub buttons: u16,
+    /// The left and right sticks, x then y, from -32767 (left, up) to 32767 (right, down).
+    pub sticks: [[i16; 2]; 2],
+    /// How far L2 and R2 are pressed, from 0 to 32767.
+    pub triggers: [i16; 2],
+}
+
+impl Input {
+    pub fn buttons(buttons: u16) -> Input {
+        Input { buttons, ..Input::default() }
+    }
+
+    /// The buttons, with the left stick pushed most of the way also pressing the d-pad, for cores
+    /// that only read the d-pad.
+    fn with_stick_as_dpad(&self) -> u16 {
+        let [x, y] = self.sticks[0];
+        let far = i16::MAX / 2;
+        [(x < -far, "left"), (x > far, "right"), (y < -far, "up"), (y > far, "down")]
+            .into_iter()
+            .filter(|&(held, _)| held)
+            .fold(self.buttons, |b, (_, name)| b | button(name).unwrap())
+    }
+}
+
 // ---- what the callbacks share with romi ----
 
 /// One video frame as packed 8-bit RGB, top row first.
@@ -236,8 +340,19 @@ struct Shared {
     frame: Frame,
     /// The last frame's sound: interleaved left and right samples at the core's sample rate.
     audio: Vec<i16>,
-    buttons: u16,
+    input: Input,
+    /// The core says the game is played with the left stick (see `stick_is_stick`).
+    uses_left_stick: bool,
+    /// The core has asked where the sticks are.
+    reads_sticks: bool,
     memory_map: Descriptors,
+    /// What the core asked for to draw with OpenGL, if it did.
+    hw: Option<Hw>,
+    /// The size of the frame it last drew with OpenGL, not yet read back.
+    hw_frame: Option<(c_uint, c_uint)>,
+    /// The biggest picture the core says it draws, which its framebuffer must hold.
+    max_size: (c_uint, c_uint),
+    options: Option<Options>,
 }
 
 static SHARED: Mutex<Shared> = Mutex::new(Shared {
@@ -248,8 +363,14 @@ static SHARED: Mutex<Shared> = Mutex::new(Shared {
     save_dir: None,
     frame: Frame { width: 0, height: 0, rgb: Vec::new(), pixel_aspect: 0.0 },
     audio: Vec::new(),
-    buttons: 0,
+    input: Input { buttons: 0, sticks: [[0; 2]; 2], triggers: [0; 2] },
+    uses_left_stick: false,
+    reads_sticks: false,
     memory_map: Descriptors(Vec::new(), 0),
+    hw: None,
+    hw_frame: None,
+    max_size: (0, 0),
+    options: None,
 });
 
 static LOADED: AtomicBool = AtomicBool::new(false);
@@ -280,12 +401,78 @@ extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                 shared().pixel_format = format;
             }
             ENV_GET_VARIABLE_UPDATE => *(data as *mut bool) = false,
+            ENV_GET_CORE_OPTIONS_VERSION => *(data as *mut c_uint) = 2,
+            ENV_SET_VARIABLES
+            | ENV_SET_CORE_OPTIONS
+            | ENV_SET_CORE_OPTIONS_INTL
+            | ENV_SET_CORE_OPTIONS_V2
+            | ENV_SET_CORE_OPTIONS_V2_INTL => {
+                let declared = crate::emu::options::declared(cmd & !ENV_FLAGS, data);
+                shared().options.get_or_insert_default().declare(declared);
+            }
+            ENV_GET_VARIABLE => {
+                let var = &mut *(data as *mut Variable);
+                let Some(key) = (!var.key.is_null()).then(|| CStr::from_ptr(var.key).to_string_lossy()) else {
+                    return false;
+                };
+                match shared().options.get_or_insert_default().get(&key) {
+                    Some(value) => var.value = value,
+                    None => return false,
+                }
+            }
+            ENV_GET_LOG_INTERFACE => *(data as *mut *const c_void) = romi_core_log_to(on_core_log),
+            ENV_GET_PREFERRED_HW_RENDER if crate::emu::gl::available().is_ok() => {
+                *(data as *mut c_uint) = HW_CONTEXT_OPENGL
+            }
+            ENV_SET_HW_RENDER => {
+                let cb = &mut *(data as *mut HwRenderCallback);
+                let api = crate::emu::gl::Api::for_context(cb.context_type, cb.version_major, cb.version_minor);
+                let Some(api) = api else {
+                    note(&format!(
+                        "romi: the core asked to draw with context type {}, which romi can't make",
+                        cb.context_type
+                    ));
+                    return false;
+                };
+                if let Err(e) = crate::emu::gl::available() {
+                    note(&format!("romi: the core asked to draw with OpenGL, but {e:#}"));
+                    return false;
+                }
+                note(&format!("romi: the core draws with {api:?}"));
+                cb.get_current_framebuffer = Some(current_framebuffer);
+                cb.get_proc_address = Some(proc_address);
+                let request =
+                    crate::emu::gl::Request { api, depth: cb.depth, stencil: cb.stencil, debug: cb.debug_context };
+                shared().hw = Some(Hw {
+                    request,
+                    bottom_left: cb.bottom_left_origin,
+                    reset: cb.context_reset,
+                    destroy: cb.context_destroy,
+                });
+            }
+            ENV_SET_SYSTEM_AV_INFO => {
+                let av = &*(data as *const AvInfo);
+                let g = &av.geometry;
+                let mut s = shared();
+                s.geometry = (g.base_width, g.base_height, g.aspect_ratio);
+                s.max_size = (g.max_width.max(g.base_width), g.max_height.max(g.base_height));
+            }
+            ENV_SET_INPUT_DESCRIPTORS => {
+                let mut d = data as *const InputDescriptor;
+                let mut left_stick = false;
+                while !(*d).description.is_null() {
+                    let d_ = &*d;
+                    left_stick |= d_.port == 0 && d_.device == DEVICE_ANALOG && d_.index == ANALOG_LEFT;
+                    d = d.add(1);
+                }
+                shared().uses_left_stick = left_stick;
+            }
             ENV_SET_MESSAGE
             | ENV_SET_PERFORMANCE_LEVEL
-            | ENV_SET_INPUT_DESCRIPTORS
-            | ENV_SET_VARIABLES
+            | ENV_SET_CORE_OPTIONS_DISPLAY
             | ENV_SET_SUPPORT_NO_GAME
-            | ENV_SET_CONTROLLER_INFO => {}
+            | ENV_SET_CONTROLLER_INFO
+            | ENV_SET_HW_SHARED_CONTEXT => {}
             ENV_SET_MEMORY_MAPS => {
                 let map = &*(data as *const MemoryMap);
                 let descriptors = if map.descriptors.is_null() {
@@ -301,17 +488,101 @@ extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                 let g = &*(data as *const Geometry);
                 shared().geometry = (g.base_width, g.base_height, g.aspect_ratio);
             }
-            // Everything else (core options, logging, bitmask input among them) is unsupported,
-            // and cores fall back to their defaults.
-            _ => return false,
+            // Everything else (bitmask input among it) is unsupported, and cores do without.
+            other => {
+                turned_down(other);
+                return false;
+            }
         }
     }
     true
 }
 
+// ---- what cores log ----
+
+/// The file what cores log goes to, when it's set.
+const LOG_VAR: &str = "ROMI_CORE_LOG";
+
+unsafe extern "C" {
+    /// From core_log.c: sends what cores log to `to`, and gives the function to hand them for it.
+    fn romi_core_log_to(to: extern "C" fn(c_int, *const c_char)) -> *const c_void;
+    /// C's standard streams (glibc's), which cores print to.
+    static mut stdout: *mut libc::FILE;
+    static mut stderr: *mut libc::FILE;
+}
+
+/// Points C's stdout and stderr at the `ROMI_CORE_LOG` file, or nowhere, for good. Some cores
+/// print as they go (Mupen64Plus prints "plugin_start_gfx"), and in the TUI that landed on the
+/// screen and scrolled it. romi itself writes to the terminal through Rust, which C's streams
+/// don't touch.
+fn quiet_c_streams() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let path = std::env::var_os(LOG_VAR).and_then(|p| CString::new(p.as_encoded_bytes()).ok());
+        // SAFETY: fopen with valid strings; the streams are swapped once, before any core runs,
+        // and the old ones are flushed first and left open, as nothing else should still use them.
+        unsafe {
+            let file = match &path {
+                Some(path) => libc::fopen(path.as_ptr(), c"a".as_ptr()),
+                None => std::ptr::null_mut(),
+            };
+            let file = if file.is_null() { libc::fopen(c"/dev/null".as_ptr(), c"w".as_ptr()) } else { file };
+            if file.is_null() {
+                return;
+            }
+            libc::setvbuf(file, std::ptr::null_mut(), libc::_IOLBF, 0);
+            libc::fflush(std::ptr::null_mut());
+            stdout = file;
+            stderr = file;
+        }
+    });
+}
+
+/// Writes `message` to the `ROMI_CORE_LOG` file, when it's set.
+pub fn note(message: &str) {
+    use std::io::Write;
+    let Some(path) = std::env::var_os(LOG_VAR) else { return };
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
+        let _ = writeln!(file, "{}", message.trim_end());
+    }
+}
+
+/// The last error the core logged, to say why it couldn't load a game.
+static LAST_ERROR: Mutex<String> = Mutex::new(String::new());
+
+extern "C" fn on_core_log(level: c_int, message: *const c_char) {
+    if message.is_null() {
+        return;
+    }
+    // SAFETY: core_log.c gives a NUL-terminated message, valid for this call.
+    let message = unsafe { CStr::from_ptr(message) }.to_string_lossy();
+    // Debug messages come by the thousand a second from some cores.
+    if level == 0 || message.trim().is_empty() {
+        return;
+    }
+    let label = ["debug", "info", "warn", "error"].get(level as usize).copied().unwrap_or("?");
+    note(&format!("[{label}] {message}"));
+    if level >= 3 {
+        *LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()) = message.trim().to_string();
+    }
+}
+
+/// Notes the first time the core asks for something romi doesn't do.
+fn turned_down(cmd: c_uint) {
+    static SEEN: Mutex<BTreeMap<c_uint, ()>> = Mutex::new(BTreeMap::new());
+    if SEEN.lock().unwrap_or_else(|e| e.into_inner()).insert(cmd, ()).is_none() {
+        note(&format!("romi: turned down environment call {cmd}"));
+    }
+}
+
 extern "C" fn video(data: *const c_void, width: c_uint, height: c_uint, pitch: usize) {
+    if data == HW_FRAME_BUFFER_VALID {
+        // Drawn with OpenGL; it's read back once the frame is done (see `Core::run_frame`).
+        shared().hw_frame = Some((width, height));
+        return;
+    }
     // A null frame repeats the last one.
-    if data.is_null() || data == HW_FRAME_BUFFER_VALID || width == 0 || height == 0 {
+    if data.is_null() || width == 0 || height == 0 {
         return;
     }
     let mut s = shared();
@@ -330,6 +601,11 @@ extern "C" fn video(data: *const c_void, width: c_uint, height: c_uint, pitch: u
         let line = &src[row * pitch..][..width as usize * bytes_per_pixel];
         to_rgb(format, line, &mut frame.rgb);
     }
+    upright(frame, rotation, geometry);
+}
+
+/// Turns a frame just drawn upright, and says how wide its pixels are meant to look.
+fn upright(frame: &mut Frame, rotation: c_uint, geometry: (c_uint, c_uint, f32)) {
     if rotation != 0 {
         *frame = rotate(frame, rotation);
     }
@@ -411,14 +687,45 @@ extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
 
 extern "C" fn input_poll() {}
 
-extern "C" fn input_state(port: c_uint, device: c_uint, _index: c_uint, id: c_uint) -> i16 {
-    if port != 0 || device != DEVICE_JOYPAD {
+extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uint) -> i16 {
+    if port != 0 {
         return 0;
     }
-    let buttons = shared().buttons;
-    match id {
-        DEVICE_ID_JOYPAD_MASK => buttons as i16,
-        0..16 => (buttons >> id & 1) as i16,
+    let (input, stick_is_stick) = {
+        let mut s = shared();
+        if device == DEVICE_ANALOG && !s.reads_sticks {
+            s.reads_sticks = true;
+            if s.uses_left_stick {
+                note("romi: the game is played with the left stick, so it isn't also the d-pad");
+            }
+        }
+        (s.input, s.uses_left_stick && s.reads_sticks)
+    };
+    match device {
+        // The left stick is the d-pad too, unless the game plays with it as a stick: the core says
+        // it does, and asks where it is. An N64 game would see the d-pad pressed whenever you
+        // walk, and some cores list a stick they never read (Beetle Saturn's for its 3D pad).
+        DEVICE_JOYPAD => {
+            let buttons = match stick_is_stick {
+                true => input.buttons,
+                false => input.with_stick_as_dpad(),
+            };
+            match id {
+                DEVICE_ID_JOYPAD_MASK => buttons as i16,
+                0..16 => (buttons >> id & 1) as i16,
+                _ => 0,
+            }
+        }
+        DEVICE_ANALOG => {
+            match (index, id) {
+                (ANALOG_LEFT | ANALOG_RIGHT, 0..2) => input.sticks[index as usize][id as usize],
+                (ANALOG_BUTTON, ID_L2) => input.triggers[0],
+                (ANALOG_BUTTON, ID_R2) => input.triggers[1],
+                // Other buttons are all the way down or not at all.
+                (ANALOG_BUTTON, 0..16) => (input.buttons >> id & 1) as i16 * i16::MAX,
+                _ => 0,
+            }
+        }
         _ => 0,
     }
 }
@@ -436,6 +743,8 @@ pub struct Dirs {
     /// The game's save file (`.srm`), read when it starts and written by `save`. Without one, the
     /// game starts with nothing saved and what it saves is lost.
     pub save_file: Option<PathBuf>,
+    /// Core options set for the core and the game, by key (see `options`).
+    pub options: BTreeMap<String, String>,
 }
 
 pub struct Core {
@@ -452,6 +761,11 @@ pub struct Core {
     _rom: Vec<u8>,
     /// Where the ROM was unpacked to, for a zip the core can't open itself.
     _unpacked: Option<crate::files::TempDir>,
+    /// For a core that draws with OpenGL: what it asked for, its context, and the thread that has
+    /// the context current.
+    hw: Option<Hw>,
+    gl: Option<crate::emu::gl::Context>,
+    gl_thread: Option<ThreadId>,
     // Dropped last, after `Drop` has shut the core down.
     _lib: libloading::Library,
 }
@@ -478,12 +792,21 @@ impl Core {
             save_dir: c_path(&dirs.saves),
             frame: Frame::default(),
             audio: Vec::new(),
-            buttons: 0,
+            input: Input::default(),
+            uses_left_stick: false,
+            reads_sticks: false,
             memory_map: Descriptors::default(),
+            hw: None,
+            hw_frame: None,
+            max_size: (0, 0),
+            options: Some(Options::new(dirs.options.clone())),
         };
+        LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()).clear();
         // SAFETY: loading a core runs its initializers; libretro cores are made to be loaded this way.
         let lib = unsafe { libloading::Library::new(core_path) }
             .with_context(|| format!("can't load {}", core_path.display()))?;
+        keep_thread_pools_loaded();
+        quiet_c_streams();
         // SAFETY: the signatures below are libretro.h's, which every core exports.
         unsafe {
             macro_rules! sym {
@@ -532,11 +855,38 @@ impl Core {
             };
             if !sym!("retro_load_game", unsafe extern "C" fn(*const GameInfo) -> bool)(&game) {
                 (api.deinit)();
-                bail!("{name} couldn't load {}", rom.display());
+                let why = std::mem::take(&mut *LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()));
+                let why = if why.is_empty() { String::new() } else { format!(": {why}") };
+                bail!("{name} couldn't load {}{why}", rom.display());
+            }
+            // A pad in each port, as RetroArch says by default. Some cores plug nothing in until
+            // they're told: Flycast waits to hear about all four ports before it plugs in a pad and
+            // its memory card, and Mupen64Plus has no controllers without it.
+            if let Ok(plug_in) = lib.get::<unsafe extern "C" fn(c_uint, c_uint)>(b"retro_set_controller_port_device\0")
+            {
+                for port in 0..4 {
+                    plug_in(port, DEVICE_JOYPAD);
+                }
             }
             let mut av = AvInfo::default();
             sym!("retro_get_system_av_info", unsafe extern "C" fn(*mut AvInfo))(&mut av);
-            shared().geometry = (av.geometry.base_width, av.geometry.base_height, av.geometry.aspect_ratio);
+            let g = &av.geometry;
+            let (hw, max_size) = {
+                let mut s = shared();
+                s.geometry = (g.base_width, g.base_height, g.aspect_ratio);
+                s.max_size = (g.max_width.max(g.base_width), g.max_height.max(g.base_height));
+                (s.hw, s.max_size)
+            };
+            // Not under the lock: the core calls back while it sets up.
+            let gl = match hw.map(|hw| start_gl(&hw, max_size)) {
+                Some(Ok(gl)) => Some(gl),
+                Some(Err(e)) => {
+                    (api.unload_game)();
+                    (api.deinit)();
+                    return Err(e.context(format!("{name} draws with OpenGL")));
+                }
+                None => None,
+            };
             let mut core = Core {
                 api,
                 name,
@@ -546,6 +896,9 @@ impl Core {
                 saved: Vec::new(),
                 _rom: data,
                 _unpacked: unpacked.map(|(dir, _)| dir),
+                hw,
+                gl,
+                gl_thread: None,
                 _lib: lib,
             };
             if let Err(e) = core.load_save() {
@@ -591,15 +944,41 @@ impl Core {
         Ok(true)
     }
 
-    /// Runs one frame with these buttons held (bits from `button`).
-    pub fn run_frame(&mut self, buttons: u16) {
-        {
+    /// Runs one frame with `input` held.
+    pub fn run_frame(&mut self, input: Input) {
+        let max_size = {
             let mut s = shared();
-            s.buttons = buttons;
+            s.input = input;
             s.audio.clear();
+            s.max_size
+        };
+        if let Some(gl) = &mut self.gl {
+            // The context follows the core to whichever thread runs it.
+            let here = std::thread::current().id();
+            if self.gl_thread != Some(here) {
+                if let Err(e) = gl.make_current() {
+                    return note(&format!("romi: {e:#}"));
+                }
+                self.gl_thread = Some(here);
+            }
+            let (w, h) = gl.size();
+            if (max_size.0 > w || max_size.1 > h)
+                && let Err(e) = gl.resize((max_size.0.max(w), max_size.1.max(h)))
+            {
+                note(&format!("romi: {e:#}"));
+            }
         }
         // SAFETY: the game is loaded, and only one thread drives a core.
         unsafe { (self.api.run)() }
+        let (Some(gl), Some(hw)) = (&mut self.gl, &self.hw) else { return };
+        let mut s = shared();
+        let Some((w, h)) = s.hw_frame.take().filter(|&(w, h)| w > 0 && h > 0) else { return };
+        let (rotation, geometry) = (s.rotation, s.geometry);
+        let frame = &mut s.frame;
+        gl.read((w, h), hw.bottom_left, &mut frame.rgb);
+        let (w, h) = (w.min(gl.size().0), h.min(gl.size().1));
+        (frame.width, frame.height) = (w, h);
+        upright(frame, rotation, geometry);
     }
 
     /// The last frame the core drew.
@@ -641,13 +1020,44 @@ impl Drop for Core {
     fn drop(&mut self) {
         // Whoever drove the core has saved and reported what failed; this only catches the rest.
         let _ = self.save();
+        // The core lets go of what it drew with as the game unloads, so its context is current.
+        if let Some(gl) = &self.gl
+            && self.gl_thread != Some(std::thread::current().id())
+        {
+            let _ = gl.make_current();
+        }
         // SAFETY: the game was loaded and the core initialized in `load`.
         unsafe {
             (self.api.unload_game)();
+            if let Some(destroy) = self.hw.and_then(|hw| hw.destroy) {
+                destroy();
+            }
             (self.api.deinit)();
         }
+        self.gl = None;
         LOADED.store(false, Ordering::SeqCst);
     }
+}
+
+/// Keeps OpenMP loaded for good once a core has loaded it. Its threads outlive the core that
+/// started them, and unloading the library under them, as unloading the core did, crashed romi
+/// when a game played with bsnes-hd stopped.
+fn keep_thread_pools_loaded() {
+    // SAFETY: with RTLD_NOLOAD, dlopen only marks a library that's already loaded; it loads nothing.
+    unsafe { libc::dlopen(c"libgomp.so.1".as_ptr(), libc::RTLD_NOW | libc::RTLD_NOLOAD | libc::RTLD_NODELETE) };
+}
+
+/// Makes the OpenGL context a core asked for, with a framebuffer of `size`, and lets the core set
+/// up what it draws with. The context is let go after, for whichever thread runs the core.
+fn start_gl(hw: &Hw, size: (c_uint, c_uint)) -> Result<crate::emu::gl::Context> {
+    let gl = crate::emu::gl::Context::new(hw.request, size)?;
+    note(&format!("romi: drawing on {}, {}×{}", gl.renderer(), size.0, size.1));
+    if let Some(reset) = hw.reset {
+        // SAFETY: the core's own callback, called as libretro says: once its context is current.
+        unsafe { reset() };
+    }
+    gl.release();
+    Ok(gl)
 }
 
 /// The core in a RetroArch command line (`-L core.so` or `--libretro=core.so`).

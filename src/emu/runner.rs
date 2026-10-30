@@ -5,11 +5,11 @@
 use crate::config::Config;
 use crate::emu::audio;
 use crate::emu::cheevos::{self, Event as CheevoEvent};
-use crate::emu::libretro::{Core, Dirs, Frame};
+use crate::emu::libretro::{Core, Dirs, Frame, Input};
 use crate::emu::timing;
 use anyhow::{Context, Result};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -17,14 +17,16 @@ use std::time::{Duration, Instant};
 /// Loads a core to play `rom` with. It gets RetroArch's system folder and RetroArch's save folder
 /// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways. The
 /// game's own save goes where RetroArch keeps it too, so a game saved in romi carries on in
-/// RetroArch and back.
+/// RetroArch and back, and the core runs with the options RetroArch has for it and the game.
 pub fn load(cfg: &Config, core: &Path, rom: &Path) -> Result<Core> {
-    let saves = crate::emu::libretro::info(core).and_then(|info| crate::emucfg::retroarch_save_dir(&info.name, rom));
+    let name = crate::emu::libretro::info(core).map(|info| info.name);
+    let saves = name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom));
     if let Some(dir) = &saves {
         std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;
     }
     let save_file = save_file(saves.as_deref(), rom);
-    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file })
+    let options = name.map(|name| crate::emucfg::retroarch_core_options(&name, rom)).unwrap_or_default();
+    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file, options })
 }
 
 /// Where RetroArch keeps a game's save: the ROM's name with `.srm`, in the save folder, or next to
@@ -40,7 +42,7 @@ pub struct Shared {
     /// The newest frame and how many frames have run.
     latest: Mutex<(u64, Frame)>,
     ready: Condvar,
-    buttons: AtomicU16,
+    input: Mutex<Input>,
     quit: AtomicBool,
     /// Held before its first frame, while the launch animation plays.
     paused: AtomicBool,
@@ -79,7 +81,7 @@ impl Shared {
         let shared = Arc::new(Shared {
             latest: Mutex::new((0, Frame::default())),
             ready: Condvar::new(),
-            buttons: AtomicU16::new(0),
+            input: Mutex::new(Input::default()),
             quit: AtomicBool::new(false),
             paused: AtomicBool::new(paused),
             volume,
@@ -105,9 +107,9 @@ impl Shared {
         self.paused.store(false, Ordering::SeqCst);
     }
 
-    /// Holds these buttons (bits from `libretro::button`) from the next frame on.
-    pub fn set_buttons(&self, buttons: u16) {
-        self.buttons.store(buttons, Ordering::Relaxed);
+    /// Holds `input` from the next frame on.
+    pub fn set_input(&self, input: Input) {
+        *lock(&self.input) = input;
     }
 
     /// The newest frame and its number, once there's one newer than frame number `seen`, waiting up
@@ -222,7 +224,8 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
             continue;
         }
         let started = Instant::now();
-        core.run_frame(shared.buttons.load(Ordering::Relaxed));
+        let input = *lock(&shared.input);
+        core.run_frame(input);
         let ran = started.elapsed();
         if let Some(client) = &mut cheevos {
             client.frame(&core);

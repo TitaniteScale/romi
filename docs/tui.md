@@ -79,9 +79,19 @@ there), so a game saved in romi carries on in RetroArch and back. romi writes th
 second of the game saving, and again when you stop. What a core keeps itself (FinalBurn Neo's high
 scores and NVRAM) goes to the same folder. A save that's there but can't be read stops the game
 from starting, rather than being written over. The first time a core is played, romi starts it in a separate process
-for a moment, so one that crashes (Flycast, which only draws with OpenGL or Vulkan) shows an error
-instead of taking romi down. Sound plays through PulseAudio (or PipeWire's stand-in for it), or
-ALSA without either; `"volume"` in the config sets how loud, from 0 to 100.
+for a moment, so one that crashes shows an error instead of taking romi down. Sound plays through
+PulseAudio (or PipeWire's stand-in for it), or ALSA without either; `"volume"` in the config sets
+how loud, from 0 to 100.
+
+Cores that draw with the GPU work too: Flycast (Dreamcast, Naomi), Mupen64Plus-Next (N64) and
+Beetle PSX HW draw with OpenGL, through EGL with no window, on the GPU your screen is plugged into
+(on a laptop with two, the other one stays asleep), and romi reads each frame back. Vulkan isn't
+there yet, so a core set to draw only with Vulkan won't start. Cores run with the options
+RetroArch has for them (`config/<core>/<core>.opt`, and the ones for the game or its folder), so a
+game plays the same in both. Controllers' sticks and analog triggers reach the core as they are;
+in games played with the stick (N64 ones), the left stick isn't also the d-pad. On a keyboard, the
+arrows push the stick all the way. `ROMI_CORE_LOG=file` writes what the core says there, which is
+the place to look when a game won't start.
 
 The picture is square by default, as the game drew it. `"corner_radius"` rounds its corners, as a
 percentage of its height: about 4 looks like an old TV. The corners are left clear, so the

@@ -177,14 +177,14 @@ impl Embedded {
         true
     }
 
-    /// Reads the controllers and hands the held buttons to the core. False when Select+Start
-    /// has been held long enough to stop the game. While the animation plays, a button skips it.
+    /// Reads the controllers and hands what's held to the core. False when Select+Start has been
+    /// held long enough to stop the game. While the animation plays, a button skips it.
     pub fn read_pads(&mut self) -> bool {
-        let Some(buttons) = self.controls.buttons() else { return false };
+        let Some(input) = self.controls.input() else { return false };
         match &mut self.intro {
-            Some(intro) if buttons != 0 => intro.skip(),
+            Some(intro) if input.buttons != 0 => intro.skip(),
             Some(_) => {}
-            None => self.shared.set_buttons(buttons),
+            None => self.shared.set_input(input),
         }
         true
     }

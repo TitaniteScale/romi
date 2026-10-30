@@ -1,5 +1,5 @@
 //! Compiles rcheevos (RetroAchievements' C library, in `vendor/rcheevos`) and romi's glue to it,
-//! for achievements in games played inside romi.
+//! for achievements in games played inside romi, and the shim that takes what cores log.
 
 use std::path::Path;
 
@@ -27,6 +27,8 @@ fn main() {
         // Its code, not ours: warnings in it aren't romi's to fix.
         .warnings(false)
         .compile("rcheevos");
+    cc::Build::new().file("src/emu/core_log.c").include(vendor.join("libretro")).compile("romi_core_log");
     println!("cargo:rerun-if-changed=src/emu/cheevos.c");
+    println!("cargo:rerun-if-changed=src/emu/core_log.c");
     println!("cargo:rerun-if-changed=vendor");
 }

@@ -232,6 +232,40 @@ pub fn retroarch_save_dir(core: &str, rom: &Path) -> Option<PathBuf> {
     save_dir(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
 }
 
+/// The core options RetroArch has for the core called `core` (its name without the version), by
+/// key: the core's, then the ones for `rom`'s folder, then for `rom` itself, each over the last, as
+/// RetroArch takes them. With global core options on, there's one file for every core instead.
+pub fn retroarch_core_options(core: &str, rom: &Path) -> BTreeMap<String, String> {
+    let dir = Emulator::RetroArch.config_dir(false);
+    core_options(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
+}
+
+fn core_options(ini: &Ini, config_dir: &Path, core: &str, rom: &Path) -> BTreeMap<String, String> {
+    let set = |key| ini.get("", key).filter(|v| !v.is_empty() && *v != "default");
+    let configs = set("rgui_config_directory").map_or(config_dir.join("config"), expand_path).join(core);
+    let mut files = Vec::new();
+    if ini.get("", "global_core_options") == Some("true") {
+        files.push(set("core_options_path").map_or(config_dir.join("retroarch-core-options.cfg"), expand_path));
+    } else {
+        files.push(configs.join(format!("{core}.opt")));
+    }
+    // Named by hand: a game called "Mr. Bones" isn't "Mr.opt".
+    let opt = |name: &std::ffi::OsStr| configs.join(format!("{}.opt", name.to_string_lossy()));
+    if let Some(folder) = rom.parent().and_then(|p| p.file_name()) {
+        files.push(opt(folder));
+    }
+    if ini.get("", "game_specific_options") != Some("false")
+        && let Some(name) = rom.file_stem()
+    {
+        files.push(opt(name));
+    }
+    let mut options = BTreeMap::new();
+    for file in files {
+        options.extend(Ini::read(&file).section("").map(|(k, v)| (k.to_string(), v.to_string())));
+    }
+    options
+}
+
 fn save_dir(ini: &Ini, config_dir: &Path, core: &str, rom: &Path) -> Option<PathBuf> {
     if ini.get("", "savefiles_in_content_dir") == Some("true") {
         return None;
@@ -314,6 +348,26 @@ mod tests {
         assert_eq!(at(by_content), Some(PathBuf::from("/s/FinalBurn Neo/neogeo")));
         assert_eq!(at("savefile_directory = \"default\""), None);
         assert_eq!(at("savefile_directory = \"/s\"\nsavefiles_in_content_dir = \"true\""), None);
+    }
+
+    #[test]
+    fn core_options_take_the_games_over_the_folders_over_the_cores() {
+        let dir = std::env::temp_dir().join(format!("romi-core-options-test-{}", std::process::id()));
+        let core = dir.join("config/Mupen64Plus-Next");
+        std::fs::create_dir_all(&core).unwrap();
+        let write = |name: &str, text: &str| std::fs::write(core.join(name), text).unwrap();
+        write("Mupen64Plus-Next.opt", "cpu = \"interpreter\"\nres = \"640x480\"\naspect = \"4:3\"\n");
+        write("n64.opt", "res = \"960x720\"\n");
+        write("Mr. Bones.opt", "cpu = \"dynarec\"\n");
+        let rom = Path::new("/roms/n64/Mr. Bones.z64");
+        let options = |cfg: &str| core_options(&Ini::parse(cfg), &dir, "Mupen64Plus-Next", rom);
+        let (all, no_games) = (options(""), options("game_specific_options = \"false\""));
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(all["cpu"], "dynarec");
+        assert_eq!(all["res"], "960x720");
+        assert_eq!(all["aspect"], "4:3");
+        assert_eq!(no_games["cpu"], "interpreter");
+        assert_eq!(no_games["res"], "960x720");
     }
 
     #[test]
