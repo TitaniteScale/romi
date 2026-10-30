@@ -6,9 +6,12 @@ RetroAchievements: Game Boy to SNES, Genesis and arcade, and in 3D, N64, PlaySta
 
 <img width="720" height="450" alt="Picking Crazy Taxi from the Dreamcast covers in romi: a wireframe arcade cabinet builds itself, and the game plays in the middle of the launcher" src="https://github.com/user-attachments/assets/226ba686-b2f8-4c54-805b-b708a5a86dc3" />
 
-The full clip, with sound:
+<details>
+<summary>Watch it with sound (27 seconds)</summary>
 
 https://github.com/user-attachments/assets/3546be21-ad2e-4cfb-91fb-bc42bb2cdb4f
+
+</details>
 
 - **Play in the terminal.** romi loads RetroArch's libretro cores itself and draws the game in the
   middle of the launcher. A wireframe of the console builds itself in your terminal's colors, then
