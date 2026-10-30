@@ -1,7 +1,7 @@
 # Maintainer: Jake Eaker <jacob.eaker@gmail.com>
 
 pkgname=romi
-pkgver=0.3.0
+pkgver=0.4.0
 pkgrel=1
 pkgdesc="A terminal game launcher for ROMs, native ports and Steam, driven by keyboard or controller"
 arch=('x86_64' 'aarch64')
@@ -13,10 +13,11 @@ makedepends=('cargo')
 options=('!lto')
 optdepends=(
   'retroarch: run most systems, through libretro cores'
+  'libglvnd: 3D games played in romi (Dreamcast, NAOMI, N64, PlayStation)'
   'emulationstation-de: system definitions and emulators for romi init, names from its gamelists'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('0748f82755f96158a02d6fd9b8888d2ad0fb44b119b1bf7be1b9963440e4c5b1')
+sha256sums=('22aa3c65d679155712e7c2da1efd38461a41358cba064b859d439da5eb8c1e70')
 
 prepare() {
   cd "$pkgname-$pkgver"
