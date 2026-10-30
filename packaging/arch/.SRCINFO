@@ -1,6 +1,6 @@
 pkgbase = romi
 	pkgdesc = A terminal game launcher for ROMs, native ports and Steam, driven by keyboard or controller
-	pkgver = 0.2.0
+	pkgver = 0.3.0
 	pkgrel = 1
 	url = https://github.com/TitaniteScale/romi
 	arch = x86_64
@@ -14,7 +14,7 @@ pkgbase = romi
 	optdepends = retroarch: run most systems, through libretro cores
 	optdepends = emulationstation-de: system definitions and emulators for romi init, names from its gamelists
 	options = !lto
-	source = romi-0.2.0.tar.gz::https://github.com/TitaniteScale/romi/archive/refs/tags/v0.2.0.tar.gz
-	sha256sums = 186e46f5857a0505a2cf6e27f2b0983a300b72384e001508d0899e9a0731c557
+	source = romi-0.3.0.tar.gz::https://github.com/TitaniteScale/romi/archive/refs/tags/v0.3.0.tar.gz
+	sha256sums = 0748f82755f96158a02d6fd9b8888d2ad0fb44b119b1bf7be1b9963440e4c5b1
 
 pkgname = romi
