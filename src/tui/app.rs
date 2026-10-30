@@ -1595,8 +1595,15 @@ impl App {
     /// Stops the game in the middle panel. Input waits a moment, so the buttons that stopped it
     /// don't also do something in the list.
     pub fn stop_embedded(&mut self) {
-        if let Some(e) = self.embedded.take().and_then(|e| e.stop()) {
-            self.set_status(Level::Error, format!("Not saved: {e}"));
+        if let Some(mut embedded) = self.embedded.take() {
+            match embedded.write_timings() {
+                Some(Ok(path)) => self.set_status(Level::Info, format!("Frame timings in {}", config::tilde(&path))),
+                Some(Err(e)) => self.set_status(Level::Warn, format!("{e:#}")),
+                None => {}
+            }
+            if let Some(e) = embedded.stop() {
+                self.set_status(Level::Error, format!("Not saved: {e}"));
+            }
         }
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);
     }

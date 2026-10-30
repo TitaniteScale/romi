@@ -17,6 +17,7 @@ use crate::emu::libretro::{Core, Frame};
 use crate::emu::notice::{self, Toast};
 use crate::emu::runner::Shared;
 use crate::emu::screen::{self, Filter};
+use crate::emu::timing::{self, Recorder};
 use crate::emu::wireframe::{self, Beam, Model, Painter, Picture, Plan, Settings, View};
 use anyhow::Result;
 use base64::Engine;
@@ -110,6 +111,10 @@ pub struct Embedded {
     look: Appearance,
     /// Achievement notices still to show, the one showing first.
     toasts: VecDeque<Toast>,
+    /// Frame timings, if `ROMI_FRAME_LOG` asks for them.
+    timing: Option<Recorder>,
+    /// The last frame sent, kept to scale the next one into.
+    pixels: Vec<u8>,
 }
 
 impl Embedded {
@@ -123,6 +128,7 @@ impl Embedded {
         look: Appearance,
         cheevos: Option<cheevos::Setup>,
     ) -> Result<Embedded> {
+        let about = format!("{} in the TUI, filter {}, corners {}", core.name, look.filter.name(), look.corners);
         // With the animation, the game's cells are placed before it draws, in the shape it says.
         let shape = if launch.is_some() { core.display_size() } else { (0.0, 0.0) };
         let (shared, thread) = Shared::start(core, volume, launch.is_some(), cheevos)?;
@@ -153,6 +159,8 @@ impl Embedded {
             intro,
             look,
             toasts: VecDeque::new(),
+            timing: Recorder::start(about),
+            pixels: Vec::new(),
         })
     }
 
@@ -235,6 +243,12 @@ impl Embedded {
         Some(layout)
     }
 
+    /// Writes the frame timings, if they're being recorded, and says where.
+    pub fn write_timings(&mut self) -> Option<Result<std::path::PathBuf>> {
+        let timing = self.timing.take()?;
+        Some(timing.finish(&self.shared.take_made()))
+    }
+
     /// Stops the game, which saves it a last time, and says why that save failed if it did.
     pub fn stop(mut self) -> Option<String> {
         self.shared.stop();
@@ -270,6 +284,16 @@ impl Embedded {
         Some((rect, (u32::from(cols) * cell_w, u32::from(rows) * cell_h)))
     }
 
+    /// Waits up to `wait` for the core's next frame, so it can be sent as soon as it's made. False,
+    /// at once, while the launch animation plays: it keeps its own time.
+    pub fn wait_for_frame(&self, wait: Duration) -> bool {
+        if self.intro.is_some() {
+            return false;
+        }
+        self.shared.wait_newer(self.seen, wait);
+        true
+    }
+
     /// Plays the animation's next frame, or sends the core's newest frame to the terminal if
     /// there's one it hasn't seen.
     pub fn pump(&mut self) -> Result<()> {
@@ -290,7 +314,7 @@ impl Embedded {
             return Ok(());
         }
         self.shape = frame.display_size();
-        self.send_game(&frame)
+        self.send_game(n, &frame)
     }
 
     /// One step of the animation. False once it's over, with the game's first frame sent.
@@ -315,7 +339,7 @@ impl Embedded {
             self.shared.resume();
             self.cells = self.fit(area);
             if let Some(frame) = &intro.game {
-                self.send_game(frame)?;
+                self.send_game(self.seen, frame)?;
             }
             return Ok(false);
         }
@@ -341,28 +365,39 @@ impl Embedded {
         Ok(true)
     }
 
-    /// Sends a game frame scaled to the game's cells, filtered, its corners rounded if they're to
-    /// be: clear, so the terminal's background shows there.
-    fn send_game(&mut self, frame: &Frame) -> Result<()> {
+    /// Sends game frame number `n` scaled to the game's cells, as `game_pixels` makes it.
+    fn send_game(&mut self, n: u64, frame: &Frame) -> Result<()> {
         let Some((rect, (w, h))) = self.cells else { return Ok(()) };
-        let sizes = ((w as usize, h as usize), (frame.width as usize, frame.height as usize));
-        if self.look.corners <= 0.0 {
-            let mut pixels = frame.resample(w, h);
-            screen::apply(&mut pixels, 3, sizes.0, sizes.1, self.look.filter);
-            return self.send(IMAGE, rect, &pixels, (w, h), 24);
+        let taken = Instant::now();
+        let mut pixels = std::mem::take(&mut self.pixels);
+        let format = game_pixels(frame, (w, h), self.look, &mut pixels);
+        let prepared = Instant::now();
+        let sent = self.send(IMAGE, rect, &pixels, (w, h), format);
+        let bytes = pixels.len();
+        self.pixels = pixels;
+        let (name, copied) = sent?;
+        if let Some(timing) = &mut self.timing {
+            let written = Instant::now();
+            timing.handed_over(n, &name);
+            timing.sent(timing::Sent { frame: n, taken, prepared, copied, written, size: (w, h), bytes });
         }
-        let mut pixels = frame.resample_rgba(w, h);
-        screen::apply(&mut pixels, 4, sizes.0, sizes.1, self.look.filter);
-        let (fw, fh) = (f64::from(w), f64::from(h));
-        wireframe::round_corners(&mut pixels, w as usize, [0.0, 0.0, fw, fh], self.look.corners * fh);
-        self.send(IMAGE, rect, &pixels, (w, h), 32)
+        Ok(())
     }
 
-    /// Replaces image `id`, `w`×`h` pixels of RGB (24) or RGBA (32), stretched over `rect`.
-    fn send(&mut self, id: u32, rect: Rect, pixels: &[u8], (w, h): (u32, u32), format: u8) -> Result<()> {
+    /// Replaces image `id`, `w`×`h` pixels of RGB (24) or RGBA (32), stretched over `rect`. Gives
+    /// back the shared memory object it went in, and when its pixels were copied there.
+    fn send(
+        &mut self,
+        id: u32,
+        rect: Rect,
+        pixels: &[u8],
+        (w, h): (u32, u32),
+        format: u8,
+    ) -> Result<(String, Instant)> {
         self.sent += 1;
         let name = format!("/romi-{}-{}", std::process::id(), self.sent);
         kitty::write_shm(&name, pixels)?;
+        let copied = Instant::now();
         let mut out = std::io::stdout().lock();
         write!(
             out,
@@ -373,16 +408,38 @@ impl Embedded {
             BASE64.encode(&name),
         )?;
         out.flush()?;
-        self.pending.push_back(name);
+        self.pending.push_back(name.clone());
         while self.pending.len() > PENDING {
-            kitty::remove_shm(&self.pending.pop_front().unwrap());
+            let old = self.pending.pop_front().unwrap();
+            if kitty::remove_shm(&old)
+                && let Some(timing) = &mut self.timing
+            {
+                timing.never_read(&old);
+            }
         }
-        Ok(())
+        Ok((name, copied))
     }
+}
+
+/// A game frame as it's sent, into `pixels` in place of what they were: scaled to `w`×`h`,
+/// filtered, its corners rounded if they're to be (clear, so the terminal's background shows
+/// there). Gives back their format: RGB (24) or RGBA (32).
+pub fn game_pixels(frame: &Frame, (w, h): (u32, u32), look: Appearance, pixels: &mut Vec<u8>) -> u8 {
+    let sizes = ((w as usize, h as usize), (frame.width as usize, frame.height as usize));
+    let bpp = if look.corners > 0.0 { 4 } else { 3 };
+    frame.resample_into(w, h, bpp, pixels);
+    screen::apply(pixels, bpp, sizes.0, sizes.1, look.filter);
+    if bpp == 3 {
+        return 24;
+    }
+    let (fw, fh) = (f64::from(w), f64::from(h));
+    wireframe::round_corners(pixels, w as usize, [0.0, 0.0, fw, fh], look.corners * fh);
+    32
 }
 
 impl Drop for Embedded {
     fn drop(&mut self) {
+        let _ = self.write_timings();
         self.shared.stop();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -392,6 +449,53 @@ impl Drop for Embedded {
         let _ = execute!(out, PopKeyboardEnhancementFlags);
         for name in &self.pending {
             kitty::remove_shm(name);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// How long romi takes to get a frame ready for the terminal, by the panel's size in pixels
+    /// and how the game looks. Not a test: run it with
+    /// `cargo test --release frame_cost -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn frame_cost() {
+        let (fw, fh) = (240, 160);
+        let rgb = (0..fw * fh * 3).map(|i| (i * 7 % 251) as u8).collect();
+        let frame = Frame { width: fw, height: fh, rgb, pixel_aspect: 0.0 };
+        let look = |filter, corners| Appearance { corners, filter, badges: false };
+        let looks = [
+            ("plain", look(Filter::None, 0.0)),
+            ("crt", look(Filter::Crt, 0.0)),
+            ("corners", look(Filter::None, 0.02)),
+            ("crt+corners", look(Filter::Crt, 0.02)),
+        ];
+        print!("\n{:>11} {:>7}", "panel", "MB");
+        for (name, _) in &looks {
+            print!(" {name:>11}");
+        }
+        println!(" {:>11}   (ms a frame, the copy into shared memory included)", "copy only");
+        for (w, h) in [(720, 480), (1080, 720), (1440, 960), (1920, 1280), (2400, 1600), (3000, 2000)] {
+            const RUNS: u32 = 30;
+            print!("{:>11} {:>7.1}", format!("{w}×{h}"), f64::from(w * h * 4) / 1e6);
+            let mut copy = Duration::ZERO;
+            for (_, look) in looks {
+                let started = Instant::now();
+                let mut pixels = Vec::new();
+                for i in 0..RUNS {
+                    game_pixels(&frame, (w, h), look, &mut pixels);
+                    let name = format!("/romi-{}-bench-{i}", std::process::id());
+                    let copying = Instant::now();
+                    kitty::write_shm(&name, &pixels).unwrap();
+                    copy += copying.elapsed();
+                    kitty::remove_shm(&name);
+                }
+                print!(" {:>11.2}", started.elapsed().as_secs_f64() * 1000.0 / f64::from(RUNS));
+            }
+            println!(" {:>11.2}", copy.as_secs_f64() * 1000.0 / f64::from(RUNS * looks.len() as u32));
         }
     }
 }

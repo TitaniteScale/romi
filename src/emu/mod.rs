@@ -12,4 +12,5 @@ pub mod live;
 pub mod notice;
 pub mod runner;
 pub mod screen;
+pub mod timing;
 pub mod wireframe;

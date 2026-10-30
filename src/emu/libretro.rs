@@ -188,29 +188,39 @@ impl Frame {
         (f64::from(self.width) * par, f64::from(self.height))
     }
 
-    /// The same as `resample`, with a fourth byte a pixel for opacity, all opaque.
-    pub fn resample_rgba(&self, w: u32, h: u32) -> Vec<u8> {
-        let rgb = self.resample(w, h);
-        let mut out = Vec::with_capacity(rgb.len() / 3 * 4);
-        for &[r, g, b] in rgb.as_chunks::<3>().0 {
-            out.extend_from_slice(&[r, g, b, 255]);
-        }
+    /// The frame scaled to exactly `w`×`h`, nearest neighbour, so pixels stay sharp.
+    pub fn resample(&self, w: u32, h: u32) -> Vec<u8> {
+        let mut out = Vec::new();
+        self.resample_into(w, h, 3, &mut out);
         out
     }
 
-    /// The frame scaled to exactly `w`×`h`, nearest neighbour, so pixels stay sharp.
-    pub fn resample(&self, w: u32, h: u32) -> Vec<u8> {
+    /// The same as `resample`, into `out` in place of what it held, as RGB (`bpp` 3) or RGBA (4,
+    /// all opaque). Played frames are big, so reusing one `out` saves the time it takes the system
+    /// to hand out fresh memory for each.
+    pub fn resample_into(&self, w: u32, h: u32, bpp: usize, out: &mut Vec<u8>) {
         let (fw, fh) = (self.width as usize, self.height as usize);
         let (w, h) = (w as usize, h as usize);
         let xs: Vec<usize> = (0..w).map(|x| x * fw / w * 3).collect();
-        let mut out = Vec::with_capacity(w * h * 3);
+        out.clear();
+        out.reserve(w * h * bpp);
+        let mut last = None;
         for y in 0..h {
-            let row = &self.rgb[y * fh / h * fw * 3..][..fw * 3];
+            let from = y * fh / h;
+            if last == Some(from) {
+                // Scaled up, most rows are the row above again.
+                out.extend_from_within(out.len() - w * bpp..);
+                continue;
+            }
+            last = Some(from);
+            let row = &self.rgb[from * fw * 3..][..fw * 3];
             for &x in &xs {
                 out.extend_from_slice(&row[x..x + 3]);
+                if bpp == 4 {
+                    out.push(255);
+                }
             }
         }
-        out
     }
 }
 
@@ -823,6 +833,9 @@ mod tests {
         let frame = Frame { width: 2, height: 1, rgb: vec![1, 1, 1, 2, 2, 2], ..Frame::default() };
         assert_eq!(frame.resample(4, 2), [[1u8; 6], [2; 6], [1; 6], [2; 6]].concat());
         assert_eq!(frame.resample(3, 1), [1, 1, 1, 1, 1, 1, 2, 2, 2]);
+        let mut rgba = vec![9; 100];
+        frame.resample_into(2, 2, 4, &mut rgba);
+        assert_eq!(rgba, [1, 1, 1, 255, 2, 2, 2, 255].repeat(2));
     }
 
     #[test]

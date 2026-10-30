@@ -176,6 +176,21 @@ It's built in steps, and the first one pays off without any of the TUI work:
      on as the camera lands; `romi run --live`; screen curvature and glow. Real shaders
      (RetroArch's `.slangp` presets, through the `librashader` crate on the GPU, reading the
      frame back to send it) would look better still, at the cost of a GPU and a big dependency.
+   - ✓ **Smooth frames**: `ROMI_FRAME_LOG=frames.csv` records when each frame was made, sent and
+     read by the terminal (see `CONTRIBUTING.md`). In the TUI, frames were picked up whenever the
+     main loop came round, so they reached Ghostty 12 to 22 ms apart (sd 2.1 ms) for a game making
+     them every 16.7: some stayed up for two of the screen's refreshes and the next was never seen.
+     The loop now waits for the core's frame and sends it straight away, and scales into the last
+     frame's buffer, RGBA in one pass, copying repeated rows: 15.5 to 18.5 ms apart (sd 0.7),
+     7 ms from the core to Ghostty instead of 10, for Link's Awakening DX at 1218×1050 with the
+     CRT filter and corners. `romi run --live` sends 160×144 and gets sd 0.3.
+     Still to do: scaling straight into the shared memory, made and touched ahead of time, would
+     save the copy (2.4 ms for 5 MB) and most of what's left of the unevenness, which is how long
+     each frame takes to get ready (3.6 ms, 5.7 at p99). What the terminal does after reading a
+     frame isn't seen: recording the screen at 60 fps and counting repeated frames would show it,
+     and compare it with RetroArch. A game at 59.7 fps on a 60 Hz screen shows a frame twice every
+     few seconds wherever it plays, unless it's run at the screen's rate, as RetroArch does with
+     vsync; a terminal doesn't say when it refreshes.
 3. **Audio and input**: audio through `cpal`, resampled to the device rate and used to pace emulation.
    The controller already goes through `gilrs`. Playing on a keyboard needs key-release events, so it
    only works in terminals that support the Kitty keyboard protocol.
@@ -320,6 +335,10 @@ Smaller items that fit between phases.
 - **More descriptions**: Wikipedia's summary API needs no key, but matching titles to articles is
   hit-or-miss. ScreenScraper and TheGamesDB need keys.
 - **SteamGridDB** (free key) for covers on PC ports and pinball tables.
+- **Tests that play leave frames behind**: `e2e/drive.py` ends romi with SIGKILL, and pyte never
+  reads the frames, so each test that plays in romi leaves up to 30 in `/dev/shm` (about 150 MB
+  for a whole run, until they're deleted or the machine restarts). Stopping romi with Esc, or a
+  SIGTERM it cleans up after, would fix it.
 - **An AUR package**: the AUR isn't taking new packages. Until it does, the recipe in `packaging/arch`
   builds with `makepkg -si`.
 - **A waybar module**, if it turns out to be wanted: games usually run full screen, hiding the bar, so

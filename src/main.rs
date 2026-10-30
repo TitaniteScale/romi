@@ -130,9 +130,17 @@ fn terminal_answers() -> bool {
 fn event_loop(terminal: &mut DefaultTerminal, app: &mut App, rx: &Receiver<PadEvent>) -> Result<()> {
     while !app.quit {
         terminal.draw(|f| tui::ui::draw(f, app))?;
+        // A game in the middle panel: each frame is sent as soon as the core makes it, so they
+        // reach the terminal as evenly spaced as they were made. Input is read in between, at
+        // least every 8ms.
+        let waited = app.embedded.as_ref().is_some_and(|e| e.wait_for_frame(Duration::from_millis(8)));
         app.pump_embedded();
-        // A game in the middle panel needs a new frame every 16ms.
-        let wait = if app.embedded.is_some() { Duration::from_millis(4) } else { Duration::from_millis(20) };
+        let wait = match &app.embedded {
+            _ if waited => Duration::ZERO,
+            // The launch animation draws at 60 fps.
+            Some(_) => Duration::from_millis(4),
+            None => Duration::from_millis(20),
+        };
         if event::poll(wait)? {
             while event::poll(Duration::ZERO)? {
                 app.on_term_event(event::read()?);

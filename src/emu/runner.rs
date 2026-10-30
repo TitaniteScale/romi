@@ -6,6 +6,7 @@ use crate::config::Config;
 use crate::emu::audio;
 use crate::emu::cheevos::{self, Event as CheevoEvent};
 use crate::emu::libretro::{Core, Dirs, Frame};
+use crate::emu::timing;
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
@@ -54,6 +55,8 @@ pub struct Shared {
     save_error: Mutex<Option<String>>,
     /// What's happened with the game's achievements, not yet shown.
     cheevos: Mutex<Vec<CheevoEvent>>,
+    /// When each frame was made, if `ROMI_FRAME_LOG` asks (see `timing`).
+    made: Option<Mutex<Vec<timing::Made>>>,
 }
 
 const NO_SOUND: u32 = u32::MAX;
@@ -85,6 +88,7 @@ impl Shared {
             sound_error: Mutex::new(None),
             save_error: Mutex::new(None),
             cheevos: Mutex::new(Vec::new()),
+            made: timing::path().map(|_| Mutex::new(Vec::new())),
         });
         let thread = {
             let shared = shared.clone();
@@ -112,6 +116,11 @@ impl Shared {
         let (mut latest, _) =
             self.ready.wait_timeout_while(lock(&self.latest), wait, |l| l.0 == seen).unwrap_or_else(|e| e.into_inner());
         (latest.0 != seen).then(|| (latest.0, std::mem::take(&mut latest.1)))
+    }
+
+    /// Waits up to `wait` for a frame newer than frame number `seen`.
+    pub fn wait_newer(&self, seen: u64, wait: Duration) {
+        let _ = self.ready.wait_timeout_while(lock(&self.latest), wait, |l| l.0 == seen);
     }
 
     /// How many frames have run.
@@ -148,6 +157,11 @@ impl Shared {
     /// Why the game's save couldn't be written, once for each time it couldn't.
     pub fn take_save_error(&self) -> Option<String> {
         lock(&self.save_error).take()
+    }
+
+    /// When each frame so far was made, if they're being timed.
+    pub fn take_made(&self) -> Vec<timing::Made> {
+        self.made.as_ref().map(|m| std::mem::take(&mut *lock(m))).unwrap_or_default()
     }
 
     /// What's happened with the game's achievements since the last time, oldest first.
@@ -207,7 +221,9 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
             next = Instant::now();
             continue;
         }
+        let started = Instant::now();
         core.run_frame(shared.buttons.load(Ordering::Relaxed));
+        let ran = started.elapsed();
         if let Some(client) = &mut cheevos {
             client.frame(&core);
             tell(client);
@@ -230,6 +246,10 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
             latest.1 = frame;
         }
         shared.ready.notify_one();
+        if let Some(made) = &shared.made {
+            let sound_ahead = sound.as_ref().map(|s| s.ahead());
+            lock(made).push(timing::Made { started, ran, done: Instant::now(), sound_ahead });
+        }
         next += wait;
         let now = Instant::now();
         if next > now {

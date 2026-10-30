@@ -7,6 +7,8 @@ cargo test                                    # unit tests
 python -m venv .venv && .venv/bin/pip install -r e2e/requirements.txt
 .venv/bin/pytest e2e                          # the real binary, driven in a fake terminal
 .venv/bin/python e2e/drive.py 100 30 keys:j shot   # print what the screen looks like
+cargo test --release frame_cost -- --ignored --nocapture   # how long a frame takes to get ready
+ROMI_FRAME_LOG=frames.csv romi                # time every frame of a game played in romi
 ```
 
 The end-to-end tests run romi in a pty with a small made-up library in a temporary home folder, so
@@ -15,6 +17,22 @@ buttons on a virtual gamepad, and read the screen with [pyte](https://github.com
 controller tests need write access to `/dev/uinput` and are skipped without it. CI runs rustfmt,
 clippy, the unit tests and the end-to-end tests on every push, and on every tag before a release
 is built.
+
+### Frame timings
+
+A game played in romi should reach the terminal as evenly as the core makes its frames, or it
+looks choppy: on a 60 Hz screen, a frame that comes a few ms late stays up for two refreshes and
+the next is never seen. With `ROMI_FRAME_LOG` set to a file, a game played in the TUI or with
+`romi run --live` writes a row a frame there when it stops: when the core made it and how long it
+ran, when romi took it, scaled and filtered it, copied it to shared memory and wrote it out, and
+when the terminal read it (it deletes the shared memory then, which romi watches for). A summary
+goes beside it, with `.txt` for the extension: how evenly frames were made, sent and read (gaps
+more than half a frame late are the ones that show), and how long each step took. The TUI says
+where they went in its status bar.
+
+`frame_cost` times getting a frame ready, the copy to shared memory included, at panel sizes from
+720×480 to 3000×2000, plain and with the CRT filter and round corners. Times vary from run to run
+on a laptop saving power; run it a few times.
 
 ## Releasing
 
@@ -83,5 +101,6 @@ A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 | `src/emu/embedded.rs`  | a game played in the TUI's middle panel, after its launch animation                |
 | `src/emu/wireframe.rs` | the launch animation: wireframe models, the seeded plan, drawing, terminal colors  |
 | `src/emu/kitty.rs`     | Kitty graphics: Unicode placeholders, shared memory                                |
+| `src/emu/timing.rs`    | `ROMI_FRAME_LOG`: when each frame was made, sent and read by the terminal          |
 | `e2e/drive.py`         | runs romi in a fake terminal with a virtual gamepad (tests and by hand)            |
 | `e2e/test_*.py`        | end-to-end tests of the TUI and the CLI                                            |

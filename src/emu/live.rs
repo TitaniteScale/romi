@@ -13,6 +13,7 @@ use crate::emu::controls::Controls;
 use crate::emu::kitty;
 use crate::emu::libretro::{Core, Frame};
 use crate::emu::runner::Shared;
+use crate::emu::timing::{self, Recorder};
 use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -75,9 +76,15 @@ pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     let fps = core.fps;
     let core_name = core.name.clone();
     let (shared, emu) = Shared::start(core, volume, false, None)?;
-    let result = Screen::enter().and_then(|_screen| View::new(name, &core_name, fps).run(&shared));
+    let mut view = View::new(name, &core_name, fps);
+    let result = Screen::enter().and_then(|_screen| view.run(&shared));
     shared.stop();
     let _ = emu.join();
+    if let Some(timing) = view.timing.take() {
+        let path = timing.finish(&shared.take_made())?;
+        let summary = std::fs::read_to_string(timing::summary_path(&path)).unwrap_or_default();
+        eprintln!("{summary}\nFrame timings in {}", path.display());
+    }
     result?;
     match shared.take_save_error() {
         Some(e) => anyhow::bail!("the game wasn't saved: {e}"),
@@ -148,6 +155,8 @@ struct View {
     pending: VecDeque<Handoff>,
     unread: u64,
     stats: Stats,
+    /// Frame timings, if `ROMI_FRAME_LOG` asks for them.
+    timing: Option<Recorder>,
 }
 
 /// Counted over about a second, then shown on the status line.
@@ -183,6 +192,7 @@ impl View {
                 send_time: Duration::ZERO,
                 worst_send: Duration::ZERO,
             },
+            timing: Recorder::start(format!("{name}, {core_name}, in the whole terminal (romi run --live)")),
         }
     }
 
@@ -197,7 +207,7 @@ impl View {
                 return Ok(());
             }
             if let Some(frame) = frame.filter(|f| f.width > 0) {
-                self.draw(&frame)?;
+                self.draw(shown, &frame)?;
             }
             self.update_stats(shared)?;
         }
@@ -274,7 +284,8 @@ impl View {
         Ok(layout)
     }
 
-    fn draw(&mut self, frame: &Frame) -> Result<()> {
+    fn draw(&mut self, n: u64, frame: &Frame) -> Result<()> {
+        let taken = Instant::now();
         let shape = (frame.width, frame.height, frame.pixel_aspect.to_bits());
         if self.layout.is_none() || self.laid_out_for != shape {
             self.layout = Some(self.lay_out(frame)?);
@@ -290,6 +301,7 @@ impl View {
                 (&scaled, w, h)
             }
         };
+        let prepared = Instant::now();
         let mut keys = format!("a=T,i={IMAGE},p={IMAGE},q=2,C=1,f=24,s={w},v={h}");
         match self.scale {
             Scale::Terminal => keys += &format!(",c={},r={}", layout.cols, layout.rows),
@@ -302,6 +314,9 @@ impl View {
             Transfer::Shm => {
                 let name = format!("/romi-{pid}-{}", self.sent);
                 crate::emu::kitty::write_shm(&name, pixels)?;
+                if let Some(timing) = &mut self.timing {
+                    timing.handed_over(n, &name);
+                }
                 self.check_read(Handoff::Shm(name.clone()));
                 write!(out, "\x1b_G{keys},t=s,S={};{}\x1b\\", pixels.len(), BASE64.encode(&name))?;
                 pixels.len()
@@ -331,6 +346,10 @@ impl View {
         stdout.write_all(&out)?;
         stdout.flush()?;
         let took = started.elapsed();
+        if let Some(timing) = &mut self.timing {
+            let (size, written) = ((w, h), Instant::now());
+            timing.sent(timing::Sent { frame: n, taken, prepared, copied: started, written, size, bytes });
+        }
         self.stats.shown += 1;
         self.stats.bytes += bytes as u64;
         self.stats.send_time += took;
@@ -344,8 +363,12 @@ impl View {
     fn check_read(&mut self, sent: Handoff) {
         self.pending.push_back(sent);
         while self.pending.len() > 30 {
-            if self.pending.pop_front().unwrap().remove() {
+            let old = self.pending.pop_front().unwrap();
+            if old.remove() {
                 self.unread += 1;
+                if let (Some(timing), Handoff::Shm(name)) = (&mut self.timing, &old) {
+                    timing.never_read(name);
+                }
             }
         }
     }
