@@ -529,6 +529,16 @@ impl Hashes {
     }
 }
 
+/// RetroAchievements' console id for a game's system and the game's hash, hashing it if it hasn't
+/// been; None for systems it doesn't hash.
+pub fn game_hash(lib: &Library, g: usize) -> Option<(u32, String)> {
+    let console = console(&lib.system_of(g).id)?;
+    let mut hashes = Hashes::load();
+    let hash = hashes.get(lib, g)?;
+    hashes.save();
+    Some((console, hash))
+}
+
 /// A game's ROM file and how its system hashes it, when it does.
 fn hashable(lib: &Library, g: usize) -> Option<(PathBuf, Hashing)> {
     let game = &lib.games[g];

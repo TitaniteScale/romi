@@ -15,8 +15,35 @@ where; `RA_API_KEY` in the environment beats both. Keeping it out of `config.jso
 your dotfiles. The TUI refreshes your progress when it starts, and `romi achievements` refreshes it
 and lists your games that have achievements.
 
-romi only shows achievements; the emulator earns them, so each one needs RetroAchievements turned
-on and your login. `romi check` tells you which aren't set up.
+Games played in another emulator earn achievements there, so each one needs RetroAchievements
+turned on and your login. `romi check` tells you which aren't set up.
+
+## Earning them in romi
+
+Games played in romi (**Play in romi** in a game's menu) earn achievements themselves, once you've
+logged in:
+
+```sh
+romi achievements login        # asks for your password; or pipe it in
+romi achievements logout
+```
+
+The web API key can only read, so earning needs your password, once: romi swaps it for the login
+token the server gives, the way RetroArch does, and keeps only the token, in
+`~/.local/state/romi/retroachievements-login.json` (readable only by you). When a game starts, a
+notice over it says how many of its achievements you have; each unlock gets one of its own, and is
+sent to your account as it happens. If the server can't be reached, unlocks wait and go through
+when it's back, as long as the game is still running.
+
+romi uses RetroAchievements' own library, rcheevos, so achievements are checked the same way as in
+RetroArch. Unlocks are softcore: the server only accepts hardcore unlocks from emulators it has
+approved, and treats others' as softcore. Systems are the ones romi plays in the middle panel
+(cartridge systems, mostly), and a game is found by its ROM's hash, as in
+[How games are matched](#how-games-are-matched).
+
+`ROMI_RA_LOG=/path/to/file` writes rcheevos' warnings to a file, for when something doesn't work:
+how it laid out the game's memory, and any achievement it turned off because it reads memory the
+core didn't give.
 
 ## The achievements screen
 

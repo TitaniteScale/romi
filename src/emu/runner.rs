@@ -4,6 +4,7 @@
 
 use crate::config::Config;
 use crate::emu::audio;
+use crate::emu::cheevos::{self, Event as CheevoEvent};
 use crate::emu::libretro::{Core, Dirs, Frame};
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -51,6 +52,8 @@ pub struct Shared {
     sound_error: Mutex<Option<String>>,
     /// Why the game's save couldn't be written, the last time it couldn't.
     save_error: Mutex<Option<String>>,
+    /// What's happened with the game's achievements, not yet shown.
+    cheevos: Mutex<Vec<CheevoEvent>>,
 }
 
 const NO_SOUND: u32 = u32::MAX;
@@ -62,8 +65,14 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 impl Shared {
     /// Starts `core` on its own thread, running until `stop`, with its sound `volume` loud. A
-    /// `paused` core waits for `resume` before its first frame.
-    pub fn start(core: Core, volume: f32, paused: bool) -> Result<(Arc<Shared>, JoinHandle<()>)> {
+    /// `paused` core waits for `resume` before its first frame. With `cheevos`, its achievements
+    /// are checked after every frame.
+    pub fn start(
+        core: Core,
+        volume: f32,
+        paused: bool,
+        cheevos: Option<cheevos::Setup>,
+    ) -> Result<(Arc<Shared>, JoinHandle<()>)> {
         let shared = Arc::new(Shared {
             latest: Mutex::new((0, Frame::default())),
             ready: Condvar::new(),
@@ -75,10 +84,11 @@ impl Shared {
             queued_ms: AtomicU32::new(NO_SOUND),
             sound_error: Mutex::new(None),
             save_error: Mutex::new(None),
+            cheevos: Mutex::new(Vec::new()),
         });
         let thread = {
             let shared = shared.clone();
-            std::thread::Builder::new().name("core".into()).spawn(move || run_core(core, &shared))?
+            std::thread::Builder::new().name("core".into()).spawn(move || run_core(core, cheevos, &shared))?
         };
         Ok((shared, thread))
     }
@@ -139,14 +149,30 @@ impl Shared {
     pub fn take_save_error(&self) -> Option<String> {
         lock(&self.save_error).take()
     }
+
+    /// What's happened with the game's achievements since the last time, oldest first.
+    pub fn take_cheevo_events(&self) -> Vec<CheevoEvent> {
+        std::mem::take(&mut *lock(&self.cheevos))
+    }
 }
 
 /// How often a running game's save is written, if it has changed, so a crash loses little.
 const SAVE_EVERY: Duration = Duration::from_secs(1);
 
+/// Starts checking a game's achievements: logs in and loads them. The game's memory is found
+/// after its first frame (see `Client::frame`).
+fn start_cheevos(setup: cheevos::Setup, shared: &Shared) -> Option<cheevos::Client> {
+    let problem = |p: String| lock(&shared.cheevos).push(CheevoEvent::Problem(p));
+    let client =
+        cheevos::Client::new(setup.console).inspect_err(|e| problem(format!("RetroAchievements: {e:#}"))).ok()?;
+    let started = client.login_with_token(&setup.login).and_then(|()| client.load_game(&setup.hash));
+    started.inspect_err(|e| problem(format!("RetroAchievements: {e:#}"))).ok()?;
+    Some(client)
+}
+
 /// Runs the core until told to quit, playing its sound, at the pace its sound sets (or at its
 /// frame rate, without sound).
-fn run_core(mut core: Core, shared: &Shared) {
+fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
     // The stream lives on this thread, so it's opened here.
     let mut sound = audio::Output::open(core.sample_rate, core.fps)
         .inspect_err(|e| *lock(&shared.sound_error) = Some(format!("{e:#}")))
@@ -155,6 +181,13 @@ fn run_core(mut core: Core, shared: &Shared) {
     let period = Duration::from_secs_f64(1.0 / core.fps);
     let mut next = Instant::now();
     let mut saved = Instant::now();
+    let mut cheevos = cheevos.and_then(|setup| start_cheevos(setup, shared));
+    let tell = |client: &cheevos::Client| {
+        let events = client.take_events();
+        if !events.is_empty() {
+            lock(&shared.cheevos).extend(events);
+        }
+    };
     let save = |core: &mut Core| {
         if let Err(e) = core.save() {
             *lock(&shared.save_error) = Some(format!("{e:#}"));
@@ -166,11 +199,19 @@ fn run_core(mut core: Core, shared: &Shared) {
             saved = Instant::now();
         }
         if shared.paused.load(Ordering::Relaxed) {
+            if let Some(client) = &mut cheevos {
+                client.idle();
+                tell(client);
+            }
             std::thread::sleep(Duration::from_millis(2));
             next = Instant::now();
             continue;
         }
         core.run_frame(shared.buttons.load(Ordering::Relaxed));
+        if let Some(client) = &mut cheevos {
+            client.frame(&core);
+            tell(client);
+        }
         let wait = match &mut sound {
             Some(sound) => {
                 samples.clear();
@@ -199,6 +240,8 @@ fn run_core(mut core: Core, shared: &Shared) {
         }
     }
     save(&mut core);
+    // The client reads the core's memory, so it goes first.
+    drop(cheevos);
 }
 
 #[cfg(test)]

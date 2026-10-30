@@ -103,6 +103,19 @@ struct Cli {
 }
 
 #[derive(Subcommand)]
+pub enum AchievementsAction {
+    /// Log in to RetroAchievements, so games played in romi earn achievements. romi keeps the
+    /// login token the server gives, not your password. Reads the password from stdin when it
+    /// isn't a terminal
+    Login {
+        /// Your RetroAchievements username (default: `retroachievements.username` in the config)
+        username: Option<String>,
+    },
+    /// Forget the login
+    Logout,
+}
+
+#[derive(Subcommand)]
 pub enum Command {
     /// Show what romi finds and anything that looks broken
     Check,
@@ -232,6 +245,8 @@ pub enum Command {
     },
     /// Refresh your RetroAchievements progress and list your games that have achievements
     Achievements {
+        #[command(subcommand)]
+        action: Option<AchievementsAction>,
         /// Print JSON instead
         #[arg(long)]
         json: bool,
@@ -420,7 +435,11 @@ pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
             play::run_core(cfg, &game, system.as_deref(), core, frames, screenshot, wav, input.as_deref(), json, live)
         }
         Command::Stats { json } => reports::stats(cfg, json),
-        Command::Achievements { json } => reports::achievements(cfg, json),
+        Command::Achievements { action: None, json } => reports::achievements(cfg, json),
+        Command::Achievements { action: Some(AchievementsAction::Login { username }), .. } => {
+            reports::login(cfg, username)
+        }
+        Command::Achievements { action: Some(AchievementsAction::Logout), .. } => reports::logout(),
         Command::Scrape { systems } => art::scrape(cfg, &Library::load_complete(cfg), &systems),
     }
 }

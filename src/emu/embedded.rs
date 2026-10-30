@@ -10,6 +10,7 @@
 //! first frames are the ones seen as the camera lands. The game's image is in place before the
 //! animation's goes, so the handover doesn't show.
 
+use crate::emu::cheevos::{self, Event as CheevoEvent};
 use crate::emu::controls::Controls;
 use crate::emu::kitty;
 use crate::emu::libretro::{Core, Frame};
@@ -40,6 +41,54 @@ const PENDING: usize = 30;
 /// The animation is drawn at 1/this of the panel's pixels, and the terminal scales it up.
 const SHRINK: u32 = 2;
 const INTRO_FPS: f64 = 60.0;
+
+/// A notice over the game: an achievement unlocked, or the game's achievements loaded. The first
+/// line is its heading.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Toast {
+    pub lines: Vec<String>,
+    lasts: Duration,
+    /// When it went up, once it has.
+    shown: Option<Instant>,
+}
+
+impl Toast {
+    fn new(lines: Vec<String>, secs: u64) -> Toast {
+        Toast { lines, lasts: Duration::from_secs(secs), shown: None }
+    }
+
+    /// The notice for an achievement event, if it gets one, or else what to say in the status bar.
+    fn for_event(event: CheevoEvent) -> Result<Toast, Option<String>> {
+        let plural = |n: u32, one: &str| if n == 1 { format!("1 {one}") } else { format!("{n} {one}s") };
+        match event {
+            CheevoEvent::Loaded { title, total: 0, .. } => {
+                Ok(Toast::new(vec![title, "No achievements for this game yet".into()], 4))
+            }
+            CheevoEvent::Loaded { title, unlocked, total, points, points_total } => Ok(Toast::new(
+                vec![
+                    title,
+                    format!(
+                        "{unlocked} of {} unlocked · {points} of {points_total} points",
+                        plural(total, "achievement")
+                    ),
+                ],
+                4,
+            )),
+            CheevoEvent::Unlocked { title, description, points, .. } => Ok(Toast::new(
+                vec![format!("Achievement unlocked · {}", plural(points, "point")), title, description],
+                5,
+            )),
+            CheevoEvent::Mastered { title } => {
+                Ok(Toast::new(vec!["Mastered".into(), title, "Every achievement unlocked".into()], 6))
+            }
+            CheevoEvent::Offline => {
+                Err(Some("Can't reach RetroAchievements; unlocks will be sent when it's back".into()))
+            }
+            CheevoEvent::Online => Err(Some("RetroAchievements is back; unlocks sent".into())),
+            CheevoEvent::Problem(p) => Err(Some(p)),
+        }
+    }
+}
 
 /// What the launch animation needs to know to play.
 pub struct Launch {
@@ -96,11 +145,13 @@ pub struct Embedded {
     /// How round the picture's corners are, as a fraction of its height.
     corners: f64,
     filter: Filter,
+    /// Achievement notices still to show, the one showing first.
+    toasts: VecDeque<Toast>,
 }
 
 impl Embedded {
     /// Starts the game, after the launch animation if there's one, with corners `corners` of its
-    /// height round and `filter` over the picture.
+    /// height round and `filter` over the picture, and its achievements checked with `cheevos`.
     pub fn start(
         game: usize,
         core: Core,
@@ -108,10 +159,11 @@ impl Embedded {
         launch: Option<Launch>,
         corners: f64,
         filter: Filter,
+        cheevos: Option<cheevos::Setup>,
     ) -> Result<Embedded> {
         // With the animation, the game's cells are placed before it draws, in the shape it says.
         let shape = if launch.is_some() { core.display_size() } else { (0.0, 0.0) };
-        let (shared, thread) = Shared::start(core, volume, launch.is_some())?;
+        let (shared, thread) = Shared::start(core, volume, launch.is_some(), cheevos)?;
         // Key releases are needed to know when a button is let go.
         let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
         execute!(std::io::stdout(), PushKeyboardEnhancementFlags(flags))?;
@@ -139,6 +191,7 @@ impl Embedded {
             intro,
             corners,
             filter,
+            toasts: VecDeque::new(),
         })
     }
 
@@ -175,6 +228,33 @@ impl Embedded {
     /// Why the game's save couldn't be written, once for each time it couldn't.
     pub fn save_error(&self) -> Option<String> {
         self.shared.take_save_error()
+    }
+
+    /// Queues notices for what's happened with the game's achievements, and gives back the last
+    /// thing to say in the status bar, if there's one.
+    pub fn cheevo_status(&mut self) -> Option<String> {
+        let mut status = None;
+        for event in self.shared.take_cheevo_events() {
+            match Toast::for_event(event) {
+                Ok(toast) => self.toasts.push_back(toast),
+                Err(say) => status = say.or(status),
+            }
+        }
+        status
+    }
+
+    /// The notice to show over the game now, if there's one.
+    pub fn toast(&mut self) -> Option<&Toast> {
+        while self.toasts.front().is_some_and(|t| t.shown.is_some_and(|s| s.elapsed() >= t.lasts)) {
+            self.toasts.pop_front();
+        }
+        // Notices wait for the launch animation, so the first one isn't missed.
+        if self.intro.is_some() {
+            return None;
+        }
+        let toast = self.toasts.front_mut()?;
+        toast.shown.get_or_insert_with(Instant::now);
+        Some(toast)
     }
 
     /// Stops the game, which saves it a last time, and says why that save failed if it did.
@@ -335,5 +415,38 @@ impl Drop for Embedded {
         for name in &self.pending {
             kitty::remove_shm(name);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn achievement_events_become_notices_or_status() {
+        let loaded = CheevoEvent::Loaded {
+            title: "Pocket Lantern".into(),
+            unlocked: 3,
+            total: 25,
+            points: 20,
+            points_total: 310,
+        };
+        assert_eq!(
+            Toast::for_event(loaded).unwrap().lines,
+            ["Pocket Lantern", "3 of 25 achievements unlocked · 20 of 310 points"]
+        );
+        let none = CheevoEvent::Loaded { title: "Demo".into(), unlocked: 0, total: 0, points: 0, points_total: 0 };
+        assert_eq!(Toast::for_event(none).unwrap().lines[1], "No achievements for this game yet");
+        let unlocked = CheevoEvent::Unlocked {
+            title: "First Light".into(),
+            description: "Light the lantern".into(),
+            points: 1,
+            badge_url: None,
+        };
+        assert_eq!(
+            Toast::for_event(unlocked).unwrap().lines,
+            ["Achievement unlocked · 1 point", "First Light", "Light the lantern"]
+        );
+        assert_eq!(Toast::for_event(CheevoEvent::Problem("nope".into())), Err(Some("nope".into())));
     }
 }

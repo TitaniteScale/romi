@@ -75,6 +75,8 @@ class Sandbox:
             for f in files:
                 (self.home / "ROMs" / system / f).touch()
         self.config_path = self.root / "config.json"
+        # More environment for romi, like a fake server's address.
+        self.extra_env = {}
         self.write_config(CONFIG if config is None else config)
 
     def write_config(self, config):
@@ -91,6 +93,7 @@ class Sandbox:
             "XDG_DATA_HOME": str(self.home / ".local/share"),
             "ROMI_CONFIG": str(self.config_path),
             "LANG": "C.UTF-8",
+            **self.extra_env,
         }
 
     def write_state(self, state):

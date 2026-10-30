@@ -4,6 +4,71 @@ use super::*;
 
 // ---- achievements ----
 
+/// `romi achievements login`: swaps a password for a login token and keeps the token.
+pub(super) fn login(cfg: &Config, username: Option<String>) -> Result<()> {
+    let username = username.or_else(|| cfg.retroachievements.username.clone()).filter(|u| !u.trim().is_empty());
+    let Some(username) = username else {
+        return fail(exit::USAGE, "give your RetroAchievements username: romi achievements login <username>");
+    };
+    let password = read_password(&format!("RetroAchievements password for {username}: "))?;
+    if password.is_empty() {
+        return fail(exit::USAGE, "no password given");
+    }
+    let client = crate::emu::cheevos::Client::new(0)?;
+    let login = client
+        .login_with_password(&username, &password, std::time::Duration::from_secs(30))
+        .or_else(|e| fail(exit::UNAVAILABLE, format!("RetroAchievements login failed: {e:#}")))?;
+    crate::emu::cheevos::save_login(&login)?;
+    println!(
+        "Logged in to RetroAchievements as {}. Games played in romi will earn achievements (softcore).",
+        login.username
+    );
+    println!("romi keeps a login token in {}, not your password.", config::tilde(&crate::emu::cheevos::login_path()));
+    Ok(())
+}
+
+/// `romi achievements logout`.
+pub(super) fn logout() -> Result<()> {
+    if crate::emu::cheevos::forget_login()? {
+        println!("Logged out of RetroAchievements.");
+    } else {
+        println!("Not logged in to RetroAchievements.");
+    }
+    Ok(())
+}
+
+/// A password from the terminal, without showing it, or the first line of stdin when that isn't a
+/// terminal (for scripts and password managers).
+fn read_password(prompt: &str) -> Result<String> {
+    use std::io::{BufRead, IsTerminal, Write};
+    let stdin = std::io::stdin();
+    if !stdin.is_terminal() {
+        let mut line = String::new();
+        stdin.lock().read_line(&mut line)?;
+        return Ok(line.trim_end_matches(['\r', '\n']).to_string());
+    }
+    eprint!("{prompt}");
+    std::io::stderr().flush()?;
+    // SAFETY: tcgetattr and tcsetattr only read and write the termios they're given.
+    let saved = unsafe {
+        let mut t: libc::termios = std::mem::zeroed();
+        if libc::tcgetattr(libc::STDIN_FILENO, &mut t) != 0 {
+            bail!("can't read the terminal's settings");
+        }
+        let saved = t;
+        t.c_lflag &= !libc::ECHO;
+        libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &t);
+        saved
+    };
+    let mut line = String::new();
+    let read = stdin.lock().read_line(&mut line);
+    // SAFETY: as above.
+    unsafe { libc::tcsetattr(libc::STDIN_FILENO, libc::TCSANOW, &saved) };
+    eprintln!();
+    read?;
+    Ok(line.trim_end_matches(['\r', '\n']).to_string())
+}
+
 pub(super) fn achievements(cfg: &Config, json: bool) -> Result<()> {
     let lib = Library::load(cfg);
     // Without RetroAchievements, Steam's own cache may still have something.

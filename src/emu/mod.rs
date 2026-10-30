@@ -3,6 +3,7 @@
 //! TUI's middle panel, both over the Kitty graphics protocol.
 
 pub mod audio;
+pub mod cheevos;
 pub mod controls;
 pub mod embedded;
 pub mod kitty;

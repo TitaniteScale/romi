@@ -1524,13 +1524,22 @@ impl App {
         }
         let volume = self.cfg.volume_gain();
         let launch = self.launch_animation(g, &rom);
-        let started = crate::emu::runner::load(&self.cfg, &core, &rom).and_then(|core| {
-            crate::emu::embedded::Embedded::start(g, core, volume, launch, self.cfg.corners(), self.cfg.screen_filter)
-        });
+        let cheevos = self.cheevos_setup(g);
+        let (corners, filter) = (self.cfg.corners(), self.cfg.screen_filter);
+        let started = crate::emu::runner::load(&self.cfg, &core, &rom)
+            .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume, launch, corners, filter, cheevos));
         match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),
         }
+    }
+
+    /// What a game played here needs for its achievements: the RetroAchievements login and the
+    /// ROM's hash. None without a login, or for a system RetroAchievements doesn't hash.
+    fn cheevos_setup(&self, g: usize) -> Option<crate::emu::cheevos::Setup> {
+        let login = crate::emu::cheevos::saved_login()?;
+        let (console, hash) = crate::ra::game_hash(&self.lib, g)?;
+        Some(crate::emu::cheevos::Setup { login, console, hash })
     }
 
     /// The launch animation for a game played here, if it's on: its system's console, or a TV.
@@ -1599,6 +1608,9 @@ impl App {
             return self.set_status(Level::Error, format!("Stopped: {e:#}"));
         }
         let (sound_error, save_error) = (embedded.sound_error(), embedded.save_error());
+        if let Some(say) = embedded.cheevo_status() {
+            self.set_status(Level::Warn, say);
+        }
         if let Some(e) = sound_error {
             self.set_status(Level::Warn, format!("No sound: {e}"));
         }

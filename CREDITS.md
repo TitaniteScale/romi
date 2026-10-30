@@ -3,6 +3,16 @@
 romi's own code is under the MIT license (see [LICENSE](LICENSE)). The files listed here are other
 people's work, used under their own licenses.
 
+## Code
+
+| What                                                          | Where                       | License |
+| ------------------------------------------------------------- | --------------------------- | ------- |
+| [rcheevos](https://github.com/RetroAchievements/rcheevos) 12.5.0 | `vendor/rcheevos/`          | MIT     |
+| `libretro.h`, from [libretro-common](https://github.com/libretro/libretro-common) | `vendor/libretro/libretro.h` | MIT     |
+
+rcheevos is RetroAchievements' library for checking achievements against a game's memory and
+talking to its server; romi compiles it in for achievements in games played in romi.
+
 ## 3D models
 
 The launch animation's wireframes, in [`src/emu/wireframes/`](src/emu/wireframes) and built into

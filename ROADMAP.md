@@ -195,11 +195,24 @@ It's built in steps, and the first one pays off without any of the TUI work:
 6. **Full screen**: at first, scale the game to fill the terminal. Later, maybe, hand off to RetroArch
    mid-game through a save state. Whether romi's save states and RetroArch's are compatible still needs
    checking.
-7. **RetroAchievements during play**: unlock notifications drawn over the game. This needs `rcheevos`
-   (RetroAchievements' C library, compiled into romi) to check each achievement's memory conditions
-   against the core's memory every frame. Showing an unlock only needs the achievement list.
-   Recording it on the user's account needs a login token from their password, because the web API
-   key romi has now only reads.
+7. ✓ **RetroAchievements during play**: rcheevos 12.5.0 (`vendor/rcheevos`, MIT) is compiled in,
+   with a little C glue (`src/emu/cheevos.c`) so the Rust side never mirrors its structs.
+   `romi achievements login` swaps the password for a login token and keeps only that. A game
+   played in romi loads its achievements by the ROM's hash, checks them after every frame through
+   rcheevos' libretro helpers (which lay out memory from the core's memory map, now kept), and
+   unlocks go to the account as they happen, with a notice over the game. The web API's `MemAddr`
+   is only a hash of the conditions, so the login was needed. Unlocks are softcore: the server
+   demotes hardcore unlocks from clients it hasn't approved. The e2e tests run against a fake
+   server (`e2e/fake_ra.py`, through `ROMI_RA_HOST`). mGBA only gives its memory map once it has
+   run a frame, so memory is laid out after frames, again whenever the core gives a new map, and
+   achievements aren't started before the first frame; before that, every GBA achievement that
+   reads EWRAM was turned off (found playing Pokémon Emerald).
+   - Still to do: badges in the notices (rcheevos gives their URLs); progress and challenge
+     indicators, and leaderboards (rcheevos sends the events, romi ignores them); rich presence
+     is sent but not shown; `romi run --live` and headless `romi run` (where a scripted run
+     earning an achievement would make a good regression test for ROM hacks); unlocks still
+     waiting when a game stops are lost; hardcore, which would need RetroAchievements to approve
+     romi.
 8. **Launch animation**: a wireframe of the system (a console and a CRT, or a cabinet) builds itself
    out of lines, then the camera dives into its screen and lands on the cells the game is drawn in.
    Each game's file name seeds how the lines enter (pen trace, reverse explode, scan flash, fly in,

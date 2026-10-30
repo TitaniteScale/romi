@@ -43,6 +43,43 @@ const PIXEL_RGB565: c_int = 2;
 /// The game's battery-backed RAM, where cartridges keep their saves.
 const MEMORY_SAVE_RAM: c_uint = 0;
 
+/// One part of the console's address space and where the core keeps it (libretro.h's
+/// `retro_memory_descriptor`). RetroAchievements reads memory through these.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct MemoryDescriptor {
+    flags: u64,
+    ptr: *mut c_void,
+    offset: usize,
+    start: usize,
+    select: usize,
+    disconnect: usize,
+    len: usize,
+    addrspace: *const c_char,
+}
+
+/// libretro.h's `retro_memory_map`.
+#[repr(C)]
+pub struct MemoryMap {
+    pub descriptors: *const MemoryDescriptor,
+    pub num_descriptors: c_uint,
+}
+
+/// The memory map a core gave, copied, since the core needn't keep it, and which one it is: the
+/// count goes up each time the core gives one. Cores give it while the game loads, or (mGBA) on
+/// the first frame, and again when they reset.
+#[derive(Clone, Default)]
+pub struct Descriptors(pub Vec<MemoryDescriptor>, pub u64);
+
+// SAFETY: the pointers are into the core's memory, which stays put while the game is loaded and is
+// only read through them on the thread driving the core.
+unsafe impl Send for Descriptors {}
+
+/// The core's functions for its memory: where a kind of it is (`retro_get_memory_data`), and how
+/// big (`retro_get_memory_size`).
+pub type MemoryDataFn = unsafe extern "C" fn(c_uint) -> *mut c_void;
+pub type MemorySizeFn = unsafe extern "C" fn(c_uint) -> usize;
+
 /// What the video callback gets instead of pixels when the core renders with OpenGL or Vulkan.
 const HW_FRAME_BUFFER_VALID: *const c_void = usize::MAX as *const c_void;
 
@@ -99,8 +136,8 @@ struct Api {
     deinit: unsafe extern "C" fn(),
     run: unsafe extern "C" fn(),
     unload_game: unsafe extern "C" fn(),
-    get_memory_data: unsafe extern "C" fn(c_uint) -> *mut c_void,
-    get_memory_size: unsafe extern "C" fn(c_uint) -> usize,
+    get_memory_data: MemoryDataFn,
+    get_memory_size: MemorySizeFn,
 }
 
 impl Api {
@@ -190,6 +227,7 @@ struct Shared {
     /// The last frame's sound: interleaved left and right samples at the core's sample rate.
     audio: Vec<i16>,
     buttons: u16,
+    memory_map: Descriptors,
 }
 
 static SHARED: Mutex<Shared> = Mutex::new(Shared {
@@ -201,6 +239,7 @@ static SHARED: Mutex<Shared> = Mutex::new(Shared {
     frame: Frame { width: 0, height: 0, rgb: Vec::new(), pixel_aspect: 0.0 },
     audio: Vec::new(),
     buttons: 0,
+    memory_map: Descriptors(Vec::new(), 0),
 });
 
 static LOADED: AtomicBool = AtomicBool::new(false);
@@ -236,8 +275,18 @@ extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             | ENV_SET_INPUT_DESCRIPTORS
             | ENV_SET_VARIABLES
             | ENV_SET_SUPPORT_NO_GAME
-            | ENV_SET_CONTROLLER_INFO
-            | ENV_SET_MEMORY_MAPS => {}
+            | ENV_SET_CONTROLLER_INFO => {}
+            ENV_SET_MEMORY_MAPS => {
+                let map = &*(data as *const MemoryMap);
+                let descriptors = if map.descriptors.is_null() {
+                    &[][..]
+                } else {
+                    std::slice::from_raw_parts(map.descriptors, map.num_descriptors as usize)
+                };
+                let mut s = shared();
+                let given = s.memory_map.1 + 1;
+                s.memory_map = Descriptors(descriptors.to_vec(), given);
+            }
             ENV_SET_GEOMETRY => {
                 let g = &*(data as *const Geometry);
                 shared().geometry = (g.base_width, g.base_height, g.aspect_ratio);
@@ -420,6 +469,7 @@ impl Core {
             frame: Frame::default(),
             audio: Vec::new(),
             buttons: 0,
+            memory_map: Descriptors::default(),
         };
         // SAFETY: loading a core runs its initializers; libretro cores are made to be loaded this way.
         let lib = unsafe { libloading::Library::new(core_path) }
@@ -448,8 +498,8 @@ impl Core {
                 deinit: sym!("retro_deinit", unsafe extern "C" fn()),
                 run: sym!("retro_run", unsafe extern "C" fn()),
                 unload_game: sym!("retro_unload_game", unsafe extern "C" fn()),
-                get_memory_data: sym!("retro_get_memory_data", unsafe extern "C" fn(c_uint) -> *mut c_void),
-                get_memory_size: sym!("retro_get_memory_size", unsafe extern "C" fn(c_uint) -> usize),
+                get_memory_data: sym!("retro_get_memory_data", MemoryDataFn),
+                get_memory_size: sym!("retro_get_memory_size", MemorySizeFn),
             };
             let mut info = std::mem::zeroed::<SystemInfo>();
             sym!("retro_get_system_info", unsafe extern "C" fn(*mut SystemInfo))(&mut info);
@@ -554,6 +604,21 @@ impl Core {
 
     pub fn frame(&self) -> Frame {
         shared().frame.clone()
+    }
+
+    /// The memory map the core gave, if it gave one, for reading the console's memory.
+    pub fn memory_map(&self) -> Descriptors {
+        shared().memory_map.clone()
+    }
+
+    /// Which memory map the core gave last (see `Descriptors`), to tell when there's a new one.
+    pub fn memory_map_given(&self) -> u64 {
+        shared().memory_map.1
+    }
+
+    /// The core's own functions for finding its memory, which stay valid while it's loaded.
+    pub fn memory_functions(&self) -> (MemoryDataFn, MemorySizeFn) {
+        (self.api.get_memory_data, self.api.get_memory_size)
     }
 
     /// Appends the last frame's sound to `out`, as interleaved left and right samples.
