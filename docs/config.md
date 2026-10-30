@@ -13,7 +13,7 @@ stops. A config that doesn't parse is reported once, and romi carries on with th
 `ctrl-r` reloads by hand.
 
 **Options** in the TUI's menu changes the settings worth changing from the couch: volume, rounded
-corners, the launch animation, covers, title screens, the accent color, borders, and which button
+corners, the screen filter, the launch animation, covers, title screens, the accent color, borders, and which button
 confirms. Each change is saved into your config straight away, changing just that value's text (or
 adding the setting where it's missing), so your comments and layout stay as they are.
 

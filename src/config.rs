@@ -39,6 +39,8 @@ pub struct Config {
     /// How round the corners of a game played in the middle panel are, as a percentage of its
     /// height: 0 is square, about 4 is an old TV's.
     pub corner_radius: u8,
+    /// An old screen's look for a game played in the middle panel: scanlines, a CRT's or an LCD's.
+    pub screen_filter: crate::emu::screen::Filter,
     pub systems: Vec<SystemConfig>,
     pub games: Vec<GameConfig>,
     /// Tweaks to any game (ROM, hand-added or Steam) by its key, as `romi list` shows it.
@@ -207,6 +209,7 @@ impl Default for Config {
             controller: ControllerConfig::default(),
             volume: 100,
             corner_radius: 0,
+            screen_filter: crate::emu::screen::Filter::None,
             systems: Vec::new(),
             games: Vec::new(),
             overrides: HashMap::new(),

@@ -14,6 +14,7 @@ use crate::emu::controls::Controls;
 use crate::emu::kitty;
 use crate::emu::libretro::{Core, Frame};
 use crate::emu::runner::Shared;
+use crate::emu::screen::{self, Filter};
 use crate::emu::wireframe::{self, Beam, Model, Painter, Picture, Plan, Settings, View};
 use anyhow::Result;
 use base64::Engine;
@@ -94,12 +95,20 @@ pub struct Embedded {
     intro_shown: bool,
     /// How round the picture's corners are, as a fraction of its height.
     corners: f64,
+    filter: Filter,
 }
 
 impl Embedded {
     /// Starts the game, after the launch animation if there's one, with corners `corners` of its
-    /// height round.
-    pub fn start(game: usize, core: Core, volume: f32, launch: Option<Launch>, corners: f64) -> Result<Embedded> {
+    /// height round and `filter` over the picture.
+    pub fn start(
+        game: usize,
+        core: Core,
+        volume: f32,
+        launch: Option<Launch>,
+        corners: f64,
+        filter: Filter,
+    ) -> Result<Embedded> {
         // With the animation, the game's cells are placed before it draws, in the shape it says.
         let shape = if launch.is_some() { core.display_size() } else { (0.0, 0.0) };
         let (shared, thread) = Shared::start(core, volume, launch.is_some())?;
@@ -129,6 +138,7 @@ impl Embedded {
             intro_shown: intro.is_some(),
             intro,
             corners,
+            filter,
         })
     }
 
@@ -273,14 +283,18 @@ impl Embedded {
         Ok(true)
     }
 
-    /// Sends a game frame scaled to the game's cells, its corners rounded if they're to be: clear,
-    /// so the terminal's background shows there.
+    /// Sends a game frame scaled to the game's cells, filtered, its corners rounded if they're to
+    /// be: clear, so the terminal's background shows there.
     fn send_game(&mut self, frame: &Frame) -> Result<()> {
         let Some((rect, (w, h))) = self.cells else { return Ok(()) };
+        let sizes = ((w as usize, h as usize), (frame.width as usize, frame.height as usize));
         if self.corners <= 0.0 {
-            return self.send(IMAGE, rect, &frame.resample(w, h), (w, h), 24);
+            let mut pixels = frame.resample(w, h);
+            screen::apply(&mut pixels, 3, sizes.0, sizes.1, self.filter);
+            return self.send(IMAGE, rect, &pixels, (w, h), 24);
         }
         let mut pixels = frame.resample_rgba(w, h);
+        screen::apply(&mut pixels, 4, sizes.0, sizes.1, self.filter);
         let (fw, fh) = (f64::from(w), f64::from(h));
         wireframe::round_corners(&mut pixels, w as usize, [0.0, 0.0, fw, fh], self.corners * fh);
         self.send(IMAGE, rect, &pixels, (w, h), 32)

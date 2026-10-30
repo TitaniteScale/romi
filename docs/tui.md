@@ -87,6 +87,13 @@ The picture is square by default, as the game drew it. `"corner_radius"` rounds 
 percentage of its height: about 4 looks like an old TV. The corners are left clear, so the
 terminal's background shows there.
 
+`"screen_filter"` gives the picture an old screen's look: `"scanlines"`, `"crt"` (scanlines and a
+phosphor mask of red, green and blue columns) or `"lcd"` (a dark grid between the pixels, like a
+handheld's). romi draws it into each frame after scaling it, so it works the same in any terminal,
+and brightens the picture to make up for the dark lines. They need a few screen pixels for each
+of the game's, so a small panel shows less of them. `"none"`, the default, leaves the picture as
+the game drew it.
+
 Games start with a launch animation: a wireframe of the system builds itself out of lines across
 the panel, then the camera dives into its screen as the game starts on it. Game Boy and Game Boy
 Color games get a Game Boy, NES and SNES games an old TV with the console in front of it, arcade

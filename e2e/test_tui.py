@@ -171,7 +171,7 @@ def test_options_save_into_the_config_keeping_comments(start, sandbox):
     # Volume goes from 100 (the default) round to muted, then accent color from blue to cyan.
     romi.keys("l")
     romi.wait_for("‹ muted")
-    romi.keys("jjjjjl")
+    romi.keys("jjjjjjl")
     romi.wait_for("‹ cyan")
     saved = sandbox.config_path.read_text()
     assert "// my own notes" in saved

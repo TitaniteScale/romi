@@ -133,10 +133,13 @@ def set_up_a_game_boy_game(sandbox, **settings):
 
 
 def play_in_romi(romi):
+    # Waits for the game's image rather than the words under it, which ALSA's complaints about the
+    # sandbox's sound devices can write over.
+    seen = len(romi.output)
     romi.keys("o")
     romi.wait_for("Play in romi")
     romi.keys("\r")
-    romi.wait_for("to stop", timeout=10)
+    romi.wait_for(lambda: GAME_IMAGE in romi.output[seen:], timeout=10)
 
 
 def play_a_game_boy_game(start, sandbox, **settings):
@@ -179,13 +182,8 @@ def test_games_played_in_romi_save_where_retroarch_does_and_carry_on_from_it(sta
     save = sandbox.home / SAVE
     romi = start()
     for count in (1, 2):
-        # By the game's image rather than the words under it, which ALSA's complaints about the
-        # sandbox's sound devices can write over.
         seen = len(romi.output)
-        romi.keys("o")
-        romi.wait_for("Play in romi")
-        romi.keys("\r")
-        romi.wait_for(lambda: GAME_IMAGE in romi.output[seen:], timeout=10)
+        play_in_romi(romi)
         romi.keys("\x1b")
         romi.wait_for(lambda: b"a=d,d=I," + GAME_IMAGE[:-1] in romi.output[seen:])
         romi.pump(1)  # past the pause for buttons still held from the game
@@ -204,3 +202,8 @@ def test_a_save_that_cant_be_read_stops_the_game_and_is_left_alone(start, sandbo
     romi.keys("\r")
     romi.wait_for("can't read the save", timeout=10)
     assert save.is_dir()
+
+
+def test_a_screen_filter_keeps_the_game_playing(start, sandbox):
+    out = play_a_game_boy_game(start, sandbox, launch_animation={"enabled": False}, screen_filter="crt")
+    assert out.count(GAME_IMAGE) > 20

@@ -167,6 +167,15 @@ It's built in steps, and the first one pays off without any of the TUI work:
      CPS-1/2 games (384×224) come out 4:3. romi works out how wide each pixel is from the core's
      base size and aspect ratio, since cores like mGBA give a base size (the Super Game Boy's) that
      isn't the frames'. Headless screenshots stay pixel for pixel.
+   - ✓ **Screen filters** (`"screen_filter"`): scanlines, a CRT (scanlines and a phosphor mask)
+     or an LCD grid, drawn by romi into each frame after it's scaled, so it works the same in
+     every terminal. Each is a brightness per screen row and column, about 2 ms a frame at
+     1300×1100, and the picture is brightened to make up for the dark lines. Ghostty's
+     `custom-shader` was the other way to do it, but it covers the whole window, menus too.
+     Still to do: the launch animation's last frames are drawn without the filter, so it comes
+     on as the camera lands; `romi run --live`; screen curvature and glow. Real shaders
+     (RetroArch's `.slangp` presets, through the `librashader` crate on the GPU, reading the
+     frame back to send it) would look better still, at the cost of a GPU and a big dependency.
 3. **Audio and input**: audio through `cpal`, resampled to the device rate and used to pace emulation.
    The controller already goes through `gilrs`. Playing on a keyboard needs key-release events, so it
    only works in terminals that support the Kitty keyboard protocol.

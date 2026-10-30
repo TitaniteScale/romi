@@ -3,12 +3,14 @@
 //! `config_edit`), keeping your comments.
 
 use crate::config::Config;
+use crate::emu::screen::Filter;
 use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Setting {
     Volume,
     Corners,
+    Filter,
     Animation,
     Covers,
     Screens,
@@ -17,9 +19,10 @@ pub enum Setting {
     Confirm,
 }
 
-pub const SETTINGS: [Setting; 8] = [
+pub const SETTINGS: [Setting; 9] = [
     Setting::Volume,
     Setting::Corners,
+    Setting::Filter,
     Setting::Animation,
     Setting::Covers,
     Setting::Screens,
@@ -36,6 +39,7 @@ impl Setting {
         match self {
             Setting::Volume => "Volume",
             Setting::Corners => "Corners",
+            Setting::Filter => "Screen filter",
             Setting::Animation => "Launch animation",
             Setting::Covers => "Covers",
             Setting::Screens => "Title screens",
@@ -50,6 +54,7 @@ impl Setting {
         match self {
             Setting::Volume => &["volume"],
             Setting::Corners => &["corner_radius"],
+            Setting::Filter => &["screen_filter"],
             Setting::Animation => &["launch_animation", "enabled"],
             Setting::Covers => &["art", "show"],
             Setting::Screens => &["art", "screens"],
@@ -64,6 +69,7 @@ impl Setting {
         match self {
             Setting::Volume => json!(cfg.volume),
             Setting::Corners => json!(cfg.corner_radius),
+            Setting::Filter => json!(cfg.screen_filter.name()),
             Setting::Animation => json!(cfg.launch_animation.enabled),
             Setting::Covers => json!(cfg.art.show),
             Setting::Screens => json!(cfg.art.screens),
@@ -78,6 +84,7 @@ impl Setting {
         match self {
             Setting::Volume => (0..=10).map(|n| json!(n * 10)).collect(),
             Setting::Corners => [0, 2, 4, 6, 8].map(|n| json!(n)).to_vec(),
+            Setting::Filter => Filter::ALL.map(|f| json!(f.name())).to_vec(),
             Setting::Accent => ACCENTS.map(|a| json!(a)).to_vec(),
             Setting::Borders => BORDERS.map(|b| json!(b)).to_vec(),
             Setting::Animation | Setting::Covers | Setting::Screens | Setting::Confirm => {
@@ -109,6 +116,7 @@ impl Setting {
             Setting::Volume => format!("{}%", cfg.volume.min(100)),
             Setting::Corners if cfg.corner_radius == 0 => "square".into(),
             Setting::Corners => format!("round, {}%", cfg.corner_radius.min(50)),
+            Setting::Filter => cfg.screen_filter.name().into(),
             Setting::Animation => on(cfg.launch_animation.enabled),
             Setting::Covers => on(cfg.art.show),
             Setting::Screens => on(cfg.art.screens),
