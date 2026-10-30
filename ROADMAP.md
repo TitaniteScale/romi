@@ -89,8 +89,9 @@ not logged in, or no controller is bound, in RetroArch, PCSX2, Dolphin or melonD
 
 ## 3. Managing the library from inside romi ✓
 
-Changes made in the TUI are saved in `state.json` (sort orders, tags) or in `overrides.jsonc`, a file
-the config includes (hidden games, emulator picks). All done.
+Changes made in the TUI are saved in `state.json` (sort orders, tags), in `overrides.jsonc`, a file
+the config includes (hidden games, emulator picks), or, for the options, in the config itself. All
+done.
 
 - ✓ **Multi-disc games as one entry.** "Mr. Bones (Disc 1)" and "(Disc 2)" become one game, launched
   through a generated `.m3u` so the emulator can swap discs.
@@ -104,6 +105,9 @@ the config includes (hidden games, emulator picks). All done.
   and filter by them.
 - ✓ **Hot reload**: the TUI reloads the config when it or a file it includes is saved, waiting while a
   game runs. The controller's A/B swap, covers and the animation's colors change without a restart.
+- ✓ **Options**: a panel in the menu for volume, rounded corners, the launch animation, covers, title
+  screens, the accent color, borders and the confirm button. Each change goes into `config.json`
+  itself, only that value's text changed (`config_edit.rs`), so comments and layout stay.
 
 ## 4. Couch mode and hooks ✓
 

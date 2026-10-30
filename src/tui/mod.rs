@@ -3,4 +3,5 @@
 pub mod app;
 pub mod cheevos;
 pub mod cover;
+pub mod options;
 pub mod ui;

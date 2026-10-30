@@ -41,6 +41,8 @@ pub enum MenuItem {
     Stats,
     Achievements,
     ShowHidden,
+    /// Opens the options panel.
+    Options,
     Reload,
     Quit,
     Favorite,
@@ -252,6 +254,8 @@ pub struct App {
     pub filter_options: filter::Options,
     /// Selected row while the filter panel is open.
     pub filter_panel: Option<usize>,
+    /// The options panel, open on this row.
+    pub options: Option<usize>,
     /// Database metadata being looked up in the background.
     metadata: Option<Receiver<Vec<crate::meta::Found>>>,
     pub quit: bool,
@@ -322,6 +326,7 @@ impl App {
             filter: Filter::default(),
             filter_options: filter::Options::default(),
             filter_panel: None,
+            options: None,
             quit: false,
             systems_list: ListState::default(),
             games_list: ListState::default(),
@@ -696,7 +701,7 @@ impl App {
             self.cheevos_op(op);
             return;
         }
-        if self.filter_panel.is_some() {
+        if self.filter_panel.is_some() || self.options.is_some() {
             let op = match k.code {
                 KeyCode::Up | KeyCode::Char('k') => Op::Up,
                 KeyCode::Down | KeyCode::Char('j') => Op::Down,
@@ -845,6 +850,9 @@ impl App {
         }
         if self.filter_panel.is_some() {
             return self.filter_op(op);
+        }
+        if self.options.is_some() {
+            return self.options_op(op);
         }
         if self.menu.is_some() {
             return self.menu_op(op);
@@ -1120,7 +1128,7 @@ impl App {
                 if self.lib.games.iter().any(|g| g.hidden) {
                     items.push(ShowHidden);
                 }
-                items.extend([Reload, Quit]);
+                items.extend([Options, Reload, Quit]);
                 items
             }
         }
@@ -1148,6 +1156,7 @@ impl App {
             MenuItem::ShowHidden => {
                 format!("Show hidden games ({})", self.lib.games.iter().filter(|g| g.hidden).count())
             }
+            MenuItem::Options => "Options…".into(),
             MenuItem::Reload => "Reload config".into(),
             MenuItem::PlayHere => "Play in romi".into(),
             MenuItem::Quit => "Quit romi".into(),
@@ -1230,6 +1239,7 @@ impl App {
                         self.show_hidden = !self.show_hidden;
                         self.rebuild_keeping_selection();
                     }
+                    MenuItem::Options => self.options = Some(0),
                     MenuItem::Reload => self.reload(),
                     MenuItem::Quit => self.quit = true,
                     MenuItem::Favorite => {
@@ -1277,6 +1287,49 @@ impl App {
 
     /// The filter panel: up/down picks a row, left/right (or A) changes it, and the list updates
     /// behind the panel as you go.
+    /// The options panel: up/down picks a setting, left/right (or A) changes it, saving it into
+    /// the config straight away.
+    fn options_op(&mut self, op: Op) {
+        use crate::tui::options::SETTINGS;
+        let Some(row) = self.options else { return };
+        let n = SETTINGS.len();
+        match op {
+            Op::Up => self.options = Some((row + n - 1) % n),
+            Op::Down => self.options = Some((row + 1) % n),
+            Op::Back | Op::Menu => self.options = None,
+            Op::Left => self.change_setting(SETTINGS[row], false),
+            Op::Right | Op::Confirm => self.change_setting(SETTINGS[row], true),
+            _ => {}
+        }
+    }
+
+    /// Steps a setting to its next value and saves it into the config, changing only that value.
+    fn change_setting(&mut self, setting: crate::tui::options::Setting, forward: bool) {
+        let value = setting.step(&self.cfg, forward);
+        // Changed by hand since romi last read it: everything has to be read again, not just this.
+        let edited_elsewhere = stamps(&self.watched.files) != self.watched.seen;
+        if let Err(e) = crate::config_edit::save(&self.cfg_path, setting.path(), &value) {
+            return self.set_status(Level::Error, format!("{e:#}"));
+        }
+        if edited_elsewhere {
+            return self.reload_as("Saved, and reloaded");
+        }
+        match config::load(&self.cfg_path) {
+            Ok(cfg) => {
+                let art_changed = (cfg.art.show, cfg.art.screens) != (self.cfg.art.show, self.cfg.art.screens);
+                if let Some(c) = self.covers.as_mut().filter(|_| art_changed) {
+                    c.reset(&cfg);
+                }
+                self.cfg = cfg;
+                self.apply_settings();
+                self.watched = Watched::new(&self.cfg_path, &self.cfg);
+                let shown = setting.shown(&self.cfg);
+                self.set_status(Level::Info, format!("{}: {shown}", setting.label()));
+            }
+            Err(e) => self.set_status(Level::Error, format!("Config error: {e:#}")),
+        }
+    }
+
     fn filter_op(&mut self, op: Op) {
         let Some(row) = self.filter_panel else { return };
         let rows = filter::ROWS.len();

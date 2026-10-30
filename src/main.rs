@@ -3,6 +3,7 @@ mod archive;
 mod art;
 mod cli;
 mod config;
+mod config_edit;
 mod emu;
 mod emucfg;
 mod emulators;

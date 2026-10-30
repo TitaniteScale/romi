@@ -134,6 +134,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.filter_panel.is_some() {
         draw_filter(f, app, &theme, body);
     }
+    if app.options.is_some() {
+        draw_options(f, app, &theme, body);
+    }
     if app.stats.is_some() {
         draw_stats(f, app, &theme, body);
     }
@@ -176,6 +179,38 @@ fn draw_filter(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     f.render_widget(Clear, rect);
     let count = Line::from(Span::styled(format!(" {} games ", app.filtered_count()), Style::new().dim()));
     let block = theme.block(" Filter ", true).title_bottom(count.right_aligned()).padding(Padding::vertical(1));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+/// The options: each setting and what it's set to, changed in place with left and right.
+fn draw_options(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    use crate::tui::options::SETTINGS;
+    let Some(sel) = app.options else { return };
+    let lines: Vec<Line> = SETTINGS
+        .iter()
+        .enumerate()
+        .map(|(i, &setting)| {
+            let style = if i == sel { theme.selected(true) } else { Style::new() };
+            Line::from(vec![
+                Span::styled(format!("  {:<18}", setting.label()), style.patch(Style::new().dim())),
+                Span::styled(format!("‹ {:<17} ›   ", setting.shown(&app.cfg)), style),
+            ])
+        })
+        .collect();
+    let rect = centered(area, 46, lines.len() as u16 + 4);
+    f.render_widget(Clear, rect);
+    // What saving says, since the status line is hidden under the panel's hints.
+    let saved = match &app.status {
+        Some(s) if matches!(s.level, Level::Error) => {
+            let text = text::truncate(&s.text, 40);
+            Line::from(Span::styled(format!(" {text} "), Style::new().fg(Color::Red)))
+        }
+        _ => {
+            let file = app.cfg_path.file_name().map_or("the config".into(), |n| n.to_string_lossy().into_owned());
+            Line::from(Span::styled(format!(" saved in {file} "), Style::new().dim()))
+        }
+    };
+    let block = theme.block(" Options ", true).title_bottom(saved.right_aligned()).padding(Padding::vertical(1));
     f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
@@ -702,7 +737,7 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let pad = matches!(app.pad, PadState::Connected(_));
     let (ok, back) = if app.cfg.controller.swap_confirm { ("B", "A") } else { ("A", "B") };
 
-    if app.filter_panel.is_some() {
+    if app.filter_panel.is_some() || app.options.is_some() {
         let line = if pad {
             hints(&[("←/→", "change"), ("↑/↓", "row"), (back, "done")])
         } else {

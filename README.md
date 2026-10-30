@@ -66,7 +66,7 @@ anything you `romi add`. Rerun `romi init` after installing an emulator or addin
 | `F`               | R3              | filter by genre, players, decade, played, tag   |
 | `s`               | (menu)          | sort: name, last played, most played, year      |
 | `o`               | Start → game…   | the selected game's menu: favorite, hide, tags, emulator, achievements |
-| `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, cover grid, details, stats, achievements, show hidden, reload, quit |
+| `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, cover grid, details, stats, achievements, show hidden, options, reload, quit |
 | `ctrl-r`          |                 | reload config (it reloads by itself when saved) |
 | `q`               |                 | quit                                            |
 

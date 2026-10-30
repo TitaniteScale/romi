@@ -12,6 +12,11 @@ last save, so there's no need to restart romi. While a game is running it waits 
 stops. A config that doesn't parse is reported once, and romi carries on with the one it had.
 `ctrl-r` reloads by hand.
 
+**Options** in the TUI's menu changes the settings worth changing from the couch: volume, rounded
+corners, the launch animation, covers, title screens, the accent color, borders, and which button
+confirms. Each change is saved into your config straight away, changing just that value's text (or
+adding the setting where it's missing), so your comments and layout stay as they are.
+
 ```jsonc
 {
   "roms_dir": "~/ROMs",

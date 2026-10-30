@@ -158,3 +158,25 @@ def test_a_broken_edit_is_reported_once_and_the_old_config_kept(start, sandbox):
     # Fixed, it's read again.
     sandbox.write_config(CONFIG)
     romi.wait_for("Config changed, reloaded: 5 games")
+
+
+def test_options_save_into_the_config_keeping_comments(start, sandbox):
+    text = json.dumps(CONFIG, indent=2).replace('{\n', '{\n  // my own notes\n', 1)
+    sandbox.config_path.write_text(text)
+    romi = start()
+    romi.keys("m")
+    romi.wait_for("Options…")
+    romi.keys("kkk\r")
+    romi.wait_for("Launch animation")
+    # Volume goes from 100 (the default) round to muted, then accent color from blue to cyan.
+    romi.keys("l")
+    romi.wait_for("‹ muted")
+    romi.keys("jjjjjl")
+    romi.wait_for("‹ cyan")
+    saved = sandbox.config_path.read_text()
+    assert "// my own notes" in saved
+    assert json.loads(saved.replace("// my own notes", ""))["volume"] == 0
+    assert '"theme": { "accent": "cyan" }' in saved
+    # Its own change isn't taken for someone else's: no reload.
+    romi.pump(1.5)
+    assert "reloaded" not in romi.text()
