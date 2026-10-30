@@ -1,8 +1,10 @@
 //! What romi can tell from emulators' own settings files: for `romi check`, whether
 //! RetroAchievements is on and logged in and whether a controller is bound; for games played in
-//! romi, where RetroArch keeps saves. romi only ever reads these files.
+//! romi, where RetroArch keeps saves, and the core options and remaps it has. romi only ever reads
+//! these files.
 
 use crate::config::{Config, expand_path};
+use crate::emu::remap::Remap;
 use crate::library::Library;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -266,6 +268,34 @@ fn core_options(ini: &Ini, config_dir: &Path, core: &str, rom: &Path) -> BTreeMa
     options
 }
 
+/// The remap RetroArch would play `rom` with in `core`, or none, so games play with the same
+/// controls in romi.
+pub fn retroarch_remap(core: &str, rom: &Path) -> Remap {
+    let dir = Emulator::RetroArch.config_dir(false);
+    remap(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
+}
+
+/// The game's remap file, else its folder's, else the core's: only the first one found, as in
+/// RetroArch. Remaps sorted by controller (`input_remap_sort_by_controller_enable`) aren't found.
+fn remap(ini: &Ini, config_dir: &Path, core: &str, rom: &Path) -> Remap {
+    // Both default to on, as RetroArch's do.
+    if ini.get("", "auto_remaps_enable") == Some("false") || ini.get("", "input_remap_binds_enable") == Some("false") {
+        return Remap::default();
+    }
+    let dir = ini
+        .get("", "input_remapping_directory")
+        .filter(|v| !v.is_empty() && *v != "default")
+        .map_or(config_dir.join("config/remaps"), expand_path)
+        .join(core);
+    let names = [rom.file_stem(), rom.parent().and_then(|p| p.file_name()), Some(core.as_ref())];
+    names
+        .into_iter()
+        .flatten()
+        .find_map(|name| std::fs::read_to_string(dir.join(format!("{}.rmp", name.to_string_lossy()))).ok())
+        .map(|text| Remap::parse(&Ini::parse(&text).section("").collect()))
+        .unwrap_or_default()
+}
+
 fn save_dir(ini: &Ini, config_dir: &Path, core: &str, rom: &Path) -> Option<PathBuf> {
     if ini.get("", "savefiles_in_content_dir") == Some("true") {
         return None;
@@ -368,6 +398,30 @@ mod tests {
         assert_eq!(all["aspect"], "4:3");
         assert_eq!(no_games["cpu"], "interpreter");
         assert_eq!(no_games["res"], "960x720");
+    }
+
+    #[test]
+    fn remaps_take_the_games_else_the_folders_else_the_cores() {
+        let dir = std::env::temp_dir().join(format!("romi-remap-test-{}", std::process::id()));
+        let core = dir.join("config/remaps/Beetle PSX");
+        std::fs::create_dir_all(&core).unwrap();
+        let write = |name: &str, device: u32| {
+            std::fs::write(core.join(name), format!("input_libretro_device_p1 = \"{device}\"\n")).unwrap();
+        };
+        write("Beetle PSX.rmp", 1);
+        write("psx.rmp", 5);
+        write("Ape Escape (USA).rmp", 517);
+        let device = |cfg: &str, rom: &str| remap(&Ini::parse(cfg), &dir, "Beetle PSX", Path::new(rom)).devices[0];
+        let found = [
+            device("", "/roms/psx/Ape Escape (USA).chd"),
+            device("", "/roms/psx/Crash Bandicoot (USA).chd"),
+            device("", "/roms/ps1/Crash Bandicoot (USA).chd"),
+            device("auto_remaps_enable = \"false\"", "/roms/psx/Ape Escape (USA).chd"),
+            device("input_remap_binds_enable = \"false\"", "/roms/psx/Ape Escape (USA).chd"),
+            device("input_remapping_directory = \"/nowhere\"", "/roms/psx/Ape Escape (USA).chd"),
+        ];
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(found, [Some(517), Some(5), Some(1), None, None, None]);
     }
 
     #[test]

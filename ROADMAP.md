@@ -361,13 +361,17 @@ position, SNES-style, and RetroArch's default keys. Every controller is merged i
 the core sees nothing on the other ports. Emulators that run on their own keep their own controls,
 and as more systems play in romi, this is where their controls end up.
 
-1. **RetroArch's remap files**, read the way core options are: from `input_remapping_directory`
-   (`config/remaps` by default), in the core's folder, the game's `.rmp`, else its folder's, else
-   the core's, the first one found winning, as in RetroArch. Skipped when
-   `input_remap_binds_enable` is off. The `input_playerN_btn_*` lines say which button each of the
-   pad's buttons sends, and `input_libretro_device_pN` the controller type, which Ape Escape needs
-   to be a DualShock. That way, remaps made in RetroArch carry over. There are none on this machine
-   yet, so the tests need one made up.
+1. ✓ **RetroArch's remap files** (`emu/remap.rs`), read the way core options are: from
+   `input_remapping_directory` (`config/remaps` by default), in the core's folder, the game's
+   `.rmp`, else its folder's, else the core's, the first one found winning, as in RetroArch.
+   Skipped when `auto_remaps_enable` or `input_remap_binds_enable` is off. Player 1's
+   `input_player1_btn_*` and `_stk_*` lines say which button or stick direction each of the pad's
+   sends (sticks to buttons and back included), and `input_libretro_device_pN` the controller type
+   plugged into each port, which Ape Escape needs to be a DualShock. `romi run` uses them too, so
+   its scripts press the pad's buttons. Left out: remaps sorted by controller
+   (`input_remap_sort_by_controller_enable`), the keyboard lines (`_key_*`), turbo, and
+   `analog_dpad_mode`, since romi decides for itself when the left stick is also the d-pad. There
+   are no remap files on this machine yet, so it's only been tried with made-up ones.
 2. **Remapping in the TUI**, for a system or a single game, using the controller or the keyboard:
    "press the button for A", one button at a time, with what the button does in the game next to
    it ("B — Jump"). Cores say that as they start (`SET_INPUT_DESCRIPTORS`), so romi would remember it

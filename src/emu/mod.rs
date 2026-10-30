@@ -13,6 +13,7 @@ pub mod libretro;
 pub mod live;
 pub mod notice;
 pub mod options;
+pub mod remap;
 pub mod runner;
 pub mod screen;
 pub mod timing;

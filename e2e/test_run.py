@@ -81,6 +81,67 @@ def test_a_core_that_crashes_while_loading_leaves_the_tui_running(start, sandbox
     assert romi.exited is None
 
 
+# Writes the controller type plugged into port 1 and the buttons it sees held there, as a bitmask
+# in libretro's order, to SEEN after every frame.
+PAD_CORE = r"""
+#include <stdio.h>
+struct info { const char *name, *version, *extensions; _Bool need_fullpath, block_extract; };
+struct av { unsigned w, h, max_w, max_h; float aspect; double fps, rate; };
+typedef short (*state_fn)(unsigned, unsigned, unsigned, unsigned);
+static state_fn state;
+static unsigned device;
+unsigned retro_api_version(void) { return 1; }
+void retro_get_system_info(struct info *i) { i->name = "Pad Reader"; i->version = "1"; i->extensions = "gba"; i->need_fullpath = 1; }
+void retro_get_system_av_info(struct av *a) { a->w = a->max_w = 240; a->h = a->max_h = 160; a->aspect = 0; a->fps = 60; a->rate = 32768; }
+void retro_set_environment(void *f) {}
+void retro_set_video_refresh(void *f) {}
+void retro_set_audio_sample(void *f) {}
+void retro_set_audio_sample_batch(void *f) {}
+void retro_set_input_poll(void *f) {}
+void retro_set_input_state(state_fn f) { state = f; }
+void retro_set_controller_port_device(unsigned port, unsigned d) { if (port == 0) device = d; }
+void retro_init(void) {}
+void retro_deinit(void) {}
+void retro_run(void) {
+    unsigned held = 0;
+    for (unsigned id = 0; id < 16; id++) held |= (state(0, 1, 0, id) != 0) << id;
+    FILE *f = fopen("SEEN", "w");
+    fprintf(f, "%u %u\n", device, held);
+    fclose(f);
+}
+void retro_unload_game(void) {}
+void *retro_get_memory_data(unsigned id) { return 0; }
+unsigned long retro_get_memory_size(unsigned id) { return 0; }
+_Bool retro_load_game(const void *game) { return 1; }
+"""
+
+
+def test_runs_use_retroarchs_remap_for_the_game(sandbox):
+    seen = sandbox.home / "seen.txt"
+    source = sandbox.home / "pad.c"
+    source.write_text(PAD_CORE.replace('"SEEN"', f'"{seen}"'))
+    core = sandbox.home / "pad_libretro.so"
+    subprocess.run(["cc", "-shared", "-fPIC", "-o", str(core), str(source)], check=True)
+    script = sandbox.home / "input.txt"
+    script.write_text("0 a start\n")
+
+    def run():
+        out = run_cli(sandbox, "run", "advance wars", "--core", str(core), "--frames", "2", "--input", str(script))
+        assert out.returncode == 0, out.stderr
+        device, held = map(int, seen.read_text().split())
+        return device, held
+
+    a, b, start = 1 << 8, 1 << 0, 1 << 3
+    assert run() == (1, a | start), "a pad, with the buttons as pressed"
+    remaps = sandbox.home / ".config/retroarch/config/remaps/Pad Reader"
+    remaps.mkdir(parents=True)
+    # A and B swapped, and a DualShock plugged in.
+    (remaps / "Advance Wars (USA).rmp").write_text(
+        'input_libretro_device_p1 = "517"\ninput_player1_btn_a = "0"\ninput_player1_btn_b = "8"\n'
+    )
+    assert run() == (517, b | start)
+
+
 # Draws a blank 160x144 screen, with a frame of silence, 60 times a second. Its game saves once,
 # on its first frame: one more than the count it found in its 8 KB of save RAM.
 DRAWING_CORE = r"""

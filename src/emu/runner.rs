@@ -17,9 +17,9 @@ use std::time::{Duration, Instant};
 /// Loads a core to play `rom` with. It gets RetroArch's system folder and RetroArch's save folder
 /// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways. The
 /// game's own save goes where RetroArch keeps it too, so a game saved in romi carries on in
-/// RetroArch and back, and the core runs with the options RetroArch has for it and the game. With
-/// `shown_height`, how many screen pixels tall the game will be, 3D cores draw at about that size
-/// if `sharp_3d` is on.
+/// RetroArch and back, and the core runs with the options and remap RetroArch has for it and the
+/// game. With `shown_height`, how many screen pixels tall the game will be, 3D cores draw at about
+/// that size if `sharp_3d` is on.
 pub fn load(cfg: &Config, core: &Path, rom: &Path, shown_height: Option<u32>) -> Result<Core> {
     let name = crate::emu::libretro::info(core).map(|info| info.name);
     let saves = name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom));
@@ -27,9 +27,10 @@ pub fn load(cfg: &Config, core: &Path, rom: &Path, shown_height: Option<u32>) ->
         std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;
     }
     let save_file = save_file(saves.as_deref(), rom);
-    let options = name.map(|name| crate::emucfg::retroarch_core_options(&name, rom)).unwrap_or_default();
+    let options = name.as_ref().map(|name| crate::emucfg::retroarch_core_options(name, rom)).unwrap_or_default();
+    let remap = name.map(|name| crate::emucfg::retroarch_remap(&name, rom)).unwrap_or_default();
     let shown_height = shown_height.filter(|_| cfg.sharp_3d);
-    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file, options, shown_height })
+    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file, options, remap, shown_height })
 }
 
 /// Where RetroArch keeps a game's save: the ROM's name with `.srm`, in the save folder, or next to

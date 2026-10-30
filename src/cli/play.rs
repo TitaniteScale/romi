@@ -216,15 +216,15 @@ pub(super) fn run_core(
     // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared
     // before the core, so it's removed after the core has shut down and written its last.
     let saves = crate::files::TempDir::new("saves").context("can't make a save folder in /tmp")?;
+    // The same options and remap as playing it, so a run shows what playing would, at the
+    // console's size, so its screenshots are the same whatever the terminal.
+    let core_name = crate::emu::libretro::info(&core).map(|info| info.name);
     let dirs = crate::emu::libretro::Dirs {
         system: cfg.system_dir(),
         saves: Some(saves.path().to_path_buf()),
         save_file: None,
-        // The same options as playing it, so a run shows what playing would, at the console's
-        // size, so its screenshots are the same whatever the terminal.
-        options: crate::emu::libretro::info(&core)
-            .map(|info| crate::emucfg::retroarch_core_options(&info.name, &rom))
-            .unwrap_or_default(),
+        options: core_name.as_ref().map(|name| crate::emucfg::retroarch_core_options(name, &rom)).unwrap_or_default(),
+        remap: core_name.map(|name| crate::emucfg::retroarch_remap(&name, &rom)).unwrap_or_default(),
         shown_height: None,
     };
     let mut emu = crate::emu::libretro::Core::load(&core, &rom, &dirs)?;

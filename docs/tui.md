@@ -88,7 +88,10 @@ Beetle PSX HW draw with OpenGL, through EGL with no window, on the GPU your scre
 (on a laptop with two, the other one stays asleep), and romi reads each frame back. Vulkan isn't
 there yet, so a core set to draw only with Vulkan won't start. Cores run with the options
 RetroArch has for them (`config/<core>/<core>.opt`, and the ones for the game or its folder), so a
-game plays the same in both. Controllers' sticks and analog triggers reach the core as they are;
+game plays the same in both, and with RetroArch's remap for the game, its folder or the core
+(`config/remaps/<core>/<name>.rmp`, the first one there): which button each of the pad's buttons
+and stick directions sends, and the type of controller plugged in (a DualShock for Ape Escape, say).
+Controllers' sticks and analog triggers reach the core as they are;
 in games played with the stick (N64 ones), the left stick isn't also the d-pad. On a keyboard, the
 arrows push the stick all the way. `ROMI_CORE_LOG=file` writes what the core says there, which is
 the place to look when a game won't start.

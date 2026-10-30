@@ -8,6 +8,7 @@
 //! lives in a global, and only one core can be loaded at a time.
 
 use crate::emu::options::{Options, Variable};
+use crate::emu::remap::Remap;
 use anyhow::{Context, Result, bail};
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
@@ -21,6 +22,8 @@ use std::thread::ThreadId;
 const API_VERSION: c_uint = 1;
 const DEVICE_JOYPAD: c_uint = 1;
 const DEVICE_ANALOG: c_uint = 5;
+/// The base type in a device id, without the subclass (a DualShock is a kind of analog pad).
+const DEVICE_MASK: c_uint = 0xff;
 /// The analog device's indexes: its two sticks, and its buttons' analog values (the triggers).
 const ANALOG_LEFT: c_uint = 0;
 const ANALOG_RIGHT: c_uint = 1;
@@ -691,6 +694,7 @@ extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uin
     if port != 0 {
         return 0;
     }
+    let device = device & DEVICE_MASK;
     let (input, stick_is_stick) = {
         let mut s = shared();
         if device == DEVICE_ANALOG && !s.reads_sticks {
@@ -745,6 +749,8 @@ pub struct Dirs {
     pub save_file: Option<PathBuf>,
     /// Core options set for the core and the game, by key (see `options`).
     pub options: BTreeMap<String, String>,
+    /// What the pad's buttons send, and the controllers plugged in.
+    pub remap: Remap,
     /// How tall the game is shown, in screen pixels, for 3D cores to draw at about that size.
     pub shown_height: Option<u32>,
 }
@@ -757,6 +763,7 @@ pub struct Core {
     /// Sound samples per second, per channel.
     pub sample_rate: f64,
     save_file: Option<PathBuf>,
+    remap: Remap,
     /// The save as it is in the save file, to tell when the game has saved since.
     saved: Vec<u8>,
     /// The ROM's bytes, which the core may keep pointing into until the game is unloaded.
@@ -861,13 +868,14 @@ impl Core {
                 let why = if why.is_empty() { String::new() } else { format!(": {why}") };
                 bail!("{name} couldn't load {}{why}", rom.display());
             }
-            // A pad in each port, as RetroArch says by default. Some cores plug nothing in until
-            // they're told: Flycast waits to hear about all four ports before it plugs in a pad and
-            // its memory card, and Mupen64Plus has no controllers without it.
+            // A pad in each port, as RetroArch says by default, unless the remap says which.
+            // Some cores plug nothing in until they're told: Flycast waits to hear about all four
+            // ports before it plugs in a pad and its memory card, and Mupen64Plus has no
+            // controllers without it.
             if let Ok(plug_in) = lib.get::<unsafe extern "C" fn(c_uint, c_uint)>(b"retro_set_controller_port_device\0")
             {
-                for port in 0..4 {
-                    plug_in(port, DEVICE_JOYPAD);
+                for (port, device) in (0..).zip(dirs.remap.devices) {
+                    plug_in(port, device.unwrap_or(DEVICE_JOYPAD));
                 }
             }
             let mut av = AvInfo::default();
@@ -895,6 +903,7 @@ impl Core {
                 fps: av.timing.fps,
                 sample_rate: av.timing.sample_rate,
                 save_file: dirs.save_file.clone(),
+                remap: dirs.remap.clone(),
                 saved: Vec::new(),
                 _rom: data,
                 _unpacked: unpacked.map(|(dir, _)| dir),
@@ -946,11 +955,11 @@ impl Core {
         Ok(true)
     }
 
-    /// Runs one frame with `input` held.
+    /// Runs one frame with `input` held, before it's remapped.
     pub fn run_frame(&mut self, input: Input) {
         let max_size = {
             let mut s = shared();
-            s.input = input;
+            s.input = self.remap.apply(input);
             s.audio.clear();
             s.max_size
         };
