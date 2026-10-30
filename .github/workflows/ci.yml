@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
+    # Tags are tested by the release workflow, which runs this one before building.
+    branches: ["**"]
   pull_request:
+  workflow_call:
 
 jobs:
   test:

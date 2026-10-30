@@ -13,21 +13,28 @@ The end-to-end tests run romi in a pty with a small made-up library in a tempora
 your own config and state are never touched (`drive.py --real` uses yours). They type keys, press
 buttons on a virtual gamepad, and read the screen with [pyte](https://github.com/selectel/pyte). The
 controller tests need write access to `/dev/uinput` and are skipped without it. CI runs rustfmt,
-clippy, the unit tests and the end-to-end tests on every push.
+clippy, the unit tests and the end-to-end tests on every push, and on every tag before a release
+is built.
 
 ## Releasing
 
-The Arch package's recipe is in `packaging/arch`. It builds from the tagged release's tarball on
-GitHub, so it's updated after each tag. (The AUR isn't taking new packages, so it isn't published
-there; people build it with `makepkg -si`.) For a release:
+Pushing a tag builds the release. `.github/workflows/release.yml` runs CI on the tag, builds romi
+for x86_64 and aarch64 Linux (on Ubuntu 22.04, so the binaries run on glibc 2.35 and newer), and
+makes a draft release on GitHub with both tarballs and their checksums. The Arch package's recipe
+in `packaging/arch` builds from GitHub's tarball of the tag, so it's updated after. (The AUR isn't
+taking new packages, so it isn't published there; people build it with `makepkg -si`.) For a
+release:
 
-1. Set the version in `Cargo.toml`, build so `Cargo.lock` follows, and commit.
-2. Tag it and push the tag: `git tag v0.2.0 && git push origin main v0.2.0`.
-3. In `packaging/arch`, set `pkgver` to match and `pkgrel=1`, then run `updpkgsums` (from
+1. Set the version in `Cargo.toml`, build so `Cargo.lock` follows, and commit. The release
+   workflow stops if the tag and `Cargo.toml` disagree.
+2. Tag it and push the tag: `git tag v0.3.0 && git push origin main v0.3.0`.
+3. When the workflow finishes, write the notes on the draft release (GitHub's generated list of
+   commits is filled in to start from) and publish it.
+4. In `packaging/arch`, set `pkgver` to match and `pkgrel=1`, then run `updpkgsums` (from
    `pacman-contrib`) to fill in the checksum of GitHub's tarball for the tag.
-4. Build it: `makepkg -f`, or `pkgctl build` (from `devtools`) for a clean chroot that catches
+5. Build it: `makepkg -f`, or `pkgctl build` (from `devtools`) for a clean chroot that catches
    missing dependencies. `namcap PKGBUILD *.pkg.tar.zst` checks for common mistakes.
-5. `makepkg --printsrcinfo > .SRCINFO`, and commit both files.
+6. `makepkg --printsrcinfo > .SRCINFO`, and commit both files.
 
 A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 
