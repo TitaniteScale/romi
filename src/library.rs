@@ -130,8 +130,13 @@ fn tag_values(xml: &str, tag: &str) -> Vec<String> {
         .collect()
 }
 
-fn unescape(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+pub(crate) fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&#39;", "'")
+        .replace("&amp;", "&")
 }
 
 /// Why `Library::resolve` couldn't pick a game.
@@ -190,6 +195,7 @@ impl Library {
             && let Some(dir) = steam::find_steam_dir(cfg.steam.dir.as_deref())
         {
             let group = lib.group_for(&cfg.steam.name);
+            let store = steam::store_cache();
             for app in steam::installed_apps(&dir, &cfg.steam.exclude) {
                 let mut vars = cfg.vars.clone();
                 vars.insert("appid".into(), app.appid.clone());
@@ -201,7 +207,8 @@ impl Library {
                     vars,
                 };
                 let art = ArtRef { appid: Some(app.appid.clone()), ..ArtRef::default() };
-                lib.push_game(group, format!("steam:{}", app.appid), app.name, None, Meta::default(), launch, art);
+                let meta = store.get(&app.appid).map(|s| s.meta.clone()).unwrap_or_default();
+                lib.push_game(group, format!("steam:{}", app.appid), app.name, None, meta, launch, art);
             }
         }
 

@@ -261,9 +261,11 @@ lag there is.
 
 Smaller items that fit between phases.
 
-- **Steam game info**: Steam's public store API gives genres, a description and the release year with no
-  key, which makes Steam games filterable. It can also give the hashed cover URLs that the CDN lookup
-  misses.
+- ✓ **Steam game info**: `romi scrape` asks Steam's store (`IStoreBrowseService/GetItems`, the API
+  its own pages use, with no key) about every Steam game, in batches of 50. Genres come from the
+  tags players voted for most, the year from the first release, and players from the split-screen
+  categories and tags. The store also gives the cover's address, under a hashed folder for some
+  games, which brought in the four covers the CDN lookup missed.
 - **Import play history**: Steam play time from Steam's local config, and `playcount`/`lastplayed` from
   ES-DE gamelists, so recently played and the stats include games played outside romi.
 - **Exact matches for disc images**: CHD files store a SHA-1 of their contents, which can be matched

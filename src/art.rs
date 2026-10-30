@@ -412,6 +412,7 @@ pub fn scrape(cfg: &Config, lib: &Library, only: &[String]) -> Result<()> {
     let kinds = Kind::wanted(cfg);
     let mut totals: Vec<Tally> = kinds.iter().map(|_| Tally::default()).collect();
     let mut listings: HashMap<(String, Kind), Option<Listing>> = HashMap::new();
+    let store = scrape_steam_store(cfg, lib, only, &agent, &mut out)?;
 
     for sys in &lib.systems {
         if !only.is_empty() && !only.contains(&sys.id) {
@@ -419,7 +420,7 @@ pub fn scrape(cfg: &Config, lib: &Library, only: &[String]) -> Result<()> {
         }
         let mut line = format!("  {:<24} {:>4} games", sys.name, sys.games.len());
         for (&kind, total) in kinds.iter().zip(&mut totals) {
-            let tally = scrape_system(cfg, lib, sys, kind, &agent, &mut finder, &mut listings, &mut out)?;
+            let tally = scrape_system(cfg, lib, sys, kind, &agent, &mut finder, &mut listings, &store, &mut out)?;
             line.push_str(&format!("   {:>4} {}", tally.local + tally.downloaded, kind.plural()));
             if tally.downloaded > 0 {
                 line.push_str(&format!(" (+{})", tally.downloaded));
@@ -465,6 +466,37 @@ pub fn scrape(cfg: &Config, lib: &Library, only: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Asks Steam's store about the Steam games being scraped, for their game info and covers, and
+/// keeps what it says for the library to read. Without a connection, or if the store won't
+/// answer, what it said last time stays.
+fn scrape_steam_store(
+    cfg: &Config,
+    lib: &Library,
+    only: &[String],
+    agent: &ureq::Agent,
+    out: &mut impl Write,
+) -> Result<HashMap<String, crate::steam::StoreInfo>> {
+    let mut cache = crate::steam::store_cache();
+    let appids: Vec<String> = (0..lib.games.len())
+        .filter(|&g| only.is_empty() || only.contains(&lib.system_of(g).id))
+        .filter_map(|g| lib.games[g].art.appid.clone())
+        .collect();
+    if !cfg.art.online || appids.is_empty() {
+        return Ok(cache);
+    }
+    match crate::steam::fetch_store_info(agent, &appids) {
+        Ok(found) => {
+            writeln!(out, "  Steam store: game info for {} of {} games", found.len(), appids.len())?;
+            cache.extend(found);
+            if let Err(e) = crate::steam::save_store_cache(&cache) {
+                writeln!(out, "  ! can't save Steam's game info: {e:#}")?;
+            }
+        }
+        Err(e) => writeln!(out, "  ! Steam store: {e:#}")?,
+    }
+    Ok(cache)
+}
+
 /// Finds or downloads one kind of picture for a system's games.
 #[allow(clippy::too_many_arguments)]
 fn scrape_system(
@@ -475,6 +507,7 @@ fn scrape_system(
     agent: &ureq::Agent,
     finder: &mut Finder,
     listings: &mut HashMap<(String, Kind), Option<Listing>>,
+    store: &HashMap<String, crate::steam::StoreInfo>,
     out: &mut impl Write,
 ) -> Result<Tally> {
     let mut tally = Tally::default();
@@ -488,7 +521,9 @@ fn scrape_system(
         } else if !cfg.art.online {
             unmatched.push(g);
         } else if let (Kind::Cover, Some(appid)) = (kind, &game.art.appid) {
-            let url = format!("{STEAM_CDN}/{appid}/library_600x900.jpg");
+            // The store knows covers kept under a hashed folder, which the usual address misses.
+            let cover = store.get(appid).and_then(|s| s.cover.clone());
+            let url = cover.unwrap_or_else(|| format!("{STEAM_CDN}/{appid}/library_600x900.jpg"));
             jobs.push((g, Job { url, dest_stem: cache_stem(sys, game, kind) }));
         } else {
             unmatched.push(g);

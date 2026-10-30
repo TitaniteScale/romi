@@ -217,3 +217,28 @@ def test_title_screens_and_screenshots(sandbox):
     sandbox.write_config(config)
     out = run_cli(sandbox, "scrape", "gba").stdout
     assert "titles" not in out and "0 covers" in out
+
+
+def test_steam_games_get_the_info_romi_scrape_kept_from_the_store(sandbox):
+    steam = sandbox.root / "steam"
+    (steam / "steamapps").mkdir(parents=True)
+    (steam / "steamapps/appmanifest_4242.acf").write_text(
+        '"AppState"\n{\n\t"appid"\t\t"4242"\n\t"name"\t\t"Rule Blocks"\n\t"StateFlags"\t\t"4"\n}\n')
+    config = json.loads(json.dumps(CONFIG))
+    config["steam"] = {"enabled": True, "dir": str(steam), "command": "true {appid}"}
+    sandbox.write_config(config)
+    # What `romi scrape` keeps from Steam's store.
+    cache = sandbox.home / ".cache/romi/steam-store.json"
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(json.dumps({"4242": {
+        "meta": {"description": "Push the rules around.", "genres": ["Puzzle"], "year": 2019, "players": 2},
+        "cover": "https://shared.steamstatic.com/store_item_assets/steam/apps/4242/abc/library_capsule_2x.jpg",
+    }}))
+
+    out = run_cli(sandbox, "info", "steam:4242", "--json")
+    assert out.returncode == 0, out.stderr
+    meta = json.loads(out.stdout)["meta"]
+    assert (meta["genres"], meta["year"], meta["players"]) == (["Puzzle"], 2019, 2)
+    assert meta["description"] == "Push the rules around."
+    out = run_cli(sandbox, "list", "--genre", "Puzzle", "--players", "2", "--json")
+    assert [g["key"] for g in json.loads(out.stdout)] == ["steam:4242"]

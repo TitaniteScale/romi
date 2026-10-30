@@ -11,6 +11,14 @@ name, then by title. An exact match also gives box art lookups the precise name 
 Arcade genres come from a MAME category list (`metadata.arcade_categories`, e.g. a `catver.ini`
 from [progettosnaps](https://www.progettosnaps.net/catver/)). Genres from all these sources are
 folded into one short list ("Shoot'em Up / Horizontal" and "Shmup" both become "Shoot 'em up").
+
+Steam games get theirs from Steam's store, which needs no key: `romi scrape` asks it about every
+installed Steam game and keeps the answers in `~/.cache/romi/steam-store.json`, and romi reads them
+from there. Genres come from the tags players gave a game most often ("Puzzle", "Card Game"), up to
+three. The year is when it first came out, early access included. Players is 2 for games that can
+be played together on one screen (Steam's split-screen categories, or a "Local Co-Op" tag), which
+is what the `2+` filter needs, and 1 for single-player games. Rerun `romi scrape` to bring it up to
+date.
 The TUI starts instantly and fills database info in a moment later; `romi check` reports coverage.
 
 ## Box art
@@ -32,7 +40,8 @@ Online sources need no accounts or keys:
   plus a subtitle, then ignoring dashes. US/World releases win over others, and demos/bootlegs come
   last. Arcade systems match on the MAME title. A system's sets come from its id; override with
   `"libretro": ["Set Name", ...]` on the system.
-- **Steam's CDN** for installed Steam games.
+- **Steam's CDN** for installed Steam games, at the address Steam's store gives, which for some
+  games is a folder the usual address misses.
 
 **Title screens and screenshots** come from the same places: libretro's `Named_Titles` and
 `Named_Snaps` (matched like the covers), ES-DE's `titlescreens` and `screenshots`, and Skyscraper's

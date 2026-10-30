@@ -1,6 +1,10 @@
 //! Installed Steam games, read from the library manifests (no Steam API needed).
 
 use crate::config::{expand_path, home};
+use crate::meta::Meta;
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -291,6 +295,268 @@ pub fn with_rarity(appid: &str, mut cheevos: Vec<crate::ra::Cheevo>) -> anyhow::
         }
     }
     Ok(cheevos)
+}
+
+// ---- the store ----
+
+/// What Steam's store says about a game: genres from its players' tags, a description, the year,
+/// and its cover's address, which for some games is under a hashed folder the usual one misses.
+/// `romi scrape` fetches it, with no key, and the library reads it from the cache.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StoreInfo {
+    pub meta: Meta,
+    pub cover: Option<String>,
+}
+
+/// Where `romi scrape` keeps what the store said, by app id.
+fn store_cache_path() -> PathBuf {
+    crate::config::cache_dir().join("steam-store.json")
+}
+
+/// What the store said about each game the last time `romi scrape` asked, by app id.
+pub fn store_cache() -> HashMap<String, StoreInfo> {
+    std::fs::read(store_cache_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+pub fn save_store_cache(cache: &HashMap<String, StoreInfo>) -> anyhow::Result<()> {
+    let path = store_cache_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    Ok(crate::files::write_atomic(&path, serde_json::to_vec_pretty(cache)?)?)
+}
+
+const STORE_API: &str = "https://api.steampowered.com";
+const STORE_ASSETS: &str = "https://shared.steamstatic.com/store_item_assets";
+/// Games asked about in one request.
+const STORE_BATCH: usize = 50;
+/// Tags looked through for genres, most voted first, and the most genres a game gets.
+const STORE_TAGS: usize = 20;
+const MAX_GENRES: usize = 3;
+/// Tags with fewer votes than this share of the top tag's are passing mentions ("Fishing" in
+/// Stardew Valley), not what the game is, unless none above it names a genre.
+const MIN_TAG_SHARE: f64 = 0.3;
+/// Steam's player categories for playing together on one screen: plain, versus and co-op.
+const LOCAL_MULTIPLAYER: [u64; 3] = [24, 37, 39];
+/// Players' tags that say the same, which they give games the categories miss.
+const LOCAL_MULTIPLAYER_TAGS: [&str; 3] = ["local co-op", "local multiplayer", "split screen"];
+const SINGLE_PLAYER: u64 = 2;
+const MULTIPLAYER: u64 = 1;
+
+/// Asks Steam's store about these games, the way its own pages do, a batch at a time. Games it
+/// doesn't know (removed from the store, say) are left out.
+pub fn fetch_store_info(agent: &ureq::Agent, appids: &[String]) -> anyhow::Result<HashMap<String, StoreInfo>> {
+    use anyhow::Context;
+    let get = |url: &str| -> anyhow::Result<serde_json::Value> {
+        let bytes = crate::art::get(agent, url, 16 << 20)?.context("Steam's store API isn't there")?;
+        serde_json::from_slice(&bytes).context("Steam's store API sent something unexpected")
+    };
+    let tags = tag_names(&get(&format!("{STORE_API}/IStoreService/GetTagList/v1/?language=english"))?);
+    let mut out = HashMap::new();
+    for batch in appids.chunks(STORE_BATCH) {
+        let ids: Vec<_> =
+            batch.iter().filter_map(|id| id.parse::<u32>().ok()).map(|id| json!({ "appid": id })).collect();
+        let request = json!({
+            "ids": ids,
+            "context": { "language": "english", "country_code": "US" },
+            "data_request": {
+                "include_tag_count": STORE_TAGS,
+                "include_basic_info": true,
+                "include_release": true,
+                "include_assets": true,
+            },
+        });
+        let url = format!(
+            "{STORE_API}/IStoreBrowseService/GetItems/v1/?input_json={}",
+            crate::art::encode(&request.to_string())
+        );
+        out.extend(parse_store_items(&get(&url)?, &tags));
+    }
+    Ok(out)
+}
+
+/// Steam's tag names by id, from `GetTagList`.
+fn tag_names(reply: &serde_json::Value) -> HashMap<u64, String> {
+    let tags = reply["response"]["tags"].as_array().map(Vec::as_slice).unwrap_or_default();
+    tags.iter().filter_map(|t| Some((t["tagid"].as_u64()?, t["name"].as_str()?.to_string()))).collect()
+}
+
+/// What `GetItems` says about each game, by app id.
+fn parse_store_items(reply: &serde_json::Value, tags: &HashMap<u64, String>) -> HashMap<String, StoreInfo> {
+    let items = reply["response"]["store_items"].as_array().map(Vec::as_slice).unwrap_or_default();
+    items
+        .iter()
+        .filter(|it| it["success"] == 1)
+        .filter_map(|it| Some((it["appid"].as_u64()?.to_string(), store_info(it, tags))))
+        .collect()
+}
+
+fn store_info(item: &serde_json::Value, tags: &HashMap<u64, String>) -> StoreInfo {
+    let text = |v: &serde_json::Value| v.as_str().map(crate::library::unescape).filter(|s| !s.trim().is_empty());
+    let first_name = |v: &serde_json::Value| v.as_array()?.first().and_then(|n| text(&n["name"]));
+    let info = &item["basic_info"];
+
+    // Players' tags with their votes, most voted first: "Puzzle", "Roguelike Deckbuilder",
+    // "Singleplayer".
+    let voted: Vec<(String, f64)> = item["tags"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|t| Some((tags.get(&t["tagid"].as_u64()?)?.to_lowercase(), t["weight"].as_f64()?)))
+        .collect();
+    let top = voted.first().map_or(0.0, |(_, votes)| *votes);
+    let genres_in = |min_votes: f64| {
+        let mut genres: Vec<String> = Vec::new();
+        // "Singleplayer" isn't a genre, but would be taken for one ("sing").
+        for (name, _) in voted.iter().filter(|(name, votes)| *votes >= min_votes && !name.contains("player")) {
+            if let Some(g) = crate::meta::genre_of(name)
+                && !genres.iter().any(|have| have == g)
+                && genres.len() < MAX_GENRES
+            {
+                genres.push(g.to_string());
+            }
+        }
+        genres
+    };
+    let mut genres = genres_in(top * MIN_TAG_SHARE);
+    if genres.is_empty() {
+        genres = genres_in(0.0);
+    }
+
+    // When the game first came out, which for games that left early access is before they did.
+    let release = &item["release"];
+    let year = ["original_release_date", "original_steam_release_date", "steam_release_date"]
+        .iter()
+        .find_map(|k| release[k].as_u64().filter(|&t| t > 0))
+        .map(|t| crate::stats::local_year_month(t).0 as u16);
+
+    // How many can play on one screen: at least two, or one when it's single-player only.
+    let categories = &item["categories"]["supported_player_categoryids"];
+    let categories: Vec<u64> =
+        categories.as_array().map(|c| c.iter().filter_map(|v| v.as_u64()).collect()).unwrap_or_default();
+    let local = categories.iter().any(|c| LOCAL_MULTIPLAYER.contains(c))
+        || voted.iter().any(|(name, _)| LOCAL_MULTIPLAYER_TAGS.contains(&name.as_str()));
+    let players = if local {
+        Some(2)
+    } else if categories.contains(&SINGLE_PLAYER) && !categories.contains(&MULTIPLAYER) {
+        Some(1)
+    } else {
+        None
+    };
+
+    let assets = &item["assets"];
+    // The portrait cover, at twice the size where there's one.
+    let file = assets["library_capsule_2x"].as_str().or(assets["library_capsule"].as_str());
+    let cover = match (assets["asset_url_format"].as_str(), file) {
+        (Some(format), Some(file)) => Some(format!("{STORE_ASSETS}/{}", format.replace("${FILENAME}", file))),
+        _ => None,
+    };
+
+    StoreInfo {
+        meta: Meta {
+            description: text(&info["short_description"]),
+            developer: first_name(&info["developers"]),
+            publisher: first_name(&info["publishers"]),
+            franchise: first_name(&info["franchises"]),
+            genres,
+            year,
+            players,
+        },
+        cover,
+    }
+}
+
+#[cfg(test)]
+mod store_tests {
+    use super::*;
+
+    #[test]
+    fn store_items_give_genres_year_players_and_the_cover() {
+        let tags = tag_names(&json!({ "response": { "tags": [
+            { "tagid": 1664, "name": "Puzzle" },
+            { "tagid": 4182, "name": "Singleplayer" },
+            { "tagid": 492, "name": "Indie" },
+            { "tagid": 1756, "name": "Great Soundtrack" },
+            { "tagid": 1773, "name": "Arcade" },
+            { "tagid": 4026, "name": "Puzzle Platformer" },
+            { "tagid": 1716, "name": "Fishing" },
+            { "tagid": 3841, "name": "Local Co-Op" },
+        ] } }));
+        let reply = json!({ "response": { "store_items": [
+            {
+                "appid": 736260, "success": 1,
+                "tags": [
+                    { "tagid": 1664, "weight": 1686 },
+                    { "tagid": 4182, "weight": 1130 },
+                    { "tagid": 492, "weight": 1062 },
+                    { "tagid": 4026, "weight": 783 },
+                    { "tagid": 1716, "weight": 400 },
+                ],
+                "categories": { "supported_player_categoryids": [2] },
+                "basic_info": {
+                    "short_description": "Baba Is You is a puzzle game where the rules &quot;are&quot; blocks.",
+                    "developers": [{ "name": "Hempuli Oy" }],
+                    "publishers": [{ "name": "Hempuli Oy" }],
+                },
+                "release": { "steam_release_date": 1552492825 },
+                "assets": {
+                    "asset_url_format": "steam/apps/736260/${FILENAME}?t=1760102539",
+                    "library_capsule": "96947acc/library_capsule.jpg",
+                },
+            },
+            {
+                "appid": 646570, "success": 1,
+                "categories": { "supported_player_categoryids": [2, 1, 9, 39] },
+                "release": { "steam_release_date": 1548258674, "original_steam_release_date": 1510732543 },
+            },
+            { "appid": 3, "success": 2 },
+        ] } });
+        let found = parse_store_items(&reply, &tags);
+        assert_eq!(found.len(), 2, "a game the store doesn't know is left out");
+
+        let baba = &found["736260"];
+        assert_eq!(
+            baba.meta.genres,
+            ["Puzzle", "Platformer"],
+            "not Music for \"Singleplayer\", or Sports for \"Fishing\""
+        );
+        assert_eq!(
+            baba.meta.description.as_deref(),
+            Some("Baba Is You is a puzzle game where the rules \"are\" blocks.")
+        );
+        assert_eq!(baba.meta.developer.as_deref(), Some("Hempuli Oy"));
+        assert_eq!((baba.meta.year, baba.meta.players), (Some(2019), Some(1)));
+        assert_eq!(
+            baba.cover.as_deref(),
+            Some(
+                "https://shared.steamstatic.com/store_item_assets/steam/apps/736260/96947acc/library_capsule.jpg?t=1760102539"
+            )
+        );
+
+        let other = &found["646570"];
+        assert_eq!(other.meta.year, Some(2017), "the year it first came out, in early access");
+        assert_eq!(other.meta.players, Some(2), "split screen co-op");
+        assert_eq!((other.meta.description.as_ref(), other.cover.as_ref()), (None, None));
+    }
+
+    #[test]
+    fn players_and_genres_from_the_tags_players_voted_for_least() {
+        // Online co-op isn't on one screen.
+        let online = json!({ "categories": { "supported_player_categoryids": [2, 1, 9, 38] } });
+        assert_eq!(store_info(&online, &HashMap::new()).meta.players, None);
+        // The main tags say nothing of the genre ("Survival"), so the minor ones do.
+        let zomboid = json!({ "tags": [{ "tagid": 1662, "weight": 1000 }, { "tagid": 599, "weight": 290 }] });
+        let zomboid_tags = HashMap::from([(1662, "Survival".to_string()), (599, "Simulation".to_string())]);
+        assert_eq!(store_info(&zomboid, &zomboid_tags).meta.genres, ["Simulation"]);
+        let tagged = json!({
+            "categories": { "supported_player_categoryids": [2, 1, 9, 38] },
+            "tags": [{ "tagid": 19, "weight": 1000 }, { "tagid": 3841, "weight": 100 }],
+        });
+        let tags = HashMap::from([(19, "Action".to_string()), (3841, "Local Co-Op".to_string())]);
+        assert_eq!(store_info(&tagged, &tags).meta.players, Some(2));
+    }
 }
 
 #[cfg(test)]

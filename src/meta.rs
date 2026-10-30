@@ -7,7 +7,7 @@ use crate::config::{self, Config, expand_path};
 use crate::files::StampCache;
 use crate::library::Library;
 use crate::titles::TitleIndex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -21,7 +21,8 @@ const UNHASHABLE: &[&str] = &[
 
 /// Printed as-is by `romi list --json` and `romi info --json`, so the field names are part of the
 /// command-line interface.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Meta {
     pub description: Option<String>,
     pub developer: Option<String>,
@@ -69,52 +70,6 @@ pub fn genres(raw: &str) -> Vec<String> {
     if lower.starts_with("shooter / flying") {
         return vec!["Shoot 'em up".into()];
     }
-    const MAP: &[(&[&str], &str)] = &[
-        (&["shoot'em", "shoot 'em", "shootem", "shmup", "shoot-em"], "Shoot 'em up"),
-        (&["beat'em", "beat 'em", "beatem", "brawler"], "Beat 'em up"),
-        (&["fight", "wrestl", "boxing"], "Fighting"),
-        (&["role", "rpg"], "RPG"),
-        (&["platform", "plataform"], "Platformer"),
-        (&["race", "racing", "driving", "kart"], "Racing"),
-        (&["gun", "shooter", "shooting", "fps"], "Shooter"),
-        (&["puzzle", "breakout", "tetris", "thinking"], "Puzzle"),
-        (&["board", "chess", "shogi", "mahjong", "card", "hanafuda"], "Board & cards"),
-        (&["casino", "gambling", "pachinko", "poker", "slot"], "Casino"),
-        (&["pinball"], "Pinball"),
-        (&["quiz", "trivia"], "Quiz"),
-        (&["music", "danc", "rhythm", "sing", "karaoke"], "Music"),
-        (&["horror"], "Horror"),
-        (&["strateg", "tactic"], "Strategy"),
-        (&["simulat"], "Simulation"),
-        (&["mini game", "minigame", "party"], "Party"),
-        (&["educat"], "Educational"),
-        (&["compilation"], "Compilation"),
-        (
-            &[
-                "sport",
-                "basketball",
-                "football",
-                "soccer",
-                "tennis",
-                "golf",
-                "baseball",
-                "bowling",
-                "billiard",
-                "skate",
-                "snowboard",
-                "ski",
-                "hockey",
-                "horse",
-                "volleyball",
-                "fishing",
-                "hunting",
-            ],
-            "Sports",
-        ),
-        (&["adventure"], "Adventure"),
-        (&["action"], "Action"),
-        (&["maze"], "Maze"),
-    ];
     let segments: Vec<String> = raw
         .split(['/', ',', ';', '|'])
         .map(|s| s.trim().trim_end_matches('.').trim().to_lowercase())
@@ -122,7 +77,7 @@ pub fn genres(raw: &str) -> Vec<String> {
         .collect();
     let mut out: Vec<String> = Vec::new();
     for seg in &segments {
-        if let Some((_, g)) = MAP.iter().find(|(needles, _)| needles.iter().any(|n| seg.contains(n)))
+        if let Some(g) = genre_of(seg)
             && !out.iter().any(|o| o == g)
         {
             out.push(g.to_string());
@@ -135,6 +90,59 @@ pub fn genres(raw: &str) -> Vec<String> {
         out.push(c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default());
     }
     out
+}
+
+/// Words in the many spellings of a genre, and the genre they mean.
+const GENRES: &[(&[&str], &str)] = &[
+    (&["shoot'em", "shoot 'em", "shootem", "shmup", "shoot-em"], "Shoot 'em up"),
+    (&["beat'em", "beat 'em", "beatem", "brawler"], "Beat 'em up"),
+    (&["fight", "wrestl", "boxing"], "Fighting"),
+    (&["role", "rpg"], "RPG"),
+    (&["platform", "plataform"], "Platformer"),
+    (&["race", "racing", "driving", "kart"], "Racing"),
+    (&["gun", "shooter", "shooting", "fps"], "Shooter"),
+    (&["puzzle", "breakout", "tetris", "thinking"], "Puzzle"),
+    (&["board", "chess", "shogi", "mahjong", "card", "hanafuda"], "Board & cards"),
+    (&["casino", "gambling", "pachinko", "poker", "slot"], "Casino"),
+    (&["pinball"], "Pinball"),
+    (&["quiz", "trivia"], "Quiz"),
+    (&["music", "danc", "rhythm", "sing", "karaoke"], "Music"),
+    (&["horror"], "Horror"),
+    (&["strateg", "tactic"], "Strategy"),
+    (&["simulat"], "Simulation"),
+    (&["mini game", "minigame", "party"], "Party"),
+    (&["educat"], "Educational"),
+    (&["compilation"], "Compilation"),
+    (
+        &[
+            "sport",
+            "basketball",
+            "football",
+            "soccer",
+            "tennis",
+            "golf",
+            "baseball",
+            "bowling",
+            "billiard",
+            "skate",
+            "snowboard",
+            "ski",
+            "hockey",
+            "horse",
+            "volleyball",
+            "fishing",
+            "hunting",
+        ],
+        "Sports",
+    ),
+    (&["adventure"], "Adventure"),
+    (&["action"], "Action"),
+    (&["maze"], "Maze"),
+];
+
+/// The genre one lowercased spelling of it means, if it's one romi knows.
+pub fn genre_of(spelling: &str) -> Option<&'static str> {
+    GENRES.iter().find(|(needles, _)| needles.iter().any(|n| spelling.contains(n))).map(|&(_, g)| g)
 }
 
 /// The first plausible year in a date string ("19910101T000000", "2001-09-10", "1998").
