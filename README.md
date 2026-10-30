@@ -90,3 +90,5 @@ and `romi guide` to bring it up from the controller. See [couch mode](docs/couch
 - [Achievements](docs/achievements.md): RetroAchievements and Steam
 - [Game info and box art](docs/game-info.md): where descriptions, genres and covers come from
 - [Working on romi](CONTRIBUTING.md): tests, releasing, and a map of the code
+- [Credits](CREDITS.md): other people's work in this repository, like the 3D models the launch
+  animation is made from

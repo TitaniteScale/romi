@@ -190,6 +190,27 @@ It's built in steps, and the first one pays off without any of the TUI work:
      shared memory like live play, with a stand-in picture for the game. At 1280×720 (half a
      2560×1440 terminal's pixels) a frame takes about 8 ms to draw, and the glass lands within 2 px
      of the game's cells. Models are JSON: vertices in cm, edges, and the screen's four corners.
+   - ✓ **Importer** (`cargo run --release --example wireframe-import`): turns a downloaded OBJ, STL,
+     glTF or GLB model into that JSON. It keeps the edges where the surface folds, where it ends, and
+     where a flat side bends into a curve, joins straight runs, and finds the glass (the biggest
+     smooth patch facing front with one outline). Parts made with `--no-glass` go beside a TV with
+     `--add`. Tried on a made-up CRT so far (curved glass, rounded corners, knobs): about 500
+     lines, drawn in about 7 ms a frame.
+   - ✓ **Game Boy**: `gameboy.json`, made from Jason Toff's model on Poly Pizza, played for `.gb`
+     and `.gbc` games. The originals of five CC BY models (Game Boy, NES, SNES, an old TV, a DS)
+     are in `examples/wireframe/models/`, credited in `CREDITS.md`.
+   - ✓ **The terminal's look**: lines are drawn over the terminal's own background (RGBA frames,
+     clear but for the lines and the game), in a colour each game's seed picks from the terminal's
+     ANSI palette (asked for with OSC 4, and the background with OSC 11). Colours that don't stand
+     out from the background are skipped, and light backgrounds get lines that don't burn white.
+     `--colours` gives a list instead. A frame takes about 8 ms to draw, 1 ms more than the solid
+     version. When this moves into romi, the list becomes a config option.
+   - Still to do: wireframes from the other models (a TV with the NES or SNES beside it); rounded
+     glass, to match rounded corners in live play. Lines behind a part show through it, which
+     gets busy on the Game Boy; hiding them would need the faces as well as the lines. When the
+     wireframes move into romi, the package has to install `CREDITS.md` with `LICENSE`. The importer can't read
+     Draco-compressed or quantized glTF, and draws no outline along the sides of smooth round
+     parts like knobs, only their ends.
    - Still to do: run it while the core loads, with a key to skip and a setting to turn it off; a
      model per system; hide lines behind the glass once the game shows on it, since the TV's back
      shows through for a moment. It has only been run in a pseudo-terminal so far, with its frames

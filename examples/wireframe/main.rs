@@ -12,8 +12,13 @@
 //! The seed comes from the game's file name, and gives the same build as the browser prototype for
 //! the same seed. Keys: any key skips ahead, r replays, n tries a new seed, q or Esc quits.
 //!
+//! The lines are drawn on a clear picture over the terminal's own background, in a colour the seed
+//! picks from the terminal's palette, which the terminal is asked for at the start.
+//!
 //! The model is `nes.json`: vertices in cm, edges as pairs of vertex numbers, and `screen`, the
-//! glass's corners as top left, top right, bottom right, bottom left.
+//! glass's corners as top left, top right, bottom right, bottom left. Game Boy games get
+//! `gameboy.json`, made from a model in `models/` (see CREDITS.md). `--model` reads another,
+//! such as one made from a downloaded model by the wireframe-import example.
 
 #[allow(dead_code)]
 #[path = "../../src/emu/kitty.rs"]
@@ -27,9 +32,12 @@ use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers
 use ratatui::crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScreen, WindowSize};
 use ratatui::crossterm::{cursor, execute};
 use serde::Deserialize;
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::f64::consts::PI;
+use std::fmt::Write as _;
+use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::time::{Duration, Instant, SystemTime};
 
 /// The id of the one image this keeps replacing, and of its one placement.
@@ -41,7 +49,15 @@ const FPS: f64 = 60.0;
 const NEAR: f64 = 0.6;
 /// Seconds the lines take to fade once the camera has landed.
 const FADE: f64 = 0.35;
-const BACKGROUND: [u8; 3] = [6, 7, 12];
+/// The ANSI colours a beam can be when the terminal says what they are: red, green, yellow, blue,
+/// magenta and cyan, and their bright versions.
+const ANSI: [u8; 12] = [1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14];
+/// The beam's colours when the terminal doesn't say what its own are.
+const DEFAULT_COLOURS: [[u8; 3]; 4] = [[0x9f, 0xe3, 0xff], [0xff, 0xb5, 0x47], [0x9d, 0xf2, 0xa8], [0xff, 0x9e, 0xcf]];
+/// How far a colour has to stand out from the background (as a WCAG contrast ratio) to be a beam.
+const CONTRAST: f64 = 3.0;
+/// How long to wait for the terminal to say what its colours are.
+const ASK_FOR: Duration = Duration::from_millis(300);
 /// The stand-in game's frame size: an NES's.
 const PIC_W: usize = 256;
 const PIC_H: usize = 240;
@@ -49,7 +65,7 @@ const PIC_H: usize = 240;
 #[derive(Parser)]
 #[command(about = "Plays romi's wireframe launch animation in the terminal")]
 struct Args {
-    /// The game file whose name seeds the animation.
+    /// The game file whose name seeds the animation, and whose extension picks the model.
     #[arg(default_value = "Moonlit Harbor (USA).nes")]
     game: String,
     /// Use this seed instead of hashing the file name.
@@ -79,9 +95,13 @@ struct Args {
     /// Draw at 1/N of the terminal's pixels and let the terminal scale the picture up.
     #[arg(long, default_value_t = 2)]
     shrink: u32,
-    /// The beam's colour, as RRGGBB.
-    #[arg(long, default_value = "9fe3ff")]
-    beam: String,
+    /// The colours a game's beam is picked from: `terminal` for the terminal's own palette, or
+    /// colours like 9fe3ff,ffb547.
+    #[arg(long, default_value = "terminal")]
+    colours: String,
+    /// A model made by the wireframe-import example, instead of the NES and TV.
+    #[arg(long)]
+    model: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, PartialEq, ValueEnum)]
@@ -134,18 +154,34 @@ impl Order {
 
 fn main() -> Result<()> {
     let args = Args::parse();
-    let model = Model::load(include_str!("nes.json"))?;
-    let beam = parse_colour(&args.beam)?;
+    let model = match &args.model {
+        Some(path) => Model::load(&fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?)?,
+        None => Model::load(built_in(&args.game))?,
+    };
+    let listed = match args.colours.as_str() {
+        "terminal" => None,
+        list => Some(parse_colours(list)?),
+    };
     let mut seed = args.seed.unwrap_or_else(|| fnv1a(&args.game));
     let mut screen = Screen::enter()?;
+    let look = Look::new(listed, ask_colours());
     let mut painter = Painter::default();
     loop {
-        match play(&args, &model, seed, beam, &mut screen, &mut painter)? {
+        match play(&args, &model, seed, &look, &mut screen, &mut painter)? {
             Next::Quit => return Ok(()),
             Next::Replay => {}
             Next::NewSeed => seed = fnv1a(&format!("{:?}", SystemTime::now())),
         }
         screen.clear()?;
+    }
+}
+
+/// The model for a game, by its file's extension: the NES and TV unless there's one for its system.
+fn built_in(game: &str) -> &'static str {
+    let ext = std::path::Path::new(game).extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+    match ext.as_str() {
+        "gb" | "gbc" => include_str!("gameboy.json"),
+        _ => include_str!("nes.json"),
     }
 }
 
@@ -160,11 +196,12 @@ fn play(
     args: &Args,
     model: &Model,
     seed: u32,
-    beam: [f32; 3],
+    look: &Look,
     screen: &mut Screen,
     painter: &mut Painter,
 ) -> Result<Next> {
     let plan = Plan::new(model, args, seed.max(1));
+    let colour = look.pick(seed);
     let clock = Instant::now();
     let mut skip = 0.0;
     let mut stats = Stats::default();
@@ -174,16 +211,20 @@ fn play(
         let t = clock.elapsed().as_secs_f64() + skip;
         if t < plan.zoom_end + FADE {
             let began = Instant::now();
-            let pixels = painter.paint(model, &plan, &view, t, beam);
+            let pixels = painter.paint(model, &plan, &view, t, colour, look.light);
             let whole = Cells { col: 0, row: 0, cols: view.cols, rows: view.rows };
             screen.show(pixels, view.w, view.h, whole)?;
             stats.add(began.elapsed());
         } else {
             screen.show(&test_picture(t - plan.game_in), PIC_W, PIC_H, view.cells)?;
             let line = format!(
-                " seed {seed} · {} · {} · {} frames, draw {:.1} ms (worst {:.1}) at {}×{} · landed within {:.1} px · r replay n new seed q quit · {}",
+                " seed {seed} · {} · {} · #{:02x}{:02x}{:02x} {} · {} frames, draw {:.1} ms (worst {:.1}) at {}×{} · landed within {:.1} px · r replay n new seed q quit · {}",
                 plan.style.name(),
                 plan.order.name(),
+                colour[0],
+                colour[1],
+                colour[2],
+                look.source,
                 stats.frames,
                 stats.average_ms(),
                 stats.worst.as_secs_f64() * 1000.0,
@@ -254,15 +295,17 @@ impl Screen {
         Ok(())
     }
 
-    /// Replaces the picture with `pixels` (RGB, `w`×`h`), stretched over `cells`.
+    /// Replaces the picture with `pixels` (RGB, or RGBA where the terminal shows through, `w`×`h`),
+    /// stretched over `cells`.
     fn show(&mut self, pixels: &[u8], w: usize, h: usize, cells: Cells) -> Result<()> {
+        let format = if pixels.len() == w * h * 4 { 32 } else { 24 };
         self.sent += 1;
         let name = format!("/romi-wireframe-{}-{}", std::process::id(), self.sent);
         kitty::write_shm(&name, pixels)?;
         let mut out = std::io::stdout().lock();
         write!(
             out,
-            "\x1b[{};{}H\x1b_Ga=T,i={IMAGE},p={IMAGE},q=2,C=1,f=24,s={w},v={h},c={},r={},t=s,S={};{}\x1b\\",
+            "\x1b[{};{}H\x1b_Ga=T,i={IMAGE},p={IMAGE},q=2,C=1,f={format},s={w},v={h},c={},r={},t=s,S={};{}\x1b\\",
             cells.row + 1,
             cells.col + 1,
             cells.cols,
@@ -727,25 +770,27 @@ struct Painter {
     light: Vec<f32>,
     small: Vec<f32>,
     spare: Vec<f32>,
-    rgb: Vec<u8>,
+    rgba: Vec<u8>,
     lines: Vec<(P2, P2, f32)>,
     dots: Vec<(P2, f32, f64)>,
 }
 
 impl Painter {
-    fn paint(&mut self, model: &Model, plan: &Plan, view: &View, t: f64, beam: [f32; 3]) -> &[u8] {
+    /// A frame as RGBA, clear but for the lines and the game. On a light background lines don't
+    /// burn white where they cross, and glow less.
+    fn paint(&mut self, model: &Model, plan: &Plan, view: &View, t: f64, colour: [u8; 3], light: bool) -> &[u8] {
         let (w, h) = (view.w, view.h);
-        self.rgb.clear();
-        self.rgb.extend(std::iter::repeat_n(BACKGROUND, w * h).flatten());
+        self.rgba.clear();
+        self.rgba.resize(w * h * 4, 0);
         let cam = plan.camera(model, view, t);
 
         let game = smooth((t - plan.game_in) / (plan.zoom_end - plan.game_in).max(0.01));
         if game > 0.0 {
             let picture = test_picture(t - plan.game_in);
             if t >= plan.zoom_end {
-                blit_rect(&mut self.rgb, w, h, &picture, view.target);
+                blit_rect(&mut self.rgba, w, h, &picture, view.target);
             } else if let [Some(a), Some(b), Some(c), Some(d)] = model.screen.map(|i| cam.project(model.v[i])) {
-                blit_quad(&mut self.rgb, w, h, &picture, [a, b, c, d], game as f32);
+                blit_quad(&mut self.rgba, w, h, &picture, [a, b, c, d], game as f32);
             }
         }
 
@@ -767,23 +812,24 @@ impl Painter {
             }
             let (bw, bh) = bloom(&self.light, w, h, &mut self.small, &mut self.spare);
             let wire = wire as f32;
+            let beam = colour.map(f32::from);
+            let (glows, burns) = if light { (1.0, 0.0) } else { (2.5, 0.7) };
             for y in 0..h {
                 for x in 0..w {
                     let i = self.light[y * w + x];
                     let glow = sample(&self.small, bw, bh, (x as f32 + 0.5) / 4.0 - 0.5, (y as f32 + 0.5) / 4.0 - 0.5);
-                    let base = (i.min(1.0) + glow * 2.5) * wire;
-                    let hot = (i - 1.0).max(0.0) * 0.7 * wire * 255.0;
+                    let base = (i.min(1.0) + glow * glows) * wire;
+                    let hot = (i - 1.0).max(0.0) * burns * wire * 255.0;
                     if base <= 0.0 {
                         continue;
                     }
-                    let px = &mut self.rgb[(y * w + x) * 3..][..3];
-                    for k in 0..3 {
-                        px[k] = (f32::from(px[k]) + beam[k] * base + hot).min(255.0) as u8;
-                    }
+                    // As if added to a black background: past full strength it gets brighter.
+                    let lit = beam.map(|c| (c * base.max(1.0) + hot).min(255.0));
+                    over(&mut self.rgba[(y * w + x) * 4..][..4], lit, base.min(1.0));
                 }
             }
         }
-        &self.rgb
+        &self.rgba
     }
 }
 
@@ -1023,21 +1069,24 @@ fn sample(buf: &[f32], w: usize, h: usize, x: f32, y: f32) -> f32 {
     top * (1.0 - fy) + bottom * fy
 }
 
-/// Draws `picture` stretched over `[x, y, w, h]`, the way the terminal stretches a frame over cells.
-fn blit_rect(rgb: &mut [u8], w: usize, h: usize, picture: &[u8], [x, y, rw, rh]: [f64; 4]) {
+/// Draws `picture` (RGB) onto an RGBA frame stretched over `[x, y, w, h]`, the way the terminal
+/// stretches a frame over cells.
+fn blit_rect(rgba: &mut [u8], w: usize, h: usize, picture: &[u8], [x, y, rw, rh]: [f64; 4]) {
     let (x0, y0) = (x.round().max(0.0) as usize, y.round().max(0.0) as usize);
     let (x1, y1) = (((x + rw).round() as usize).min(w), ((y + rh).round() as usize).min(h));
     for py in y0..y1 {
         let v = (((py as f64 + 0.5 - y) / rh * PIC_H as f64) as usize).min(PIC_H - 1);
         for px in x0..x1 {
             let u = (((px as f64 + 0.5 - x) / rw * PIC_W as f64) as usize).min(PIC_W - 1);
-            rgb[(py * w + px) * 3..][..3].copy_from_slice(&picture[(v * PIC_W + u) * 3..][..3]);
+            let to = &mut rgba[(py * w + px) * 4..][..4];
+            to[..3].copy_from_slice(&picture[(v * PIC_W + u) * 3..][..3]);
+            to[3] = 255;
         }
     }
 }
 
-/// Draws `picture` onto the glass in perspective, `alpha` of the way in.
-fn blit_quad(rgb: &mut [u8], w: usize, h: usize, picture: &[u8], quad: [P2; 4], alpha: f32) {
+/// Draws `picture` (RGB) onto the glass in an RGBA frame in perspective, `alpha` of the way in.
+fn blit_quad(rgba: &mut [u8], w: usize, h: usize, picture: &[u8], quad: [P2; 4], alpha: f32) {
     let Some(m) = invert(square_to_quad(quad)) else { return };
     let xs = quad.map(|p| p.0);
     let ys = quad.map(|p| p.1);
@@ -1054,10 +1103,7 @@ fn blit_quad(rgb: &mut [u8], w: usize, h: usize, picture: &[u8], quad: [P2; 4], 
                 continue;
             }
             let from = &picture[((v * PIC_H as f64) as usize * PIC_W + (u * PIC_W as f64) as usize) * 3..][..3];
-            let to = &mut rgb[(py * w + px) * 3..][..3];
-            for k in 0..3 {
-                to[k] = (f32::from(to[k]) * (1.0 - alpha) + f32::from(from[k]) * alpha) as u8;
-            }
+            over(&mut rgba[(py * w + px) * 4..][..4], [0, 1, 2].map(|k| f32::from(from[k])), alpha);
         }
     }
 }
@@ -1094,11 +1140,165 @@ fn invert(m: [f64; 9]) -> Option<[f64; 9]> {
     ])
 }
 
-fn parse_colour(hex: &str) -> Result<[f32; 3]> {
-    let hex = hex.trim_start_matches('#');
-    let n =
-        u32::from_str_radix(hex, 16).ok().filter(|_| hex.len() == 6).context("--beam takes a colour like 9fe3ff")?;
-    Ok([(n >> 16) as u8, (n >> 8) as u8, n as u8].map(f32::from))
+/// Puts colour `c` (0 to 255 a channel) at opacity `a` over an RGBA pixel. Kitty takes straight
+/// alpha, so the colour isn't scaled by its opacity.
+fn over(px: &mut [u8], c: [f32; 3], a: f32) {
+    if px[3] == 0 {
+        // Most of a frame: nothing under it to blend with.
+        px.copy_from_slice(&[c[0].round() as u8, c[1].round() as u8, c[2].round() as u8, (a * 255.0).round() as u8]);
+        return;
+    }
+    let below = f32::from(px[3]) / 255.0 * (1.0 - a);
+    let out = a + below;
+    if out <= 0.0 {
+        return;
+    }
+    for k in 0..3 {
+        px[k] = ((c[k] * a + f32::from(px[k]) * below) / out).round().min(255.0) as u8;
+    }
+    px[3] = (out * 255.0).round() as u8;
+}
+
+fn parse_colours(list: &str) -> Result<Vec<[u8; 3]>> {
+    list.split(',')
+        .map(|hex| {
+            let hex = hex.trim().trim_start_matches('#');
+            let n = u32::from_str_radix(hex, 16).ok().filter(|_| hex.len() == 6);
+            let n =
+                n.with_context(|| format!("--colours takes `terminal` or colours like 9fe3ff,ffb547, not {hex}"))?;
+            Ok([(n >> 16) as u8, (n >> 8) as u8, n as u8])
+        })
+        .collect()
+}
+
+/// The colours a beam is picked from, and whether the background is light.
+struct Look {
+    colours: Vec<[u8; 3]>,
+    /// Where the colours came from, for the status line.
+    source: &'static str,
+    light: bool,
+}
+
+impl Look {
+    /// The colours given, or else the terminal's that stand out from its background, or else romi's.
+    fn new(listed: Option<Vec<[u8; 3]>>, terminal: TerminalColours) -> Look {
+        let background = terminal.background.unwrap_or([0; 3]);
+        let light = contrast(background, [255; 3]) < contrast(background, [0; 3]);
+        let mut usable: Vec<[u8; 3]> = Vec::new();
+        for c in terminal.palette {
+            if contrast(c, background) >= CONTRAST && !usable.contains(&c) {
+                usable.push(c);
+            }
+        }
+        let (colours, source) = match listed {
+            Some(list) => (list, "from --colours"),
+            None if !usable.is_empty() => (usable, "from the terminal"),
+            None => (DEFAULT_COLOURS.to_vec(), "romi's own"),
+        };
+        Look { colours, source, light }
+    }
+
+    /// The seed's colour. It has a generator of its own, so the plan's numbers stay the browser
+    /// prototype's.
+    fn pick(&self, seed: u32) -> [u8; 3] {
+        let k = Rng(seed ^ 0x2545_f491).next() * self.colours.len() as f64;
+        self.colours[(k as usize).min(self.colours.len() - 1)]
+    }
+}
+
+/// Relative luminance, as WCAG defines it.
+fn luminance(c: [u8; 3]) -> f64 {
+    let linear = |v: u8| {
+        let v = f64::from(v) / 255.0;
+        if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * linear(c[0]) + 0.7152 * linear(c[1]) + 0.0722 * linear(c[2])
+}
+
+/// WCAG's contrast ratio, from 1 (the same) to 21 (black and white).
+fn contrast(a: [u8; 3], b: [u8; 3]) -> f64 {
+    let (a, b) = (luminance(a), luminance(b));
+    (a.max(b) + 0.05) / (a.min(b) + 0.05)
+}
+
+/// What the terminal says its colours are.
+#[derive(Default)]
+struct TerminalColours {
+    background: Option<[u8; 3]>,
+    /// The ones in `ANSI` that it answered for, in that order.
+    palette: Vec<[u8; 3]>,
+}
+
+/// Asks the terminal for its background and ANSI colours (OSC 11 and OSC 4), then for its device
+/// attributes, which every terminal answers, so one that ignores the colour queries doesn't keep
+/// this waiting. Needs raw mode, and has to run before crossterm reads any input.
+fn ask_colours() -> TerminalColours {
+    let mut ask = String::from("\x1b]11;?\x1b\\");
+    for n in ANSI {
+        let _ = write!(ask, "\x1b]4;{n};?\x1b\\");
+    }
+    ask += "\x1b[c";
+    let mut out = std::io::stdout();
+    if out.write_all(ask.as_bytes()).and_then(|()| out.flush()).is_err() {
+        return TerminalColours::default();
+    }
+    let (mut got, mut buf) = (Vec::new(), [0u8; 4096]);
+    let deadline = Instant::now() + ASK_FOR;
+    while !answered(&got) {
+        let left = deadline.saturating_duration_since(Instant::now()).as_millis() as i32;
+        let mut fd = libc::pollfd { fd: 0, events: libc::POLLIN, revents: 0 };
+        // SAFETY: one pollfd, and a buffer as long as the length given.
+        if left <= 0 || unsafe { libc::poll(&mut fd, 1, left) } <= 0 {
+            break;
+        }
+        let n = unsafe { libc::read(0, buf.as_mut_ptr().cast(), buf.len()) };
+        if n <= 0 {
+            break;
+        }
+        got.extend_from_slice(&buf[..n as usize]);
+    }
+    read_answers(&got)
+}
+
+/// Whether the device attributes answer, `ESC [ ? 6 2 ; … c`, has come.
+fn answered(got: &[u8]) -> bool {
+    got.windows(3).enumerate().any(|(i, w)| {
+        w == b"\x1b[?" && got[i + 3..].iter().find(|b| !(b.is_ascii_digit() || **b == b';')) == Some(&b'c')
+    })
+}
+
+/// Reads answers to OSC 11 and OSC 4, `ESC ] 11 ; rgb:R/G/B` and `ESC ] 4 ; N ; rgb:R/G/B`, each
+/// ended by BEL or `ESC \`.
+fn read_answers(got: &[u8]) -> TerminalColours {
+    let text = String::from_utf8_lossy(got);
+    let (mut background, mut ansi) = (None, BTreeMap::new());
+    for part in text.split("\x1b]").skip(1) {
+        let body = part.split(['\x07', '\x1b']).next().unwrap_or("");
+        match body.split(';').collect::<Vec<_>>()[..] {
+            ["11", spec] => background = parse_rgb(spec),
+            ["4", n, spec] => {
+                if let (Ok(n), Some(c)) = (n.parse::<u8>(), parse_rgb(spec)) {
+                    ansi.insert(n, c);
+                }
+            }
+            _ => {}
+        }
+    }
+    TerminalColours { background, palette: ANSI.iter().filter_map(|n| ansi.get(n).copied()).collect() }
+}
+
+/// An X11 colour, `rgb:R/G/B`, with 1 to 4 hex digits a channel.
+fn parse_rgb(spec: &str) -> Option<[u8; 3]> {
+    let channels: Vec<u8> = spec
+        .strip_prefix("rgb:")?
+        .split('/')
+        .map(|h| {
+            let v = u32::from_str_radix(h, 16).ok().filter(|_| (1..=4).contains(&h.len()))?;
+            let max = (1u32 << (4 * h.len())) - 1;
+            Some(((v * 255 + max / 2) / max) as u8)
+        })
+        .collect::<Option<_>>()?;
+    channels.try_into().ok()
 }
 
 // ---------- the stand-in game ----------
@@ -1183,4 +1383,50 @@ fn test_picture(t: f64) -> Vec<u8> {
         }
     }
     p
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_terminals_colours_however_they_end() {
+        let got = b"\x1b]11;rgb:1e1e/2e2e/3e3e\x1b\\\x1b]4;1;rgb:ff/00/00\x07\x1b]4;12;rgb:0/8/f\x1b\\\x1b[?62;22c";
+        assert!(answered(got));
+        let colours = read_answers(got);
+        assert_eq!(colours.background, Some([0x1e, 0x2e, 0x3e]));
+        // In ANSI's order, whatever order they came in.
+        assert_eq!(colours.palette, [[255, 0, 0], [0, 0x88, 255]]);
+        assert!(!answered(b"\x1b]11;rgb:0/0/0\x07\x1b[?62;22"));
+    }
+
+    #[test]
+    fn keeps_the_terminals_colours_that_stand_out() {
+        let terminal = || TerminalColours {
+            background: Some([0x28, 0x2a, 0x36]),
+            palette: vec![[0xff, 0x55, 0x55], [0x30, 0x30, 0x40], [0xff, 0x55, 0x55], [0x8b, 0xe9, 0xfd]],
+        };
+        let look = Look::new(None, terminal());
+        assert_eq!(look.colours, [[0xff, 0x55, 0x55], [0x8b, 0xe9, 0xfd]]);
+        assert!(!look.light);
+        assert_eq!(look.pick(42), look.pick(42));
+        assert_eq!(Look::new(Some(vec![[1, 2, 3]]), terminal()).colours, [[1, 2, 3]]);
+        assert_eq!(Look::new(None, TerminalColours::default()).colours, DEFAULT_COLOURS);
+        assert!(Look::new(None, TerminalColours { background: Some([0xfa; 3]), palette: vec![] }).light);
+    }
+
+    #[test]
+    fn colour_over_clear_keeps_its_colour() {
+        let mut px = [0, 0, 0, 0];
+        over(&mut px, [200.0, 100.0, 50.0], 0.5);
+        assert_eq!(px, [200, 100, 50, 128]);
+        over(&mut px, [0.0, 0.0, 0.0], 1.0);
+        assert_eq!(px, [0, 0, 0, 255]);
+    }
+
+    #[test]
+    fn colours_are_six_hex_digits() {
+        assert_eq!(parse_colours("9fe3ff, #ffb547").unwrap(), [[0x9f, 0xe3, 0xff], [0xff, 0xb5, 0x47]]);
+        assert!(parse_colours("fff").is_err());
+    }
 }
