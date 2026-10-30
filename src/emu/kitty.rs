@@ -315,8 +315,9 @@ static DIACRITICS: [char; 297] = [
     '\u{1D244}',
 ];
 
-/// Fills `area` with placeholder cells for image `id`. Only the first cell of each row says where
-/// it is; the terminal counts along the row from there.
+/// Fills `area` with placeholder cells for image `id`, each saying which row and column of the
+/// image it is. A cell that doesn't say is counted on from the cell to its left, so something drawn
+/// over the middle of a row (an achievement notice) would start the image again after it.
 pub fn placeholders(buf: &mut Buffer, area: Rect, id: u32) {
     let [_, r, g, b] = id.to_be_bytes();
     let fg = Color::Rgb(r, g, b);
@@ -327,10 +328,8 @@ pub fn placeholders(buf: &mut Buffer, area: Rect, id: u32) {
             let Some(cell) = buf.cell_mut((area.x + x, area.y + y)) else { continue };
             symbol.clear();
             symbol.push(PLACEHOLDER);
-            if x == 0 {
-                symbol.push(DIACRITICS[y as usize]);
-                symbol.push(DIACRITICS[0]);
-            }
+            symbol.push(DIACRITICS[y as usize]);
+            symbol.push(DIACRITICS[x as usize]);
             cell.set_symbol(&symbol)
                 .set_fg(fg)
                 .set_diff_option(CellDiffOption::ForcedWidth(NonZeroU16::new(1).unwrap()));
@@ -395,12 +394,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn placeholders_number_the_first_cell_of_each_row() {
+    fn placeholders_say_where_every_cell_is() {
         let mut buf = Buffer::empty(Rect::new(0, 0, 3, 2));
         placeholders(&mut buf, Rect::new(0, 0, 3, 2), 0x726f6d);
         assert_eq!(buf[(0, 0)].symbol(), "\u{10EEEE}\u{305}\u{305}");
         assert_eq!(buf[(0, 1)].symbol(), "\u{10EEEE}\u{30D}\u{305}");
-        assert_eq!(buf[(2, 1)].symbol(), "\u{10EEEE}");
+        // Row 1, column 2, so a cell drawn over column 1 can't throw it off.
+        assert_eq!(buf[(2, 1)].symbol(), "\u{10EEEE}\u{30D}\u{30E}");
         assert_eq!(buf[(1, 0)].fg, Color::Rgb(0x72, 0x6f, 0x6d));
     }
 }

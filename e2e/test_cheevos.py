@@ -167,6 +167,11 @@ def test_an_unlock_shows_its_badge_which_is_cached(start, sandbox, server):
     romi.wait_for(lambda: BADGE_IMAGE in romi.output, timeout=5)
     # RGBA, so the badge's cells are clear around a square badge.
     assert b"f=32," in romi.output.split(BADGE_IMAGE, 1)[1][:40]
+    # Every image cell says where it is, so the game's cells after the notice in a row don't start
+    # the picture again from its left edge.
+    romi.pump(0.3)
+    cells = [c.data for row in romi.screen.buffer.values() for c in row.values() if c.data.startswith("\U0010EEEE")]
+    assert cells and all(len(c) == 3 for c in cells), [c for c in cells if len(c) != 3][:3]
     assert (sandbox.home / ".cache/romi/ra/badges/5501.png").exists()
 
 

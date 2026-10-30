@@ -202,17 +202,33 @@ fn fetch_badge(url: &str) -> Arc<Mutex<BadgeState>> {
     let state = Arc::new(Mutex::new(BadgeState::Loading));
     let (url, shared) = (url.to_string(), state.clone());
     std::thread::spawn(move || {
+        let started = Instant::now();
         let path = badge_path(&url);
         let bytes = match path.as_ref().and_then(|p| std::fs::read(p).ok()) {
             Some(bytes) => Some(bytes),
-            None => crate::art::get(&crate::art::agent(), &url, 1 << 20).ok().flatten().inspect(|bytes| {
-                if let Some(path) = &path {
-                    let _ = path.parent().map(std::fs::create_dir_all);
-                    let _ = crate::files::write_atomic(path, bytes);
+            None => match crate::art::get(&crate::art::agent(), &url, 1 << 20) {
+                Ok(Some(bytes)) => {
+                    if let Some(path) = &path {
+                        let _ = path.parent().map(std::fs::create_dir_all);
+                        let _ = crate::files::write_atomic(path, &bytes);
+                    }
+                    Some(bytes)
                 }
-            }),
+                Ok(None) => {
+                    crate::emu::cheevos::note(&format!("no badge at {url}"));
+                    None
+                }
+                Err(e) => {
+                    crate::emu::cheevos::note(&format!("can't get the badge {url}: {e:#}"));
+                    None
+                }
+            },
         };
         let image = bytes.and_then(|b| image::load_from_memory(&b).ok()).map(|i| i.to_rgba8());
+        if started.elapsed() > BADGE_WAIT {
+            let ms = started.elapsed().as_millis();
+            crate::emu::cheevos::note(&format!("the badge {url} took {ms} ms, too long to wait for"));
+        }
         *shared.lock().unwrap_or_else(|e| e.into_inner()) = match image {
             Some(image) => BadgeState::Loaded(image),
             None => BadgeState::Failed,
