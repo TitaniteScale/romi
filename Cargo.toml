@@ -32,12 +32,7 @@ serde_json = "1.0.154"
 shell-words = "1.1.1"
 ureq = "3.5.0"
 
-# Run the wireframe examples' tests with the rest.
-[[example]]
-name = "wireframe"
-path = "examples/wireframe/main.rs"
-test = true
-
+# Run the importer's tests with the rest.
 [[example]]
 name = "wireframe-import"
 path = "examples/wireframe-import/main.rs"

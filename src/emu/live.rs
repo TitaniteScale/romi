@@ -74,7 +74,7 @@ enum Scale {
 pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     let fps = core.fps;
     let core_name = core.name.clone();
-    let (shared, emu) = Shared::start(core, volume)?;
+    let (shared, emu) = Shared::start(core, volume, false)?;
     let result = Screen::enter().and_then(|_screen| View::new(name, &core_name, fps).run(&shared));
     shared.stop();
     let _ = emu.join();

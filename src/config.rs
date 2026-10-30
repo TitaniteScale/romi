@@ -43,6 +43,7 @@ pub struct Config {
     pub overrides: HashMap<String, Override>,
     pub steam: SteamConfig,
     pub art: ArtConfig,
+    pub launch_animation: LaunchAnimation,
     pub metadata: MetadataConfig,
     pub retroachievements: RetroAchievementsConfig,
     /// More config files whose systems, games and vars are added to this one's (see `Include`).
@@ -202,6 +203,7 @@ impl Default for Config {
             overrides: HashMap::new(),
             steam: SteamConfig::default(),
             art: ArtConfig::default(),
+            launch_animation: LaunchAnimation::default(),
             metadata: MetadataConfig::default(),
             retroachievements: RetroAchievementsConfig::default(),
             include: Vec::new(),
@@ -513,6 +515,21 @@ impl Default for ArtConfig {
             show: true,
             screens: true,
         }
+    }
+}
+
+/// The wireframe that builds itself when a game starts inside romi, for systems that have one.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LaunchAnimation {
+    pub enabled: bool,
+    /// The colors the beam is picked from, as `#rrggbb`. Empty uses the terminal's own palette.
+    pub colors: Vec<String>,
+}
+
+impl Default for LaunchAnimation {
+    fn default() -> Self {
+        Self { enabled: true, colors: Vec::new() }
     }
 }
 

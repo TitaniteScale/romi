@@ -1,9 +1,11 @@
 # Wireframe launch animation
 
-A prototype of romi's launch animation. A console builds itself out of lines (an NES and a TV, or a
-Game Boy), then the camera dives into its screen and lands on the cells where live play draws the
-game. A test
-picture stands in for the game.
+romi's launch animation, played on its own over the whole terminal, for trying its options. A
+console builds itself out of lines (an NES and a TV, or a Game Boy), then the camera dives into its
+screen and lands on the cells where live play draws the game. A test picture stands in for the game.
+
+The animation itself is in `src/emu/wireframe.rs`, which this includes. romi plays it in the middle
+panel before Game Boy games (see [Play in romi](../../docs/tui.md#play-in-romi)).
 
 It needs a terminal that takes Kitty graphics through shared memory, such as Ghostty or kitty.
 
@@ -67,23 +69,23 @@ Every option, with its default:
 cargo run --release --example wireframe -- --help
 ```
 
-## Colours
+## Colors
 
-The lines are drawn over the terminal's own background, in a colour the seed picks, so a game always
+The lines are drawn over the terminal's own background, in a color the seed picks, so a game always
 gets the same one. At the start the animation asks the terminal for its background and its ANSI
-colours (red, green, yellow, blue, magenta, cyan and their bright versions). Ghostty and kitty both
+colors (red, green, yellow, blue, magenta, cyan and their bright versions). Ghostty and kitty both
 answer. The beam can be any of them that stands out from the background (a contrast ratio of 3 or
 more), so it fits whatever theme is on. On a light background the lines don't burn white where they
 cross, and glow less.
 
-A terminal that doesn't answer gets a few colours of romi's own. Or pick the colours:
+A terminal that doesn't answer gets a few colors of romi's own. Or pick the colors:
 
 ```sh
-cargo run --release --example wireframe -- --colours ffb547
-cargo run --release --example wireframe -- --colours 9fe3ff,ffb547,ff79c6
+cargo run --release --example wireframe -- --colors ffb547
+cargo run --release --example wireframe -- --colors 9fe3ff,ffb547,ff79c6
 ```
 
-The status line at the end says which colour it was and where it came from.
+The status line at the end says which color it was and where it came from.
 
 ## Keys
 
@@ -99,7 +101,7 @@ draw, and how close the screen landed to the game's cells.
 
 ## The model
 
-`nes.json` holds the model: `vertices` in cm (y up, +z toward the viewer), `edges` as pairs of vertex
+A model is JSON: `vertices` in cm (y up, +z toward the viewer), `edges` as pairs of vertex
 numbers, and `screen`, the numbers of the glass's corners as top left, top right, bottom right and
 bottom left. The camera ends up facing those four corners.
 
@@ -111,8 +113,9 @@ cargo run --release --example wireframe -- --model tv.json
 
 ## The models
 
-`nes.json` was drawn by hand. `gameboy.json` was made by `wireframe-import` from a model in
-`models/`, which holds the downloaded originals. They're other people's work under CC BY 3.0, so
+romi's models are in `src/emu/wireframes/`. `nes.json` was drawn by hand, and only this prototype
+uses it. `gameboy.json` was made by `wireframe-import` from a model in `models/` here, which holds
+the downloaded originals. They're other people's work under CC BY 3.0, so
 each one is credited in [CREDITS.md](../../CREDITS.md), and a new one needs a line there too.
 
 To make `gameboy.json` again:
@@ -121,7 +124,7 @@ To make `gameboy.json` again:
 cargo run --release --example wireframe-import -- examples/wireframe/models/gameboy/model.obj \
   --front x --height 14.8 --aspect 10:9 --system gb \
   --credit '"Gameboy" by Jason Toff (https://poly.pizza/m/dczUnD4aslM), CC BY 3.0, made into a wireframe' \
-  -o examples/wireframe/gameboy.json
+  -o src/emu/wireframes/gameboy.json
 ```
 
 ## Make a model from a downloaded one

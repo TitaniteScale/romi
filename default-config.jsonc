@@ -65,6 +65,11 @@
   // How loud games played inside romi ("Play in romi", `romi run --live`) are: 0 (silent) to 100.
   "volume": 100,
 
+  // A wireframe of the console that builds itself before a game played inside romi starts, for
+  // systems that have one (Game Boy and Game Boy Color so far). "colors" lists the colors it picks
+  // from, like ["#9fe3ff", "#ffb547"]; empty uses the terminal's own palette.
+  "launch_animation": { "enabled": true, "colors": [] },
+
   "systems": [
     {
       "id": "arcade", "arcade": true, "name": "Arcade",

@@ -4,11 +4,17 @@
 //!
 //! romi scales each frame to the exact pixel size of its cells itself, nearest neighbour, because
 //! a terminal scaling it would smooth the pixel art.
+//!
+//! For systems with a wireframe, the launch animation plays first, across the whole panel, as an
+//! image of its own. The core waits until the game starts fading in on the glass, so the game's
+//! first frames are the ones seen as the camera lands. The game's image is in place before the
+//! animation's goes, so the handover doesn't show.
 
 use crate::emu::controls::Controls;
 use crate::emu::kitty;
-use crate::emu::libretro::Core;
+use crate::emu::libretro::{Core, Frame};
 use crate::emu::runner::Shared;
+use crate::emu::wireframe::{self, Beam, Model, Painter, Picture, Plan, Settings, View};
 use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -22,12 +28,53 @@ use std::collections::VecDeque;
 use std::io::Write;
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 /// The image id, which the placeholder cells carry as their colour ("rom" in ASCII).
 pub const IMAGE: u32 = 0x72_6f_6d;
+/// The launch animation's image ("wir").
+const INTRO_IMAGE: u32 = 0x77_69_72;
 /// Frames sent but maybe not read yet; older ones still around were never read and are removed.
 const PENDING: usize = 30;
+/// The animation is drawn at 1/this of the panel's pixels, and the terminal scales it up.
+const SHRINK: u32 = 2;
+const INTRO_FPS: f64 = 60.0;
+
+/// What the launch animation needs to know to play.
+pub struct Launch {
+    pub model: Model,
+    pub seed: u32,
+    pub beam: Beam,
+}
+
+/// The launch animation, while it plays.
+struct Intro {
+    launch: Launch,
+    plan: Plan,
+    painter: Painter,
+    began: Instant,
+    /// Seconds a key skipped.
+    skipped: f64,
+    painted: Option<Instant>,
+    /// The panel's cells, from the last draw.
+    area: Option<Rect>,
+    /// The game's newest frame, once the core is going.
+    game: Option<Frame>,
+}
+
+impl Intro {
+    fn t(&self) -> f64 {
+        self.began.elapsed().as_secs_f64() + self.skipped
+    }
+
+    fn end(&self) -> f64 {
+        self.plan.zoom_end + wireframe::FADE
+    }
+
+    fn skip(&mut self) {
+        self.skipped = self.skipped.max(self.end() - self.began.elapsed().as_secs_f64());
+    }
+}
 
 pub struct Embedded {
     pub game: usize,
@@ -42,14 +89,28 @@ pub struct Embedded {
     controls: Controls,
     sent: u64,
     pending: VecDeque<String>,
+    intro: Option<Intro>,
+    /// The animation has ended, but its image is still up until the game's cells are drawn.
+    intro_shown: bool,
 }
 
 impl Embedded {
-    pub fn start(game: usize, core: Core, volume: f32) -> Result<Embedded> {
-        let (shared, thread) = Shared::start(core, volume)?;
+    /// Starts the game, after the launch animation if there's one.
+    pub fn start(game: usize, core: Core, volume: f32, launch: Option<Launch>) -> Result<Embedded> {
+        let (shared, thread) = Shared::start(core, volume, launch.is_some())?;
         // Key releases are needed to know when a button is let go.
         let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
         execute!(std::io::stdout(), PushKeyboardEnhancementFlags(flags))?;
+        let intro = launch.map(|launch| Intro {
+            plan: Plan::new(&launch.model, &Settings::default(), launch.seed.max(1)),
+            launch,
+            painter: Painter::default(),
+            began: Instant::now(),
+            skipped: 0.0,
+            painted: None,
+            area: None,
+            game: None,
+        });
         Ok(Embedded {
             game,
             shared,
@@ -60,23 +121,33 @@ impl Embedded {
             controls: Controls::new(),
             sent: 0,
             pending: VecDeque::new(),
+            intro_shown: intro.is_some(),
+            intro,
         })
     }
 
-    /// Takes a key. False when it stops the game.
+    /// Takes a key. False when it stops the game. While the animation plays, any other key skips it.
     pub fn on_key(&mut self, k: KeyEvent) -> bool {
         if k.code == KeyCode::Esc && k.kind != KeyEventKind::Release {
             return false;
         }
-        self.controls.key(k);
+        match &mut self.intro {
+            Some(intro) if k.kind == KeyEventKind::Press => intro.skip(),
+            Some(_) => {}
+            None => self.controls.key(k),
+        }
         true
     }
 
     /// Reads the controllers and hands the held buttons to the core. False when Select+Start
-    /// has been held long enough to stop the game.
+    /// has been held long enough to stop the game. While the animation plays, a button skips it.
     pub fn read_pads(&mut self) -> bool {
         let Some(buttons) = self.controls.buttons() else { return false };
-        self.shared.set_buttons(buttons);
+        match &mut self.intro {
+            Some(intro) if buttons != 0 => intro.skip(),
+            Some(_) => {}
+            None => self.shared.set_buttons(buttons),
+        }
         true
     }
 
@@ -85,9 +156,20 @@ impl Embedded {
         self.shared.take_sound_error()
     }
 
-    /// Works out the cells the picture covers in `area`: as big as fits, in the frame's shape,
-    /// centered. None until the core has drawn its first frame.
-    pub fn place(&mut self, area: Rect) -> Option<Rect> {
+    /// The cells to put the picture's placeholders in, and the image they show: the whole of
+    /// `area` while the animation plays, then the game's cells. None until there's something.
+    pub fn place(&mut self, area: Rect) -> Option<(Rect, u32)> {
+        if let Some(intro) = &mut self.intro {
+            intro.area = Some(area);
+            return (!area.is_empty()).then_some((area, INTRO_IMAGE));
+        }
+        self.cells = self.fit(area);
+        self.cells.map(|(rect, _)| (rect, IMAGE))
+    }
+
+    /// The game's cells in `area`: as big as fits, in the frame's shape (or `shape` until there's
+    /// a frame), centered, and their size in pixels.
+    fn fit(&self, area: Rect) -> Option<(Rect, (u32, u32))> {
         let (fw, fh) = self.shape;
         if fw <= 0.0 || fh <= 0.0 || area.is_empty() {
             return None;
@@ -97,27 +179,95 @@ impl Embedded {
         let cols = ((fw * fit / f64::from(cell_w)).round() as u16).clamp(1, area.width);
         let rows = ((fh * fit / f64::from(cell_h)).round() as u16).clamp(1, area.height);
         let rect = Rect::new(area.x + (area.width - cols) / 2, area.y + (area.height - rows) / 2, cols, rows);
-        self.cells = Some((rect, (u32::from(cols) * cell_w, u32::from(rows) * cell_h)));
-        Some(rect)
+        Some((rect, (u32::from(cols) * cell_w, u32::from(rows) * cell_h)))
     }
 
-    /// Sends the core's newest frame to the terminal, if there's one it hasn't seen.
+    /// Plays the animation's next frame, or sends the core's newest frame to the terminal if
+    /// there's one it hasn't seen.
     pub fn pump(&mut self) -> Result<()> {
+        if let Some(mut intro) = self.intro.take() {
+            if self.play_intro(&mut intro)? {
+                self.intro = Some(intro);
+            }
+            return Ok(());
+        }
+        if self.intro_shown && self.cells.is_some() {
+            // The game's cells have been drawn over the animation's, so its image can go.
+            self.intro_shown = false;
+            write!(std::io::stdout(), "{}", kitty::delete(INTRO_IMAGE))?;
+        }
         let Some((n, frame)) = self.shared.newer_frame(self.seen, Duration::ZERO) else { return Ok(()) };
         self.seen = n;
         if frame.width == 0 {
             return Ok(());
         }
         self.shape = frame.display_size();
+        self.send_game(&frame)
+    }
+
+    /// One step of the animation. False once it's over, with the game's first frame sent.
+    fn play_intro(&mut self, intro: &mut Intro) -> Result<bool> {
+        let t = intro.t();
+        if t >= intro.plan.game_in {
+            self.shared.resume();
+        }
+        if let Some((n, frame)) = self.shared.newer_frame(self.seen, Duration::ZERO) {
+            self.seen = n;
+            if frame.width > 0 {
+                self.shape = frame.display_size();
+                intro.game = Some(frame);
+            }
+        }
+        if self.shape.0 <= 0.0 {
+            self.shape = intro.launch.model.aspect;
+        }
+        let Some(area) = intro.area else { return Ok(true) };
+        if t >= intro.end() {
+            self.shared.resume();
+            self.cells = self.fit(area);
+            if let Some(frame) = &intro.game {
+                self.send_game(frame)?;
+            }
+            return Ok(false);
+        }
+        if intro.painted.is_some_and(|p| p.elapsed().as_secs_f64() < 1.0 / INTRO_FPS) {
+            return Ok(true);
+        }
+        intro.painted = Some(Instant::now());
+        let (Some((rect, _)), Ok(size)) = (self.fit(area), terminal::window_size()) else { return Ok(true) };
+        let (cell_w, cell_h) = kitty::cell_size(&size);
+        let (cw, ch) = (f64::from(cell_w) / f64::from(SHRINK), f64::from(cell_h) / f64::from(SHRINK));
+        let target = [
+            f64::from(rect.x - area.x) * cw,
+            f64::from(rect.y - area.y) * ch,
+            f64::from(rect.width) * cw,
+            f64::from(rect.height) * ch,
+        ];
+        let w = (f64::from(area.width) * cw).round() as usize;
+        let h = (f64::from(area.height) * ch).round() as usize;
+        let view = View::new(w, h, target, cw);
+        let game = intro.game.as_ref().map(|f| Picture { rgb: &f.rgb, w: f.width as usize, h: f.height as usize });
+        let pixels = intro.painter.paint(&intro.launch.model, &intro.plan, &view, t, game, intro.launch.beam);
+        self.send(INTRO_IMAGE, area, pixels, (view.w as u32, view.h as u32), 32)?;
+        Ok(true)
+    }
+
+    /// Sends a game frame scaled to the game's cells.
+    fn send_game(&mut self, frame: &Frame) -> Result<()> {
         let Some((rect, (w, h))) = self.cells else { return Ok(()) };
         let pixels = frame.resample(w, h);
+        self.send(IMAGE, rect, &pixels, (w, h), 24)
+    }
+
+    /// Replaces image `id`, `w`×`h` pixels of RGB (24) or RGBA (32), stretched over `rect`.
+    fn send(&mut self, id: u32, rect: Rect, pixels: &[u8], (w, h): (u32, u32), format: u8) -> Result<()> {
         self.sent += 1;
         let name = format!("/romi-{}-{}", std::process::id(), self.sent);
-        kitty::write_shm(&name, &pixels)?;
+        kitty::write_shm(&name, pixels)?;
         let mut out = std::io::stdout().lock();
         write!(
             out,
-            "\x1b_Ga=T,U=1,i={IMAGE},c={},r={},f=24,s={w},v={h},t=s,S={},q=2;{}\x1b\\",
+            "\x1b_Ga=T,U=1,i={id},c={},r={},f={format},s={w},v={h},t=s,S={},q=2;{}\x1b\\",
             rect.width,
             rect.height,
             pixels.len(),
@@ -139,7 +289,7 @@ impl Drop for Embedded {
             let _ = thread.join();
         }
         let mut out = std::io::stdout();
-        let _ = write!(out, "{}", kitty::delete(IMAGE));
+        let _ = write!(out, "{}{}", kitty::delete(IMAGE), kitty::delete(INTRO_IMAGE));
         let _ = execute!(out, PopKeyboardEnhancementFlags);
         for name in &self.pending {
             kitty::remove_shm(name);

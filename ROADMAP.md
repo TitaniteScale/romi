@@ -203,18 +203,25 @@ It's built in steps, and the first one pays off without any of the TUI work:
      clear but for the lines and the game), in a colour each game's seed picks from the terminal's
      ANSI palette (asked for with OSC 4, and the background with OSC 11). Colours that don't stand
      out from the background are skipped, and light backgrounds get lines that don't burn white.
-     `--colours` gives a list instead. A frame takes about 8 ms to draw, 1 ms more than the solid
-     version. When this moves into romi, the list becomes a config option.
+     `--colors` gives a list instead. A frame takes about 8 ms to draw, 1 ms more than the solid
+     version.
    - Still to do: wireframes from the other models (a TV with the NES or SNES beside it); rounded
      glass, to match rounded corners in live play. Lines behind a part show through it, which
-     gets busy on the Game Boy; hiding them would need the faces as well as the lines. When the
-     wireframes move into romi, the package has to install `CREDITS.md` with `LICENSE`. The importer can't read
+     gets busy on the Game Boy; hiding them would need the faces as well as the lines. The importer can't read
      Draco-compressed or quantized glTF, and draws no outline along the sides of smooth round
      parts like knobs, only their ends.
-   - Still to do: run it while the core loads, with a key to skip and a setting to turn it off; a
-     model per system; hide lines behind the glass once the game shows on it, since the TV's back
-     shows through for a moment. It has only been run in a pseudo-terminal so far, with its frames
-     read back from shared memory, so it still needs watching in Ghostty and kitty.
+   - ✓ **In romi**: Game Boy and Game Boy Color games played in the middle panel start with it,
+     across the whole panel. The core waits until the game starts fading in on the glass, so its
+     first frames are the ones the camera lands on, and the animation's image goes only once the
+     game's is in the same place. Any key or button skips it; `"launch_animation"` turns it off or
+     lists colors. The code is `src/emu/wireframe.rs`, which the prototype includes. About 52 fps
+     in a pseudo-terminal sized like 2560×1440.
+   - Still to do: `romi run --live`; a model per system; hide lines behind the glass once the game
+     shows on it, since the TV's back shows through for a moment. mGBA draws Game Boy games that
+     support the Super Game Boy with its border (8:7), a little wider than the Game Boy's glass
+     (10:9), so the picture widens a few pixels as the camera lands. It has only been run in a
+     pseudo-terminal so far, with its frames read back from shared memory, so it still needs
+     watching in Ghostty and kitty.
 
 The spike settled 60 fps in Ghostty. Still to check: kitty and other terminals, and how much input
 lag there is.

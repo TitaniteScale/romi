@@ -663,8 +663,8 @@ fn draw_embedded(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     f.render_widget(Clear, area);
     f.render_widget(block, area);
     let [screen, hint] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
-    if let Some(cells) = embedded.place(screen) {
-        crate::emu::kitty::placeholders(f.buffer_mut(), cells, crate::emu::embedded::IMAGE);
+    if let Some((cells, image)) = embedded.place(screen) {
+        crate::emu::kitty::placeholders(f.buffer_mut(), cells, image);
     }
     let text = "Esc, or hold Select+Start, to stop";
     f.render_widget(Paragraph::new(Span::styled(text, Style::new().dim())).alignment(Alignment::Center), hint);

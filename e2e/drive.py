@@ -170,6 +170,8 @@ class Romi:
         self.answer_queries = answer_queries
         self.screen = pyte.Screen(cols, rows)
         self.stream = pyte.ByteStream(self.screen)
+        # Everything romi wrote, for what pyte doesn't show, like Kitty graphics.
+        self.output = bytearray()
         env = sandbox.env if sandbox else dict(os.environ)
         env["TERM"] = "xterm-256color"
         argv = [binary(), *args]
@@ -191,6 +193,7 @@ class Romi:
             except OSError:
                 self._reap()
                 return
+            self.output += data
             # Cursor position, so crossterm doesn't stall.
             if b"\x1b[6n" in data:
                 os.write(self.fd, b"\x1b[1;1R")

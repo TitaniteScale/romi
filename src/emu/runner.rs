@@ -29,6 +29,8 @@ pub struct Shared {
     ready: Condvar,
     buttons: AtomicU16,
     quit: AtomicBool,
+    /// Held before its first frame, while the launch animation plays.
+    paused: AtomicBool,
     /// How loud the sound plays (1 is as the core made it).
     volume: f32,
     muted: AtomicBool,
@@ -46,13 +48,15 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Shared {
-    /// Starts `core` on its own thread, running until `stop`, with its sound `volume` loud.
-    pub fn start(core: Core, volume: f32) -> Result<(Arc<Shared>, JoinHandle<()>)> {
+    /// Starts `core` on its own thread, running until `stop`, with its sound `volume` loud. A
+    /// `paused` core waits for `resume` before its first frame.
+    pub fn start(core: Core, volume: f32, paused: bool) -> Result<(Arc<Shared>, JoinHandle<()>)> {
         let shared = Arc::new(Shared {
             latest: Mutex::new((0, Frame::default())),
             ready: Condvar::new(),
             buttons: AtomicU16::new(0),
             quit: AtomicBool::new(false),
+            paused: AtomicBool::new(paused),
             volume,
             muted: AtomicBool::new(false),
             queued_ms: AtomicU32::new(NO_SOUND),
@@ -67,6 +71,10 @@ impl Shared {
 
     pub fn stop(&self) {
         self.quit.store(true, Ordering::SeqCst);
+    }
+
+    pub fn resume(&self) {
+        self.paused.store(false, Ordering::SeqCst);
     }
 
     /// Holds these buttons (bits from `libretro::button`) from the next frame on.
@@ -125,6 +133,11 @@ fn run_core(mut core: Core, shared: &Shared) {
     let period = Duration::from_secs_f64(1.0 / core.fps);
     let mut next = Instant::now();
     while !shared.quit.load(Ordering::Relaxed) {
+        if shared.paused.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(2));
+            next = Instant::now();
+            continue;
+        }
         core.run_frame(shared.buttons.load(Ordering::Relaxed));
         let wait = match &mut sound {
             Some(sound) => {

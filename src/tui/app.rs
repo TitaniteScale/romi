@@ -177,6 +177,8 @@ pub struct App {
     pub running: Option<Running>,
     /// A game played inside romi, in the middle panel.
     pub embedded: Option<crate::emu::embedded::Embedded>,
+    /// The colors the launch animation picks from, and whether the terminal's background is light.
+    pub look: crate::emu::wireframe::Look,
     /// Cores seen to start in a separate romi, which are safe to load into this one.
     cores_tried: HashSet<PathBuf>,
     pub pad: PadState,
@@ -249,6 +251,7 @@ impl App {
             status: None,
             running: None,
             embedded: None,
+            look: crate::emu::wireframe::Look::new(None, Default::default()),
             cores_tried: HashSet::new(),
             pad,
             terminal_job: None,
@@ -1411,12 +1414,25 @@ impl App {
             return self.set_status(Level::Error, format!("{}: {e}", self.lib.games[g].name));
         }
         let volume = self.cfg.volume_gain();
+        let launch = self.launch_animation(g, &rom);
         let started = crate::emu::runner::load(&self.cfg, &core, &rom)
-            .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume));
+            .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume, launch));
         match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),
         }
+    }
+
+    /// The launch animation for a game played here, if it's on and the game's system has a
+    /// wireframe. The ROM's file name seeds it, so a game always starts the same way.
+    fn launch_animation(&self, g: usize, rom: &Path) -> Option<crate::emu::embedded::Launch> {
+        use crate::emu::wireframe;
+        if !self.cfg.launch_animation.enabled {
+            return None;
+        }
+        let model = wireframe::Model::load(wireframe::for_system(&self.lib.system_of(g).id)?).ok()?;
+        let seed = wireframe::fnv1a(&rom.file_name()?.to_string_lossy());
+        Some(crate::emu::embedded::Launch { model, seed, beam: self.look.beam(seed) })
     }
 
     /// Starts the core in a separate romi for a frame, the first time it's played here. A core

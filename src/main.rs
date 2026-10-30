@@ -71,9 +71,13 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     }
     let mut app = App::new(cfg, cfg_path);
     let mut terminal = ratatui::init();
-    // Ask the terminal what image protocol it speaks; this has to happen before reading events.
+    // Ask the terminal about itself; this has to happen before reading events.
+    let answers = (app.cfg.art.show || app.cfg.launch_animation.enabled) && terminal_answers();
+    if app.cfg.launch_animation.enabled {
+        app.look = launch_look(&app.cfg.launch_animation, answers);
+    }
     if app.cfg.art.show {
-        let picker = if terminal_answers() {
+        let picker = if answers {
             ratatui_image::picker::Picker::from_query_stdio().ok()
         } else {
             Some(ratatui_image::picker::Picker::halfblocks())
@@ -89,6 +93,15 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     ratatui::restore();
     app.save_selection();
     result
+}
+
+/// The colors the launch animation picks from: the config's, or else the terminal's palette when
+/// it answers questions. Colors the config gets wrong are left out.
+fn launch_look(cfg: &config::LaunchAnimation, answers: bool) -> emu::wireframe::Look {
+    use emu::wireframe::{Look, TerminalColors, ask_colors, parse_colors};
+    let listed: Vec<[u8; 3]> = cfg.colors.iter().filter_map(|c| parse_colors([c.as_str()]).ok()).flatten().collect();
+    let terminal = if answers { ask_colors() } else { TerminalColors::default() };
+    Look::new((!listed.is_empty()).then_some(listed), terminal)
 }
 
 /// Asks the terminal for a status report and waits for the reply. The image-support query reads
