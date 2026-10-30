@@ -211,7 +211,11 @@ pub(super) fn run_core(
     // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared
     // before the core, so it's removed after the core has shut down and written its last.
     let saves = crate::files::TempDir::new("saves").context("can't make a save folder in /tmp")?;
-    let dirs = crate::emu::libretro::Dirs { system: cfg.system_dir(), saves: Some(saves.path().to_path_buf()) };
+    let dirs = crate::emu::libretro::Dirs {
+        system: cfg.system_dir(),
+        saves: Some(saves.path().to_path_buf()),
+        save_file: None,
+    };
     let mut emu = crate::emu::libretro::Core::load(&core, &rom, &dirs)?;
     let mut sound = wav.map(|path| crate::emu::audio::Wav::create(path, emu.sample_rate)).transpose()?;
     let mut samples = Vec::new();

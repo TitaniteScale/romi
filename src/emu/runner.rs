@@ -13,13 +13,24 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 /// Loads a core to play `rom` with. It gets RetroArch's system folder and RetroArch's save folder
-/// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways.
+/// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways. The
+/// game's own save goes where RetroArch keeps it too, so a game saved in romi carries on in
+/// RetroArch and back.
 pub fn load(cfg: &Config, core: &Path, rom: &Path) -> Result<Core> {
     let saves = crate::emu::libretro::info(core).and_then(|info| crate::emucfg::retroarch_save_dir(&info.name, rom));
     if let Some(dir) = &saves {
         std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;
     }
-    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves })
+    let save_file = save_file(saves.as_deref(), rom);
+    Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file })
+}
+
+/// Where RetroArch keeps a game's save: the ROM's name with `.srm`, in the save folder, or next to
+/// the ROM without one. A zipped game's save is named after the zip.
+fn save_file(saves: Option<&Path>, rom: &Path) -> Option<std::path::PathBuf> {
+    let mut name = rom.file_stem()?.to_os_string();
+    name.push(".srm");
+    Some(saves.or(rom.parent())?.join(name))
 }
 
 /// What the core thread and whatever draws its frames share.
@@ -38,6 +49,8 @@ pub struct Shared {
     queued_ms: AtomicU32,
     /// Why there's no sound, once the core thread has found out.
     sound_error: Mutex<Option<String>>,
+    /// Why the game's save couldn't be written, the last time it couldn't.
+    save_error: Mutex<Option<String>>,
 }
 
 const NO_SOUND: u32 = u32::MAX;
@@ -61,6 +74,7 @@ impl Shared {
             muted: AtomicBool::new(false),
             queued_ms: AtomicU32::new(NO_SOUND),
             sound_error: Mutex::new(None),
+            save_error: Mutex::new(None),
         });
         let thread = {
             let shared = shared.clone();
@@ -120,7 +134,15 @@ impl Shared {
     pub fn take_sound_error(&self) -> Option<String> {
         lock(&self.sound_error).take()
     }
+
+    /// Why the game's save couldn't be written, once for each time it couldn't.
+    pub fn take_save_error(&self) -> Option<String> {
+        lock(&self.save_error).take()
+    }
 }
+
+/// How often a running game's save is written, if it has changed, so a crash loses little.
+const SAVE_EVERY: Duration = Duration::from_secs(1);
 
 /// Runs the core until told to quit, playing its sound, at the pace its sound sets (or at its
 /// frame rate, without sound).
@@ -132,7 +154,17 @@ fn run_core(mut core: Core, shared: &Shared) {
     let mut samples = Vec::new();
     let period = Duration::from_secs_f64(1.0 / core.fps);
     let mut next = Instant::now();
+    let mut saved = Instant::now();
+    let save = |core: &mut Core| {
+        if let Err(e) = core.save() {
+            *lock(&shared.save_error) = Some(format!("{e:#}"));
+        }
+    };
     while !shared.quit.load(Ordering::Relaxed) {
+        if saved.elapsed() >= SAVE_EVERY {
+            save(&mut core);
+            saved = Instant::now();
+        }
         if shared.paused.load(Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(2));
             next = Instant::now();
@@ -165,5 +197,23 @@ fn run_core(mut core: Core, shared: &Shared) {
             // Too far behind to catch up without a burst of fast frames; carry on from here.
             next = now;
         }
+    }
+    save(&mut core);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saves_are_named_after_the_rom_in_the_save_folder_or_beside_the_rom() {
+        let rom = Path::new("/roms/gb/Super Mario Land 2 (USA, Europe).gb");
+        assert_eq!(
+            save_file(Some(Path::new("/saves/Gambatte")), rom).unwrap(),
+            Path::new("/saves/Gambatte/Super Mario Land 2 (USA, Europe).srm")
+        );
+        assert_eq!(save_file(None, rom).unwrap(), Path::new("/roms/gb/Super Mario Land 2 (USA, Europe).srm"));
+        let zipped = Path::new("/roms/gba/Mr. Bones.zip");
+        assert_eq!(save_file(None, zipped).unwrap(), Path::new("/roms/gba/Mr. Bones.srm"));
     }
 }

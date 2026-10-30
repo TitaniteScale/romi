@@ -57,6 +57,8 @@ void retro_deinit(void) {}
 void retro_run(void) {}
 void retro_unload_game(void) {}
 void retro_get_system_av_info(void *av) {}
+void *retro_get_memory_data(unsigned id) { return 0; }
+unsigned long retro_get_memory_size(unsigned id) { return 0; }
 _Bool retro_load_game(const void *game) { *(volatile int *)0 = 0; return 1; }
 """
 
@@ -79,7 +81,8 @@ def test_a_core_that_crashes_while_loading_leaves_the_tui_running(start, sandbox
     assert romi.exited is None
 
 
-# Draws a blank 160x144 screen, with a frame of silence, 60 times a second.
+# Draws a blank 160x144 screen, with a frame of silence, 60 times a second. Its game saves once,
+# on its first frame: one more than the count it found in its 8 KB of save RAM.
 DRAWING_CORE = r"""
 #include <string.h>
 struct info { const char *name, *version, *extensions; _Bool need_fullpath, block_extract; };
@@ -90,6 +93,8 @@ static video_fn video;
 static batch_fn batch;
 static unsigned short pixels[160 * 144];
 static short silence[2 * 546];
+static unsigned char sram[8192];
+static int frames;
 unsigned retro_api_version(void) { return 1; }
 void retro_get_system_info(struct info *i) { i->name = "Blank"; i->version = "1"; i->extensions = "gb"; i->need_fullpath = 1; }
 void retro_get_system_av_info(struct av *a) { a->w = a->max_w = 160; a->h = a->max_h = 144; a->aspect = 0; a->fps = 60; a->rate = 32760; }
@@ -101,8 +106,10 @@ void retro_set_input_poll(void *f) {}
 void retro_set_input_state(void *f) {}
 void retro_init(void) {}
 void retro_deinit(void) {}
-void retro_run(void) { video(pixels, 160, 144, 320); batch(silence, 546); }
+void retro_run(void) { if (!frames++) sram[0]++; video(pixels, 160, 144, 320); batch(silence, 546); }
 void retro_unload_game(void) {}
+void *retro_get_memory_data(unsigned id) { return id == 0 ? sram : 0; }
+unsigned long retro_get_memory_size(unsigned id) { return id == 0 ? sizeof sram : 0; }
 _Bool retro_load_game(const void *game) { return 1; }
 """
 
@@ -111,7 +118,7 @@ INTRO_IMAGE = b"i=%d," % 0x776972
 GAME_IMAGE = b"i=%d," % 0x726F6D
 
 
-def play_a_game_boy_game(start, sandbox, **settings):
+def set_up_a_game_boy_game(sandbox, **settings):
     source = sandbox.home / "blank.c"
     source.write_text(DRAWING_CORE)
     core = sandbox.home / "blank_libretro.so"
@@ -124,11 +131,18 @@ def play_a_game_boy_game(start, sandbox, **settings):
     config.update(settings)
     sandbox.write_config(config)
 
-    romi = start()
+
+def play_in_romi(romi):
     romi.keys("o")
     romi.wait_for("Play in romi")
     romi.keys("\r")
     romi.wait_for("to stop", timeout=10)
+
+
+def play_a_game_boy_game(start, sandbox, **settings):
+    set_up_a_game_boy_game(sandbox, **settings)
+    romi = start()
+    play_in_romi(romi)
     romi.pump(4)
     return bytes(romi.output)
 
@@ -154,3 +168,39 @@ def test_round_corners_clear_the_corners_of_the_picture(start, sandbox):
     out = play_a_game_boy_game(start, sandbox, launch_animation={"enabled": False}, corner_radius=4)
     assert b"f=32," in out.split(GAME_IMAGE, 1)[1][:100]
 
+
+
+# Where RetroArch keeps the game's save, sorted by core as it does by default.
+SAVE = ".config/retroarch/saves/Blank/Pocket Lantern (USA).srm"
+
+
+def test_games_played_in_romi_save_where_retroarch_does_and_carry_on_from_it(start, sandbox):
+    set_up_a_game_boy_game(sandbox, launch_animation={"enabled": False})
+    save = sandbox.home / SAVE
+    romi = start()
+    for count in (1, 2):
+        # By the game's image rather than the words under it, which ALSA's complaints about the
+        # sandbox's sound devices can write over.
+        seen = len(romi.output)
+        romi.keys("o")
+        romi.wait_for("Play in romi")
+        romi.keys("\r")
+        romi.wait_for(lambda: GAME_IMAGE in romi.output[seen:], timeout=10)
+        romi.keys("\x1b")
+        romi.wait_for(lambda: b"a=d,d=I," + GAME_IMAGE[:-1] in romi.output[seen:])
+        romi.pump(1)  # past the pause for buttons still held from the game
+        data = save.read_bytes()
+        assert len(data) == 8192
+        assert data[0] == count, "the game found what it saved last time"
+
+
+def test_a_save_that_cant_be_read_stops_the_game_and_is_left_alone(start, sandbox):
+    set_up_a_game_boy_game(sandbox, launch_animation={"enabled": False})
+    save = sandbox.home / SAVE
+    save.mkdir(parents=True)
+    romi = start()
+    romi.keys("o")
+    romi.wait_for("Play in romi")
+    romi.keys("\r")
+    romi.wait_for("can't read the save", timeout=10)
+    assert save.is_dir()

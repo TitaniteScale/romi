@@ -78,7 +78,11 @@ pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     let result = Screen::enter().and_then(|_screen| View::new(name, &core_name, fps).run(&shared));
     shared.stop();
     let _ = emu.join();
-    result
+    result?;
+    match shared.take_save_error() {
+        Some(e) => anyhow::bail!("the game wasn't saved: {e}"),
+        None => Ok(()),
+    }
 }
 
 /// The terminal in the state live play needs, put back however play ends.

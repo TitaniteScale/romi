@@ -40,6 +40,9 @@ const PIXEL_0RGB1555: c_int = 0;
 const PIXEL_XRGB8888: c_int = 1;
 const PIXEL_RGB565: c_int = 2;
 
+/// The game's battery-backed RAM, where cartridges keep their saves.
+const MEMORY_SAVE_RAM: c_uint = 0;
+
 /// What the video callback gets instead of pixels when the core renders with OpenGL or Vulkan.
 const HW_FRAME_BUFFER_VALID: *const c_void = usize::MAX as *const c_void;
 
@@ -96,6 +99,25 @@ struct Api {
     deinit: unsafe extern "C" fn(),
     run: unsafe extern "C" fn(),
     unload_game: unsafe extern "C" fn(),
+    get_memory_data: unsafe extern "C" fn(c_uint) -> *mut c_void,
+    get_memory_size: unsafe extern "C" fn(c_uint) -> usize,
+}
+
+impl Api {
+    /// The game's battery-backed RAM, empty if it has none. The core owns it and changes it as the
+    /// game runs; it stays put while the game is loaded.
+    fn save_ram(&mut self) -> &mut [u8] {
+        // SAFETY: the game is loaded, and the core keeps its save RAM until it's unloaded. Only the
+        // thread driving the core touches it, between frames.
+        unsafe {
+            let data = (self.get_memory_data)(MEMORY_SAVE_RAM);
+            let size = (self.get_memory_size)(MEMORY_SAVE_RAM);
+            if data.is_null() || size == 0 {
+                return &mut [];
+            }
+            std::slice::from_raw_parts_mut(data.cast(), size)
+        }
+    }
 }
 
 // ---- the joypad ----
@@ -352,6 +374,9 @@ pub struct Dirs {
     pub system: Option<PathBuf>,
     /// Where the core keeps what it writes itself, like FinalBurn Neo's NVRAM and high scores.
     pub saves: Option<PathBuf>,
+    /// The game's save file (`.srm`), read when it starts and written by `save`. Without one, the
+    /// game starts with nothing saved and what it saves is lost.
+    pub save_file: Option<PathBuf>,
 }
 
 pub struct Core {
@@ -361,6 +386,9 @@ pub struct Core {
     pub fps: f64,
     /// Sound samples per second, per channel.
     pub sample_rate: f64,
+    save_file: Option<PathBuf>,
+    /// The save as it is in the save file, to tell when the game has saved since.
+    saved: Vec<u8>,
     /// The ROM's bytes, which the core may keep pointing into until the game is unloaded.
     _rom: Vec<u8>,
     /// Where the ROM was unpacked to, for a zip the core can't open itself.
@@ -420,6 +448,8 @@ impl Core {
                 deinit: sym!("retro_deinit", unsafe extern "C" fn()),
                 run: sym!("retro_run", unsafe extern "C" fn()),
                 unload_game: sym!("retro_unload_game", unsafe extern "C" fn()),
+                get_memory_data: sym!("retro_get_memory_data", unsafe extern "C" fn(c_uint) -> *mut c_void),
+                get_memory_size: sym!("retro_get_memory_size", unsafe extern "C" fn(c_uint) -> usize),
             };
             let mut info = std::mem::zeroed::<SystemInfo>();
             sym!("retro_get_system_info", unsafe extern "C" fn(*mut SystemInfo))(&mut info);
@@ -447,16 +477,58 @@ impl Core {
             let mut av = AvInfo::default();
             sym!("retro_get_system_av_info", unsafe extern "C" fn(*mut AvInfo))(&mut av);
             shared().geometry = (av.geometry.base_width, av.geometry.base_height, av.geometry.aspect_ratio);
-            Ok(Core {
+            let mut core = Core {
                 api,
                 name,
                 fps: av.timing.fps,
                 sample_rate: av.timing.sample_rate,
+                save_file: dirs.save_file.clone(),
+                saved: Vec::new(),
                 _rom: data,
                 _unpacked: unpacked.map(|(dir, _)| dir),
                 _lib: lib,
-            })
+            };
+            if let Err(e) = core.load_save() {
+                // Dropping the core saves, which would write over the save that couldn't be read.
+                core.save_file = None;
+                return Err(e);
+            }
+            Ok(core)
         }
+    }
+
+    /// Puts the save file into the game's save RAM, as RetroArch does: as much of it as fits. A
+    /// save that's there but can't be read stops the game from starting, rather than letting it
+    /// write over the save later.
+    fn load_save(&mut self) -> Result<()> {
+        let Some(path) = &self.save_file else { return Ok(()) };
+        let ram = self.api.save_ram();
+        if ram.is_empty() {
+            return Ok(());
+        }
+        match std::fs::read(path) {
+            Ok(save) => {
+                let n = save.len().min(ram.len());
+                ram[..n].copy_from_slice(&save[..n]);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e).with_context(|| format!("can't read the save {}", path.display())),
+        }
+        self.saved = ram.to_vec();
+        Ok(())
+    }
+
+    /// Writes the game's save RAM to its save file, if the game has saved since it was read or
+    /// last written. Returns whether it wrote.
+    pub fn save(&mut self) -> Result<bool> {
+        let Some(path) = &self.save_file else { return Ok(false) };
+        let ram = self.api.save_ram();
+        if ram.is_empty() || *ram == *self.saved {
+            return Ok(false);
+        }
+        crate::files::write_atomic(path, &*ram).with_context(|| format!("can't write the save {}", path.display()))?;
+        self.saved = ram.to_vec();
+        Ok(true)
     }
 
     /// Runs one frame with these buttons held (bits from `button`).
@@ -492,6 +564,8 @@ impl Core {
 
 impl Drop for Core {
     fn drop(&mut self) {
+        // Whoever drove the core has saved and reported what failed; this only catches the rest.
+        let _ = self.save();
         // SAFETY: the game was loaded and the core initialized in `load`.
         unsafe {
             (self.api.unload_game)();

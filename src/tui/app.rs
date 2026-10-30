@@ -1581,7 +1581,9 @@ impl App {
     /// Stops the game in the middle panel. Input waits a moment, so the buttons that stopped it
     /// don't also do something in the list.
     pub fn stop_embedded(&mut self) {
-        self.embedded = None;
+        if let Some(e) = self.embedded.take().and_then(|e| e.stop()) {
+            self.set_status(Level::Error, format!("Not saved: {e}"));
+        }
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);
     }
 
@@ -1595,8 +1597,12 @@ impl App {
             self.stop_embedded();
             return self.set_status(Level::Error, format!("Stopped: {e:#}"));
         }
-        if let Some(e) = embedded.sound_error() {
+        let (sound_error, save_error) = (embedded.sound_error(), embedded.save_error());
+        if let Some(e) = sound_error {
             self.set_status(Level::Warn, format!("No sound: {e}"));
+        }
+        if let Some(e) = save_error {
+            self.set_status(Level::Error, format!("Not saved: {e}"));
         }
     }
 

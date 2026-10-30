@@ -175,8 +175,11 @@ It's built in steps, and the first one pays off without any of the TUI work:
      queued, so frames stay evenly spaced and the pitch is exact. A core's sample rate turned out
      to be more reliable than its frame rate: mGBA says 61.2 fps for Game Boy games, which run at
      59.7. `romi run --wav` saves a headless run's sound, the same every time.
-4. **Saves**: keep in-game saves in RetroArch's save folder, under the same names, so a save made in romi
-   carries over to RetroArch and back.
+4. ✓ **Saves**: in-game saves (the cartridge's battery-backed RAM) go in RetroArch's save folder,
+   under the same names, so a save made in romi carries over to RetroArch and back. romi checks
+   every second whether the game has saved, and writes the file then and when the game stops. A
+   save that can't be read stops the game from starting, so it's never written over. Save
+   states are still to come.
 5. **Scenes**: a PNG frame with a transparent screen area. romi draws each emulated frame into it and
    sends the result as one image. Terminals without graphics get an ASCII-art frame around a half-block
    screen.

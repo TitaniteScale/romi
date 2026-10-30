@@ -162,6 +162,20 @@ impl Embedded {
         self.shared.take_sound_error()
     }
 
+    /// Why the game's save couldn't be written, once for each time it couldn't.
+    pub fn save_error(&self) -> Option<String> {
+        self.shared.take_save_error()
+    }
+
+    /// Stops the game, which saves it a last time, and says why that save failed if it did.
+    pub fn stop(mut self) -> Option<String> {
+        self.shared.stop();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+        self.shared.take_save_error()
+    }
+
     /// The cells to put the picture's placeholders in, and the image they show: the whole of
     /// `area` while the animation plays, then the game's cells. None until there's something.
     pub fn place(&mut self, area: Rect) -> Option<(Rect, u32)> {

@@ -73,9 +73,12 @@ in the middle panel, with the systems and details still around it, drawn behind 
 placeholders. Esc, or holding Select+Start, stops it. Arcade games on their side, like Ms. Pac-Man,
 are turned upright.
 
-This is experimental: Kitty graphics only, and no in-game saves yet, though what a core keeps
-itself (FinalBurn Neo's high scores and NVRAM) goes to RetroArch's save folder for that core, so
-it's shared with RetroArch. The first time a core is played, romi starts it in a separate process
+This is experimental: Kitty graphics only. In-game saves go where RetroArch keeps them: the ROM's
+name with `.srm`, in RetroArch's save folder for that core (or next to the ROM, if RetroArch saves
+there), so a game saved in romi carries on in RetroArch and back. romi writes the save within a
+second of the game saving, and again when you stop. What a core keeps itself (FinalBurn Neo's high
+scores and NVRAM) goes to the same folder. A save that's there but can't be read stops the game
+from starting, rather than being written over. The first time a core is played, romi starts it in a separate process
 for a moment, so one that crashes (Flycast, which only draws with OpenGL or Vulkan) shows an error
 instead of taking romi down. Sound plays through PulseAudio (or PipeWire's stand-in for it), or
 ALSA without either; `"volume"` in the config sets how loud, from 0 to 100.
