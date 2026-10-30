@@ -1058,7 +1058,7 @@ fn contrast(a: [u8; 3], b: [u8; 3]) -> f64 {
 }
 
 /// What the terminal says its colors are.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct TerminalColors {
     background: Option<[u8; 3]>,
     /// The ones in `ANSI` that it answered for, in that order.

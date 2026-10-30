@@ -372,7 +372,7 @@ fn draw_games(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
 /// Draws a game's cover centered in `area`. Returns the rows to leave for it: the whole area while
 /// it has art (loading or not), so the text below stays put while scrolling; 0 if it has none.
 fn draw_cover(f: &mut Frame, app: &mut App, game: usize, area: Rect) -> u16 {
-    let Some(covers) = app.covers.as_mut() else { return 0 };
+    let Some(covers) = app.covers.as_mut().filter(|_| app.cfg.art.show) else { return 0 };
     match covers.get(&app.lib, game, Size::new(area.width, area.height)) {
         Cover::Ready(proto) => {
             draw_image(f, proto, area, false);
@@ -392,7 +392,7 @@ const SIDE_MIN_WIDTH: u16 = 20;
 /// there, taking turns when there are both. Without, they take turns with the cover itself,
 /// starting with the cover whenever the selection changes. Returns the rows used, like draw_cover.
 fn draw_art(f: &mut Frame, app: &mut App, game: usize, area: Rect) -> u16 {
-    let Some(covers) = app.covers.as_mut() else { return 0 };
+    let Some(covers) = app.covers.as_mut().filter(|_| app.cfg.art.show) else { return 0 };
     let screens: Vec<Kind> = Kind::wanted(&app.cfg)
         .iter()
         .copied()
@@ -525,7 +525,8 @@ fn draw_grid(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         let label_area = Rect::new(art.x, art.y + cover_h, cover_w, 1);
         f.render_widget(Paragraph::new(text::truncate(&name, cover_w as usize)).style(label).centered(), label_area);
 
-        let cover = app.covers.as_mut().map(|c| c.get(&app.lib, g, Size::new(cover_w, cover_h)));
+        let cover =
+            app.covers.as_mut().filter(|_| app.cfg.art.show).map(|c| c.get(&app.lib, g, Size::new(cover_w, cover_h)));
         match cover {
             Some(Cover::Ready(proto)) => draw_image(f, proto, art, true),
             Some(Cover::Loading) => {}
@@ -639,7 +640,7 @@ fn draw_playing(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         Line::raw(""),
         Line::from(Span::styled("romi will be back when the game closes", Style::new().dim())),
     ];
-    let has_art = app.covers.as_mut().is_some_and(|c| c.path(&app.lib, g).is_some());
+    let has_art = app.cfg.art.show && app.covers.as_mut().is_some_and(|c| c.path(&app.lib, g).is_some());
     let text_h = lines.len() as u16;
     let art_h = if has_art { (area.height.saturating_sub(text_h + 4) * 3 / 5).min(16) } else { 0 };
     let h = text_h + 2 + if art_h >= 4 { art_h + 1 } else { 0 };

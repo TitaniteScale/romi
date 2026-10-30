@@ -67,7 +67,7 @@ anything you `romi add`. Rerun `romi init` after installing an emulator or addin
 | `s`               | (menu)          | sort: name, last played, most played, year      |
 | `o`               | Start → game…   | the selected game's menu: favorite, hide, tags, emulator, achievements |
 | `m`               | Start / Guide   | menu: the game's menu, search, filter, sort, random, cover grid, details, stats, achievements, show hidden, reload, quit |
-| `ctrl-r`          |                 | reload config                                   |
+| `ctrl-r`          |                 | reload config (it reloads by itself when saved) |
 | `q`               |                 | quit                                            |
 
 The controller is read directly, since terminals never see gamepad input, and ignored while a game

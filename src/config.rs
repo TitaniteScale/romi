@@ -606,13 +606,17 @@ pub fn state_dir() -> PathBuf {
     dirs::state_dir().unwrap_or_else(|| home().join(".local/state")).join("romi")
 }
 
+/// The config's files: the one at `path`, then the ones it includes.
+pub fn files(path: &Path, cfg: &Config) -> Vec<PathBuf> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    std::iter::once(path.to_path_buf()).chain(cfg.include.iter().map(|inc| dir.join(expand_path(inc)))).collect()
+}
+
 /// Loads the config and the files it includes.
 pub fn load(path: &Path) -> Result<Config> {
     let raw = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
     let mut cfg = parse(&raw).with_context(|| format!("parsing {}", path.display()))?;
-    let dir = path.parent().unwrap_or(Path::new("."));
-    for inc in cfg.include.clone() {
-        let inc_path = dir.join(expand_path(&inc));
+    for inc_path in files(path, &cfg).into_iter().skip(1) {
         let raw = std::fs::read_to_string(&inc_path)
             .with_context(|| format!("reading {} (included from {})", inc_path.display(), path.display()))?;
         let stripped = json_comments::StripComments::new(raw.as_bytes());

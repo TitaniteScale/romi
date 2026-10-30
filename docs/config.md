@@ -7,6 +7,11 @@ first `romi`) writes one for you; other commands without one say to run it. See
 `"include": ["other.jsonc"]` adds the systems, games, vars and BIOS folders of other files
 (relative to the config's folder). Anything the main config defines itself wins.
 
+The TUI reloads the config by itself when it or a file it includes changes, a moment after the
+last save, so there's no need to restart romi. While a game is running it waits until the game
+stops. A config that doesn't parse is reported once, and romi carries on with the one it had.
+`ctrl-r` reloads by hand.
+
 ```jsonc
 {
   "roms_dir": "~/ROMs",

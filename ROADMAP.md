@@ -102,6 +102,8 @@ the config includes (hidden games, emulator picks). All done.
   with one picked per game from a menu. ES-DE's labelled commands provide these for free.
 - ✓ **Your own tags and collections**, like "couch co-op" or "backlog". Assign them with the controller
   and filter by them.
+- ✓ **Hot reload**: the TUI reloads the config when it or a file it includes is saved, waiting while a
+  game runs. The controller's A/B swap, covers and the animation's colors change without a restart.
 
 ## 4. Couch mode and hooks ✓
 

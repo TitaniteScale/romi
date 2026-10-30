@@ -3,6 +3,8 @@
 //! directions.
 
 use gilrs::{Axis, Button, EventType, Gilrs};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
@@ -80,11 +82,13 @@ struct Held {
     last: Instant,
 }
 
-pub fn spawn(tx: Sender<PadEvent>, swap_confirm: bool) {
-    std::thread::Builder::new().name("gamepad".into()).spawn(move || run(tx, swap_confirm)).ok();
+/// Reads the controllers on a thread of its own. `swap_confirm` is read on each press, so the
+/// options can change it.
+pub fn spawn(tx: Sender<PadEvent>, swap_confirm: Arc<AtomicBool>) {
+    std::thread::Builder::new().name("gamepad".into()).spawn(move || run(tx, &swap_confirm)).ok();
 }
 
-fn run(tx: Sender<PadEvent>, swap_confirm: bool) {
+fn run(tx: Sender<PadEvent>, swap_confirm: &AtomicBool) {
     let mut gilrs = match Gilrs::new() {
         Ok(g) => g,
         Err(e) => {
@@ -107,7 +111,7 @@ fn run(tx: Sender<PadEvent>, swap_confirm: bool) {
         if let Some(ev) = gilrs.next_event_blocking(Some(timeout)) {
             match ev.event {
                 EventType::ButtonPressed(b, _) => {
-                    if let Some(a) = map_button(b, swap_confirm) {
+                    if let Some(a) = map_button(b, swap_confirm.load(Ordering::Relaxed)) {
                         out.push(a);
                         if a.repeats() {
                             held = Some(Held { action: a, since: Instant::now(), last: Instant::now() });
@@ -115,7 +119,10 @@ fn run(tx: Sender<PadEvent>, swap_confirm: bool) {
                     }
                 }
                 EventType::ButtonReleased(b, _) => {
-                    if held.as_ref().is_some_and(|h| Some(h.action) == map_button(b, swap_confirm)) {
+                    if held
+                        .as_ref()
+                        .is_some_and(|h| Some(h.action) == map_button(b, swap_confirm.load(Ordering::Relaxed)))
+                    {
                         held = None;
                     }
                 }

@@ -18,6 +18,8 @@ use ratatui::widgets::ListState;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Child;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant};
 
@@ -72,6 +74,50 @@ pub const OSK: [[&str; 13]; 3] = [
 ];
 /// After a game exits, ignore input briefly so the button used to quit doesn't launch something.
 const INPUT_COOLDOWN: Duration = Duration::from_millis(600);
+/// How often the config's files are looked at for changes.
+const WATCH_EVERY: Duration = Duration::from_millis(500);
+
+/// When a file was changed and how big it is, or None if it's missing.
+type Stamp = Option<(std::time::SystemTime, u64)>;
+
+/// The config's files, and how they were when romi last read them, so it can reload when one
+/// changes: by hand, from another romi, or from romi's own menus.
+struct Watched {
+    files: Vec<PathBuf>,
+    seen: Vec<Stamp>,
+    /// Changed files as they were at the last look, to wait for them to stop changing.
+    settling: Option<Vec<Stamp>>,
+    looked: Instant,
+}
+
+impl Watched {
+    fn new(cfg_path: &Path, cfg: &Config) -> Watched {
+        let files = config::files(cfg_path, cfg);
+        let seen = stamps(&files);
+        Watched { files, seen, settling: None, looked: Instant::now() }
+    }
+
+    /// True once the files have changed and then stayed the same between two looks, so a file an
+    /// editor is still writing isn't read half done.
+    fn changed(&mut self) -> bool {
+        if self.looked.elapsed() < WATCH_EVERY {
+            return false;
+        }
+        self.looked = Instant::now();
+        let now = stamps(&self.files);
+        if now == self.seen {
+            self.settling = None;
+            return false;
+        }
+        let settled = self.settling.as_ref() == Some(&now);
+        self.settling = Some(now);
+        settled
+    }
+}
+
+fn stamps(files: &[PathBuf]) -> Vec<Stamp> {
+    files.iter().map(|f| std::fs::metadata(f).ok().and_then(|m| Some((m.modified().ok()?, m.len())))).collect()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pane {
@@ -179,6 +225,11 @@ pub struct App {
     pub embedded: Option<crate::emu::embedded::Embedded>,
     /// The colors the launch animation picks from, and whether the terminal's background is light.
     pub look: crate::emu::wireframe::Look,
+    /// What the terminal said its colors are, when romi started.
+    pub terminal_colors: crate::emu::wireframe::TerminalColors,
+    /// Whether B confirms and A goes back, for the controller's thread, which reads it on each press.
+    pub swap_confirm: Arc<AtomicBool>,
+    watched: Watched,
     /// Cores seen to start in a separate romi, which are safe to load into this one.
     cores_tried: HashSet<PathBuf>,
     pub pad: PadState,
@@ -237,6 +288,8 @@ impl App {
         let lib = Library::load(&cfg);
         let state = State::load();
         let pad = if cfg.controller.enabled { PadState::Searching } else { PadState::Disabled };
+        let watched = Watched::new(&cfg_path, &cfg);
+        let swap_confirm = Arc::new(AtomicBool::new(cfg.controller.swap_confirm));
         let mut app = App {
             show_details: cfg.theme.show_details,
             cfg,
@@ -252,6 +305,9 @@ impl App {
             running: None,
             embedded: None,
             look: crate::emu::wireframe::Look::new(None, Default::default()),
+            terminal_colors: Default::default(),
+            swap_confirm,
+            watched,
             cores_tried: HashSet::new(),
             pad,
             terminal_job: None,
@@ -1540,6 +1596,10 @@ impl App {
         if let Some(c) = &mut self.covers {
             c.poll();
         }
+        // Not while a game runs: the game list it's in would be rebuilt under it.
+        if self.embedded.is_none() && self.running.is_none() && self.watched.changed() {
+            self.reload_as("Config changed, reloaded");
+        }
         if let Some(screen) = &mut self.cheevos {
             screen.poll();
         }
@@ -1588,6 +1648,12 @@ impl App {
     }
 
     pub fn reload(&mut self) {
+        self.reload_as("Reloaded");
+    }
+
+    /// Reads the config again and rebuilds everything that comes from it, saying `done` and how
+    /// many games there are.
+    fn reload_as(&mut self, done: &str) {
         match config::load(&self.cfg_path) {
             Ok(cfg) => {
                 self.lib = Library::load(&cfg);
@@ -1596,15 +1662,27 @@ impl App {
                     c.reset(&cfg);
                 }
                 self.cfg = cfg;
+                self.apply_settings();
                 self.load_metadata();
                 self.load_achievements();
                 self.filter_options = filter::Options::from(&self.lib, &self.state);
                 self.end_search();
                 self.rebuild_keeping_selection();
-                self.set_status(Level::Info, format!("Reloaded: {} games", self.lib.games.len()));
+                self.set_status(Level::Info, format!("{done}: {} games", self.lib.games.len()));
             }
             Err(e) => self.set_status(Level::Error, format!("Config error: {e:#}")),
         }
+        // Even after an error, so it isn't reported again until the files change again.
+        self.watched = Watched::new(&self.cfg_path, &self.cfg);
+    }
+
+    /// Puts the config's settings into effect where they're kept outside it.
+    pub fn apply_settings(&mut self) {
+        use crate::emu::wireframe::{Look, parse_colors};
+        let listed: Vec<[u8; 3]> =
+            self.cfg.launch_animation.colors.iter().filter_map(|c| parse_colors([c.as_str()]).ok()).flatten().collect();
+        self.look = Look::new((!listed.is_empty()).then_some(listed), self.terminal_colors.clone());
+        self.swap_confirm.store(self.cfg.controller.swap_confirm, Ordering::Relaxed);
     }
 
     pub fn save_selection(&mut self) {

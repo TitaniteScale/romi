@@ -138,3 +138,23 @@ def test_start_on_last_played(start, sandbox):
                          "selected_game": "gba:Metroid Fusion (USA).gba"})
     romi = start()
     assert "Chrono Trigger" in romi.selected()
+
+
+def test_editing_the_config_reloads_it(start, sandbox):
+    romi = start()
+    config = json.loads(json.dumps(CONFIG))
+    config["games"].append({"name": "Fresh Script", "command": "true", "mode": "terminal"})
+    sandbox.write_config(config)
+    romi.wait_for("Config changed, reloaded: 6 games")
+    romi.keys("/fresh")
+    romi.wait_for("Fresh Script")
+
+
+def test_a_broken_edit_is_reported_once_and_the_old_config_kept(start, sandbox):
+    romi = start()
+    sandbox.config_path.write_text("{ broken")
+    romi.wait_for("Config error")
+    assert "Advance Wars" in romi.text()
+    # Fixed, it's read again.
+    sandbox.write_config(CONFIG)
+    romi.wait_for("Config changed, reloaded: 5 games")

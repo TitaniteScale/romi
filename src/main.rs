@@ -66,24 +66,24 @@ fn main() {
 
 fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     let (tx, rx) = mpsc::channel();
-    if cfg.controller.enabled {
-        gamepad::spawn(tx, cfg.controller.swap_confirm);
-    }
     let mut app = App::new(cfg, cfg_path);
+    if app.cfg.controller.enabled {
+        gamepad::spawn(tx, app.swap_confirm.clone());
+    }
     let mut terminal = ratatui::init();
-    // Ask the terminal about itself; this has to happen before reading events.
-    let answers = (app.cfg.art.show || app.cfg.launch_animation.enabled) && terminal_answers();
-    if app.cfg.launch_animation.enabled {
-        app.look = launch_look(&app.cfg.launch_animation, answers);
+    // Ask the terminal about itself; this has to happen before reading events. Covers and the
+    // animation's colors are set up even when they're off, since the options can turn them on.
+    let answers = terminal_answers();
+    if answers {
+        app.terminal_colors = emu::wireframe::ask_colors();
     }
-    if app.cfg.art.show {
-        let picker = if answers {
-            ratatui_image::picker::Picker::from_query_stdio().ok()
-        } else {
-            Some(ratatui_image::picker::Picker::halfblocks())
-        };
-        app.covers = picker.map(|p| tui::cover::Covers::new(p, &app.cfg));
-    }
+    app.apply_settings();
+    let picker = if answers {
+        ratatui_image::picker::Picker::from_query_stdio().ok()
+    } else {
+        Some(ratatui_image::picker::Picker::halfblocks())
+    };
+    app.covers = picker.map(|p| tui::cover::Covers::new(p, &app.cfg));
     // Terminals that don't understand the query may have echoed part of it. Nothing is drawn yet,
     // so wiping the screen keeps it in sync with ratatui's (empty) buffer.
     execute!(stdout(), Clear(ClearType::All))?;
@@ -93,15 +93,6 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     ratatui::restore();
     app.save_selection();
     result
-}
-
-/// The colors the launch animation picks from: the config's, or else the terminal's palette when
-/// it answers questions. Colors the config gets wrong are left out.
-fn launch_look(cfg: &config::LaunchAnimation, answers: bool) -> emu::wireframe::Look {
-    use emu::wireframe::{Look, TerminalColors, ask_colors, parse_colors};
-    let listed: Vec<[u8; 3]> = cfg.colors.iter().filter_map(|c| parse_colors([c.as_str()]).ok()).flatten().collect();
-    let terminal = if answers { ask_colors() } else { TerminalColors::default() };
-    Look::new((!listed.is_empty()).then_some(listed), terminal)
 }
 
 /// Asks the terminal for a status report and waits for the reply. The image-support query reads
