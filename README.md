@@ -1,16 +1,14 @@
-https://github.com/user-attachments/assets/3546be21-ad2e-4cfb-91fb-bc42bb2cdb4f
-<img width="720" height="450" alt="romi-demo" src="https://github.com/user-attachments/assets/226ba686-b2f8-4c54-805b-b708a5a86dc3" />
-
-
-
 # romi
 
 A game launcher for the terminal. ROMs, scripts, native ports and Steam games in one list, driven
-by a keyboard or a controller. Game Boy, GBA, NES, SNES, Genesis and arcade games can also play
-right inside it, with sound, saves and RetroAchievements.
+by a keyboard or a controller. Games can also play right inside it, with sound, saves and
+RetroAchievements: Game Boy to SNES, Genesis and arcade, and in 3D, N64, PlayStation and Dreamcast.
 
-<!-- Demo GIF goes here: browsing the cover grid, picking a Game Boy game, the launch animation,
-     a few seconds of play with the CRT filter and an achievement unlocking. -->
+<img width="720" height="450" alt="Picking Crazy Taxi from the Dreamcast covers in romi: a wireframe arcade cabinet builds itself, and the game plays in the middle of the launcher" src="https://github.com/user-attachments/assets/226ba686-b2f8-4c54-805b-b708a5a86dc3" />
+
+The full clip, with sound:
+
+https://github.com/user-attachments/assets/3546be21-ad2e-4cfb-91fb-bc42bb2cdb4f
 
 - **Play in the terminal.** romi loads RetroArch's libretro cores itself and draws the game in the
   middle of the launcher. A wireframe of the console builds itself in your terminal's colors, then
@@ -35,9 +33,9 @@ romi doesn't come with any games: bring your own ROMs, and the emulators to run 
 - **Any terminal** for the launcher. Box art is drawn with Kitty graphics, Sixel or iTerm2 images,
   or colored half-blocks where there are none.
 - **Playing in the terminal** needs Kitty graphics with Unicode placeholders: Ghostty, where it's
-  tested, or kitty. It runs libretro cores that draw in software, which covers the 2D systems;
-  [systems that need a GPU](ROADMAP.md#7-systems-that-need-a-gpu) are still to come.
-  Any other game launches in its emulator as usual.
+  tested, or kitty. It runs libretro cores, the 2D systems' and the 3D ones that draw with
+  OpenGL (Flycast, Mupen64Plus-Next, Beetle PSX HW), which need libEGL. 3D is new, and so far
+  tested on AMD with Mesa. Any other game launches in its emulator as usual.
 
 ## Install
 
