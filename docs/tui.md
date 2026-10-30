@@ -105,7 +105,18 @@ whether it's for this game, saved in `overrides.jsonc`, or all its system's, sav
 `"controls"`; a game's go over its system's, which go over RetroArch's remap. Reset puts them back.
 The buttons are named as the core names them (Fire, Jump) once the game, or another of its
 system's, has been played in romi, since a core only says as a game starts; before that they're
-named as on a Super Nintendo pad. They apply to `romi run` too.
+named as on a Super Nintendo pad. They apply to `romi run` too, and to every player.
+
+### Players
+
+Each controller is a player of its own, up to four, and the keyboard plays as player 1. With more
+than one controller connected, **Players…** in the menu says who's who: press a button on player 1's
+controller, then player 2's, and so on. It closes once every controller has had a press, or with B
+on one that has. The order is saved in `state.json` and holds for every game; controllers it
+doesn't know yet come after, in the order romi finds them. Two controllers of the same kind are told
+apart by that order too ("8BitDo Ultimate 2C #2"). Holding Select and Start on any of them stops
+the game. RetroArch's remap applies to each player as it has them (`input_player2_btn_a`), and
+romi's own remaps to every player.
 
 The picture is square by default, as the game drew it. `"corner_radius"` rounds its corners, as a
 percentage of its height: about 4 looks like an old TV. The corners are left clear, so the

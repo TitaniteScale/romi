@@ -239,8 +239,8 @@ impl View {
                 _ => {}
             }
         }
-        let Some(input) = self.controls.input() else { return Ok(false) };
-        shared.set_input(input);
+        let Some(players) = self.controls.input() else { return Ok(false) };
+        shared.set_input(players);
         Ok(true)
     }
 

@@ -1,8 +1,10 @@
-//! Game input: the keyboard and controllers, as a libretro pad's buttons, sticks and triggers.
-//! Holding Select and Start together quits, from either.
+//! Game input: the keyboard and controllers, as libretro pads' buttons, sticks and triggers. Each
+//! controller is a player of its own, in the order saved from the players screen (`State::players`),
+//! then in the order romi finds them; the keyboard plays as player 1 too. Holding Select and Start
+//! together quits, from any of them.
 
-use crate::emu::libretro::{Input, button};
-use gilrs::{Axis, Button, Gilrs};
+use crate::emu::libretro::{Input, PLAYERS, Players, button};
+use gilrs::{Axis, Button, EventType, GamepadId, Gilrs};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -12,6 +14,10 @@ const QUIT_HOLD: Duration = Duration::from_secs(1);
 
 pub struct Controls {
     gilrs: Option<Gilrs>,
+    /// The controllers, player 1's first, worked out again when one comes or goes.
+    order: Vec<GamepadId>,
+    /// The order saved from the players screen, by `pad_names`.
+    saved: Vec<String>,
     /// Keys held down. Releases only arrive in terminals with the Kitty keyboard protocol.
     keys: HashSet<KeyCode>,
     quit_held_since: Option<Instant>,
@@ -19,7 +25,10 @@ pub struct Controls {
 
 impl Controls {
     pub fn new() -> Controls {
-        Controls { gilrs: Gilrs::new().ok(), keys: HashSet::new(), quit_held_since: None }
+        let gilrs = Gilrs::new().ok();
+        let saved = crate::state::State::load().players;
+        let order = gilrs.as_ref().map(|g| player_order(g, &saved)).unwrap_or_default();
+        Controls { gilrs, order, saved, keys: HashSet::new(), quit_held_since: None }
     }
 
     /// Notes a key going down or coming up.
@@ -31,36 +40,66 @@ impl Controls {
         }
     }
 
-    /// What's held on the keyboard and every controller together, or None once Select and Start
-    /// have been held together long enough to quit.
-    pub fn input(&mut self) -> Option<Input> {
-        let mut input = self.keys.iter().fold(Input::default(), |mut input, &k| {
-            input.buttons |= key_button(k).unwrap_or(0);
-            add(&mut input.sticks[0], key_stick(k));
-            input
-        });
+    /// What each player holds, or None once one has held Select and Start together long enough
+    /// to quit.
+    pub fn input(&mut self) -> Option<Players> {
+        let mut players = Players::default();
+        for &k in &self.keys {
+            players[0].buttons |= key_button(k).unwrap_or(0);
+            add(&mut players[0].sticks[0], key_stick(k));
+        }
         if let Some(gilrs) = &mut self.gilrs {
-            while gilrs.next_event().is_some() {}
-            for (_, pad) in gilrs.gamepads() {
-                let pad = pad_input(&pad);
-                input.buttons |= pad.buttons;
-                for (stick, more) in input.sticks.iter_mut().zip(pad.sticks) {
-                    add(stick, more);
-                }
-                for (trigger, more) in input.triggers.iter_mut().zip(pad.triggers) {
-                    *trigger = (*trigger).max(more);
-                }
+            let mut changed = false;
+            while let Some(ev) = gilrs.next_event() {
+                changed |= matches!(ev.event, EventType::Connected | EventType::Disconnected);
+            }
+            if changed {
+                self.order = player_order(gilrs, &self.saved);
+            }
+            for (player, &id) in players.iter_mut().zip(&self.order) {
+                merge(player, pad_input(&gilrs.gamepad(id)));
             }
         }
         let quit = button("select").unwrap() | button("start").unwrap();
-        if input.buttons & quit == quit {
+        if players.iter().any(|p| p.buttons & quit == quit) {
             if self.quit_held_since.get_or_insert_with(Instant::now).elapsed() >= QUIT_HOLD {
                 return None;
             }
         } else {
             self.quit_held_since = None;
         }
-        Some(input)
+        Some(players)
+    }
+}
+
+/// The connected controllers by name, in the order gilrs lists them, a second of the same kind
+/// called "… #2", and so on, so the players screen and a game tell them apart the same way.
+pub fn pad_names(gilrs: &Gilrs) -> Vec<(GamepadId, String)> {
+    let mut named: Vec<(GamepadId, String)> = Vec::new();
+    for (id, pad) in gilrs.gamepads() {
+        let name = pad.name().to_string();
+        let same = named.iter().filter(|(_, n)| *n == name || n.starts_with(&format!("{name} #"))).count();
+        named.push((id, if same == 0 { name } else { format!("{name} #{}", same + 1) }));
+    }
+    named
+}
+
+/// The controllers, player 1's first: the ones in `saved` in its order, then the rest as gilrs
+/// lists them. Only as many as there are players.
+fn player_order(gilrs: &Gilrs, saved: &[String]) -> Vec<GamepadId> {
+    let mut pads = pad_names(gilrs);
+    pads.sort_by_key(|(_, name)| saved.iter().position(|s| s == name).unwrap_or(usize::MAX));
+    pads.into_iter().take(PLAYERS).map(|(id, _)| id).collect()
+}
+
+/// Adds what one more pad holds to what a player holds.
+fn merge(input: &mut Input, more: Input) {
+    input.buttons |= more.buttons;
+    for (stick, more) in input.sticks.iter_mut().zip(more.sticks) {
+        add(stick, more);
+    }
+    for (trigger, more) in input.triggers.iter_mut().zip(more.triggers) {
+        *trigger = (*trigger).max(more);
     }
 }
 

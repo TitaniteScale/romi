@@ -1,9 +1,9 @@
 //! Remapped controls: which of libretro's buttons and stick directions each of the pad's sends, and
 //! the type of controller plugged into each port. They come from RetroArch's remap file (see
 //! `emucfg::retroarch_remap`), with the buttons remapped in romi over it: the system's, then the
-//! game's. Only player 1's buttons, since romi only plays on port 1 so far.
+//! game's, which go over every player's.
 
-use crate::emu::libretro::{BUTTONS, Input};
+use crate::emu::libretro::{BUTTONS, Input, PLAYERS};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -17,15 +17,18 @@ const CONTROLS: usize = BUTTONS.len() + DIRECTIONS.len();
 const L2: usize = 12;
 const R2: usize = 13;
 
+/// What each button, then each stick direction, sends: another one's place, or None for nothing.
+type Sends = [Option<u8>; CONTROLS];
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Remap {
-    /// What each button, then each stick direction, sends: another one's place, or None for nothing.
-    sends: [Option<u8>; CONTROLS],
+    /// Each player's.
+    players: [Sends; PLAYERS],
     /// The type of controller in each port (a `RETRO_DEVICE_*`), where the file sets one.
-    pub devices: [Option<u32>; 4],
+    pub devices: [Option<u32>; PLAYERS],
 }
 
-fn unchanged() -> [Option<u8>; CONTROLS] {
+fn unchanged() -> Sends {
     std::array::from_fn(|i| Some(i as u8))
 }
 
@@ -69,7 +72,7 @@ impl<'de> Deserialize<'de> for Controls {
 
 impl Default for Remap {
     fn default() -> Remap {
-        Remap { sends: unchanged(), devices: [None; 4] }
+        Remap { players: [unchanged(); PLAYERS], devices: [None; PLAYERS] }
     }
 }
 
@@ -78,10 +81,13 @@ impl Remap {
     /// a button or direction, sends nothing, as in RetroArch.
     pub fn parse(lines: &BTreeMap<&str, &str>) -> Remap {
         let mut remap = Remap::default();
-        let names = BUTTONS.iter().map(|b| format!("btn_{b}")).chain(DIRECTIONS.iter().map(|d| format!("stk_{d}")));
-        for (sends, name) in remap.sends.iter_mut().zip(names) {
-            if let Some(n) = lines.get(format!("input_player1_{name}").as_str()).and_then(|v| v.parse::<i64>().ok()) {
-                *sends = u8::try_from(n).ok().filter(|&n| usize::from(n) < CONTROLS);
+        for (player, sends) in remap.players.iter_mut().enumerate() {
+            let names = BUTTONS.iter().map(|b| format!("btn_{b}")).chain(DIRECTIONS.iter().map(|d| format!("stk_{d}")));
+            for (sends, name) in sends.iter_mut().zip(names) {
+                let key = format!("input_player{}_{name}", player + 1);
+                if let Some(n) = lines.get(key.as_str()).and_then(|v| v.parse::<i64>().ok()) {
+                    *sends = u8::try_from(n).ok().filter(|&n| usize::from(n) < CONTROLS);
+                }
             }
         }
         for (port, device) in remap.devices.iter_mut().enumerate() {
@@ -90,51 +96,53 @@ impl Remap {
         remap
     }
 
-    /// With `controls` over it, button by button.
+    /// With `controls` over every player's, button by button.
     pub fn with(mut self, controls: &Controls) -> Remap {
         for (from, to) in &controls.0 {
             if let Some(from) = place(from).filter(|&p| p < BUTTONS.len()) {
-                self.sends[from] = place(to).map(|p| p as u8);
+                for sends in &mut self.players {
+                    sends[from] = place(to).map(|p| p as u8);
+                }
             }
         }
         self
     }
 
-    /// The pad's buttons that send the button at `place` (see `libretro::BUTTONS`).
+    /// Player 1's buttons that send the button at `place` (see `libretro::BUTTONS`). The controls
+    /// screen shows and changes player 1's, and saves them for everyone.
     pub fn sent_by(&self, place: usize) -> impl Iterator<Item = usize> + '_ {
-        (0..BUTTONS.len()).filter(move |&b| self.sends[b] == Some(place as u8))
+        (0..BUTTONS.len()).filter(move |&b| self.players[0][b] == Some(place as u8))
     }
 
-    /// Has the pad's button `pressed` send the button at `place`, and the button that sent it
+    /// Has player 1's button `pressed` send the button at `place`, and the button that sent it
     /// before send what `pressed` did, so the two swap and none is left doing nothing.
     pub fn swap(&mut self, place: usize, pressed: usize) {
         let before = self.sent_by(place).next();
-        let was = self.sends[pressed];
-        self.sends[pressed] = Some(place as u8);
+        let sends = &mut self.players[0];
+        let was = sends[pressed];
+        sends[pressed] = Some(place as u8);
         if let Some(before) = before.filter(|&b| b != pressed) {
-            self.sends[before] = was;
+            sends[before] = was;
         }
     }
 
-    /// The buttons that differ from `below`'s, to keep as romi's remap over it.
+    /// Player 1's buttons that differ from `below`'s, to keep as romi's remap over it.
     pub fn controls_over(&self, below: &Remap) -> Controls {
-        let changed = (0..BUTTONS.len()).filter(|&b| self.sends[b] != below.sends[b]);
+        let (now, below) = (&self.players[0], &below.players[0]);
+        let changed = (0..BUTTONS.len()).filter(|&b| now[b] != below[b]);
         Controls(
-            changed
-                .map(|b| (name(b).to_string(), name(self.sends[b].map_or(usize::MAX, usize::from)).to_string()))
-                .collect(),
+            changed.map(|b| (name(b).to_string(), name(now[b].map_or(usize::MAX, usize::from)).to_string())).collect(),
         )
     }
 
-    /// What the core sees when `input` is held. A button sent to a stick direction pushes the stick
-    /// all the way, and a direction sent to a button presses it once the stick is pushed halfway.
-    pub fn apply(&self, input: Input) -> Input {
-        if self.sends == unchanged() {
-            return input;
-        }
+    /// What the core sees when `player` (from 0) holds `input`. A button sent to a stick direction
+    /// pushes the stick all the way, and a direction sent to a button presses it once the stick is
+    /// pushed halfway.
+    pub fn apply(&self, player: usize, input: Input) -> Input {
+        let Some(sends) = self.players.get(player).filter(|s| **s != unchanged()) else { return input };
         let mut out = Input::default();
         let mut pushed = [0i16; CONTROLS];
-        for (from, to) in self.sends.iter().enumerate() {
+        for (from, to) in sends.iter().enumerate() {
             let Some(to) = to.map(usize::from) else { continue };
             let push = how_far(&input, from);
             pushed[to] = pushed[to].max(push);
@@ -188,9 +196,9 @@ mod tests {
             "input_player1_btn_a = 0\ninput_player1_btn_b = 8\ninput_player1_btn_select = -1\ninput_player1_btn_x = 99",
         );
         let held = |names: &[&str]| Input::buttons(names.iter().map(|n| button(n).unwrap()).fold(0, |a, b| a | b));
-        assert_eq!(r.apply(held(&["a"])).buttons, button("b").unwrap());
-        assert_eq!(r.apply(held(&["a", "b", "start"])), held(&["a", "b", "start"]));
-        assert_eq!(r.apply(held(&["select", "x", "up"])), held(&["up"]));
+        assert_eq!(r.apply(0, held(&["a"])).buttons, button("b").unwrap());
+        assert_eq!(r.apply(0, held(&["a", "b", "start"])), held(&["a", "b", "start"]));
+        assert_eq!(r.apply(0, held(&["select", "x", "up"])), held(&["up"]));
     }
 
     #[test]
@@ -201,18 +209,18 @@ mod tests {
              input_player1_stk_r_x+ = 16\ninput_player1_stk_r_x- = 6\ninput_player1_stk_r_y+ = 18\ninput_player1_stk_r_y- = 19",
         );
         let input = Input { sticks: [[1000, -2000], [-30000, 500]], ..Input::default() };
-        let out = r.apply(input);
+        let out = r.apply(0, input);
         assert_eq!(out.sticks, [[0, 500], [1000, -2000]]);
         assert_eq!(out.buttons, button("left").unwrap());
         // Pushed only a little, it isn't pressed.
-        assert_eq!(r.apply(Input { sticks: [[0; 2], [-1000, 0]], ..input }).buttons, 0);
+        assert_eq!(r.apply(0, Input { sticks: [[0; 2], [-1000, 0]], ..input }).buttons, 0);
     }
 
     #[test]
     fn triggers_go_with_their_buttons() {
         let r = remap("input_player1_btn_l2 = 13\ninput_player1_btn_r2 = 12\ninput_player1_btn_y = 17");
         let input = Input { triggers: [8000, 0], ..Input::buttons(button("y").unwrap()) };
-        let out = r.apply(input);
+        let out = r.apply(0, input);
         assert_eq!(out.triggers, [0, 8000]);
         // Y pushes the left stick all the way left.
         assert_eq!((out.buttons, out.sticks[0]), (0, [-i16::MAX, 0]));
@@ -223,11 +231,11 @@ mod tests {
         let below = remap("input_player1_btn_a = 0\ninput_player1_btn_b = 8\ninput_player1_btn_l = 16");
         let controls: Controls = serde_json::from_str(r#"{ "a": "x", "select": "none" }"#).unwrap();
         let r = below.clone().with(&controls);
-        assert_eq!(r.apply(Input::buttons(button("a").unwrap())).buttons, button("x").unwrap());
+        assert_eq!(r.apply(0, Input::buttons(button("a").unwrap())).buttons, button("x").unwrap());
         // B still sends A, and L the left stick to the right, as RetroArch's remap has them.
-        assert_eq!(r.apply(Input::buttons(button("b").unwrap())).buttons, button("a").unwrap());
-        assert_eq!(r.apply(Input::buttons(button("l").unwrap())).sticks[0], [i16::MAX, 0]);
-        assert_eq!(r.apply(Input::buttons(button("select").unwrap())).buttons, 0);
+        assert_eq!(r.apply(0, Input::buttons(button("b").unwrap())).buttons, button("a").unwrap());
+        assert_eq!(r.apply(0, Input::buttons(button("l").unwrap())).sticks[0], [i16::MAX, 0]);
+        assert_eq!(r.apply(0, Input::buttons(button("select").unwrap())).buttons, 0);
         assert_eq!(r.controls_over(&below), controls);
         assert!(below.controls_over(&below).is_empty());
     }
@@ -256,9 +264,19 @@ mod tests {
     }
 
     #[test]
+    fn each_player_has_retroarchs_own_and_romis_go_over_all() {
+        let r = remap("input_player1_btn_a = 0\ninput_player2_btn_a = 9");
+        let a = Input::buttons(button("a").unwrap());
+        let sent = |r: &Remap| [0, 1, 2].map(|p| r.apply(p, a).buttons);
+        assert_eq!(sent(&r), [button("b").unwrap(), button("x").unwrap(), button("a").unwrap()]);
+        let controls: Controls = serde_json::from_str(r#"{ "a": "start" }"#).unwrap();
+        assert_eq!(sent(&r.with(&controls)), [button("start").unwrap(); 3]);
+    }
+
+    #[test]
     fn controller_types_by_port() {
         let r = remap("input_libretro_device_p1 = 517\ninput_libretro_device_p3 = 1");
         assert_eq!(r.devices, [Some(517), None, Some(1), None]);
-        assert_eq!(r.apply(Input::buttons(5)), Input::buttons(5));
+        assert_eq!(r.apply(0, Input::buttons(5)), Input::buttons(5));
     }
 }

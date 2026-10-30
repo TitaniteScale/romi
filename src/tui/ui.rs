@@ -141,6 +141,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.controls.is_some() {
         draw_controls(f, app, &theme, body);
     }
+    if app.players.is_some() {
+        draw_players(f, app, &theme, body);
+    }
     if app.stats.is_some() {
         draw_stats(f, app, &theme, body);
     }
@@ -288,6 +291,30 @@ fn draw_controls(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let title = format!(" Controls: {} ", text::truncate(&game.name, WIDTH - 12));
     let block = theme.block(title, true).title_bottom(saved.right_aligned()).padding(Padding::vertical(1));
     f.render_widget(Paragraph::new(lines).block(block).scroll((scroll, 0)), rect);
+}
+
+/// The players screen: each controller and the player it is, the ones not pressed yet dimmed.
+fn draw_players(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let Some(screen) = &app.players else { return };
+    const WIDTH: usize = 44;
+    let next = screen.pressed.len() + 1;
+    let mut lines = vec![
+        Line::from(Span::styled(format!("  Press a button on player {next}'s controller"), Style::new().dim())),
+        Line::default(),
+    ];
+    for (i, pad) in screen.order(&app.pads, &app.state.players).iter().enumerate() {
+        let pressed = screen.pressed.contains(pad);
+        let style = if pressed { Style::new().fg(theme.accent) } else { Style::new().dim() };
+        let pad = text::truncate(pad, WIDTH - 13);
+        lines.push(Line::from(vec![
+            Span::styled(format!("  Player {}  ", i + 1), style.bold()),
+            Span::styled(pad, style),
+        ]));
+    }
+    let rect = centered(area, WIDTH as u16 + 4, lines.len() as u16 + 4);
+    f.render_widget(Clear, rect);
+    let block = theme.block(" Players ", true).padding(Padding::vertical(1));
+    f.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -841,6 +868,14 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let pad = matches!(app.pad, PadState::Connected(_));
     let (ok, back) = if app.cfg.controller.swap_confirm { ("B", "A") } else { ("A", "B") };
 
+    if let Some(screen) = &app.players {
+        let line = match screen.pressed.is_empty() {
+            true => hints(&[("any button", "next player"), ("esc", "cancel")]),
+            false => hints(&[("any button", "next player"), (back, "done"), ("esc", "done")]),
+        };
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
     if let Some(screen) = &app.controls {
         let line = match (screen.capturing, pad) {
             (true, true) => hints(&[("any button", "for it")]),

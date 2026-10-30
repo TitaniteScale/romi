@@ -239,7 +239,7 @@ pub(super) fn run_core(
     let mut samples = Vec::new();
     let started = Instant::now();
     for n in 0..frames {
-        emu.run_frame(crate::emu::libretro::Input::buttons(script.buttons_at(n)));
+        emu.run_frame(script.players_at(n));
         if let Some(sound) = &mut sound {
             samples.clear();
             emu.audio(&mut samples);

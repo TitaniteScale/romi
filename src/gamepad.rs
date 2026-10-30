@@ -38,13 +38,19 @@ pub enum PadAction {
 
 #[derive(Debug)]
 pub enum PadEvent {
-    /// A button going down: which of the pad's buttons it is to a game (see `emu::controls::PAD`),
-    /// and what it does in romi's menus.
-    Pressed(Option<&'static str>, Option<PadAction>),
+    /// A button going down: on which controller (see `emu::controls::pad_names`), which of the
+    /// pad's buttons it is to a game (see `emu::controls::PAD`), and what it does in romi's menus.
+    Pressed {
+        pad: String,
+        button: Option<&'static str>,
+        action: Option<PadAction>,
+    },
     /// A held direction repeating, or the stick pushed.
     Action(PadAction),
     Connected(String),
     Disconnected,
+    /// The controllers connected now, by name, whenever one comes or goes.
+    Pads(Vec<String>),
     Unavailable(String),
 }
 
@@ -52,7 +58,7 @@ impl PadEvent {
     /// What it does in romi's menus.
     pub fn action(&self) -> Option<PadAction> {
         match self {
-            PadEvent::Pressed(_, action) => *action,
+            PadEvent::Pressed { action, .. } => *action,
             PadEvent::Action(action) => Some(*action),
             _ => None,
         }
@@ -114,6 +120,8 @@ fn run(tx: Sender<PadEvent>, swap_confirm: &AtomicBool) {
     if let Some((_, pad)) = gilrs.gamepads().next() {
         let _ = tx.send(PadEvent::Connected(pad.name().to_string()));
     }
+    let names = |gilrs: &Gilrs| crate::emu::controls::pad_names(gilrs).into_iter().map(|(_, n)| n).collect();
+    let _ = tx.send(PadEvent::Pads(names(&gilrs)));
 
     let mut held: Option<Held> = None;
     let mut stick_y: Option<PadAction> = None;
@@ -132,7 +140,9 @@ fn run(tx: Sender<PadEvent>, swap_confirm: &AtomicBool) {
                     }
                     let button = crate::emu::controls::pad_name(b);
                     if button.is_some() || action.is_some() {
-                        out.push(PadEvent::Pressed(button, action));
+                        let pads = crate::emu::controls::pad_names(&gilrs);
+                        let pad = pads.into_iter().find(|(id, _)| *id == ev.id).map(|(_, n)| n).unwrap_or_default();
+                        out.push(PadEvent::Pressed { pad, button, action });
                     }
                 }
                 EventType::ButtonReleased(b, _) => {
@@ -164,6 +174,7 @@ fn run(tx: Sender<PadEvent>, swap_confirm: &AtomicBool) {
                 EventType::Connected => {
                     let name = gilrs.gamepad(ev.id).name().to_string();
                     let _ = tx.send(PadEvent::Connected(name));
+                    let _ = tx.send(PadEvent::Pads(names(&gilrs)));
                 }
                 EventType::Disconnected => {
                     held = None;
@@ -172,6 +183,7 @@ fn run(tx: Sender<PadEvent>, swap_confirm: &AtomicBool) {
                         None => PadEvent::Disconnected,
                     };
                     let _ = tx.send(event);
+                    let _ = tx.send(PadEvent::Pads(names(&gilrs)));
                 }
                 _ => {}
             }

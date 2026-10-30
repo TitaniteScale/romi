@@ -43,6 +43,8 @@ pub enum MenuItem {
     ShowHidden,
     /// Opens the options panel.
     Options,
+    /// Opens the players screen, with more than one controller connected.
+    Players,
     Reload,
     Quit,
     Favorite,
@@ -262,6 +264,10 @@ pub struct App {
     pub options: Option<usize>,
     /// The controls screen, while it's open.
     pub controls: Option<crate::tui::controls::Screen>,
+    /// The players screen, while it's open.
+    pub players: Option<crate::tui::players::Screen>,
+    /// The controllers connected, by name (see `emu::controls::pad_names`).
+    pub pads: Vec<String>,
     /// Database metadata being looked up in the background.
     metadata: Option<Receiver<Vec<crate::meta::Found>>>,
     pub quit: bool,
@@ -335,6 +341,8 @@ impl App {
             filter_panel: None,
             options: None,
             controls: None,
+            players: None,
+            pads: Vec::new(),
             quit: false,
             systems_list: ListState::default(),
             games_list: ListState::default(),
@@ -709,6 +717,12 @@ impl App {
             self.cheevos_op(op);
             return;
         }
+        if self.players.is_some() {
+            if matches!(k.code, KeyCode::Esc | KeyCode::Enter | KeyCode::Char('q')) {
+                self.close_players();
+            }
+            return;
+        }
         if let Some(screen) = &mut self.controls {
             if screen.capturing {
                 match (k.code, crate::emu::controls::key_name(k.code)) {
@@ -830,7 +844,8 @@ impl App {
             PadEvent::Connected(name) => self.pad = PadState::Connected(name),
             PadEvent::Disconnected => self.pad = PadState::Searching,
             PadEvent::Unavailable(e) => self.pad = PadState::Unavailable(e),
-            PadEvent::Pressed(..) | PadEvent::Action(_) => {
+            PadEvent::Pads(pads) => self.pads = pads,
+            PadEvent::Pressed { .. } | PadEvent::Action(_) => {
                 // A game in the middle panel reads the controller itself.
                 if self.embedded.is_some()
                     || self.input_blocked()
@@ -838,7 +853,21 @@ impl App {
                 {
                     return;
                 }
-                if let PadEvent::Pressed(button, _) = ev
+                if let PadEvent::Pressed { pad, action, .. } = &ev
+                    && let Some(screen) = &mut self.players
+                {
+                    // Each controller's first press makes it the next player; then B is done.
+                    if !screen.pressed.contains(pad) {
+                        screen.pressed.push(pad.clone());
+                    } else if *action == Some(PadAction::Back) {
+                        return self.close_players();
+                    }
+                    if self.pads.iter().all(|p| screen.pressed.contains(p)) {
+                        self.close_players();
+                    }
+                    return;
+                }
+                if let PadEvent::Pressed { button, .. } = ev
                     && self.controls.as_ref().is_some_and(|s| s.capturing)
                 {
                     if let Some(button) = button {
@@ -885,6 +914,12 @@ impl App {
                 return self.osk_op(op);
             }
             return self.cheevos_op(op);
+        }
+        if self.players.is_some() {
+            if matches!(op, Op::Back | Op::Menu) {
+                self.close_players();
+            }
+            return;
         }
         if self.controls.is_some() {
             return self.controls_op(op);
@@ -1169,6 +1204,9 @@ impl App {
                 if self.lib.games.iter().any(|g| g.hidden) {
                     items.push(ShowHidden);
                 }
+                if self.pads.len() > 1 {
+                    items.push(Players);
+                }
                 items.extend([Options, Reload, Quit]);
                 items
             }
@@ -1198,6 +1236,7 @@ impl App {
                 format!("Show hidden games ({})", self.lib.games.iter().filter(|g| g.hidden).count())
             }
             MenuItem::Options => "Options…".into(),
+            MenuItem::Players => "Players…".into(),
             MenuItem::Reload => "Reload config".into(),
             MenuItem::PlayHere => "Play in romi".into(),
             MenuItem::Controls => "Controls…".into(),
@@ -1288,6 +1327,7 @@ impl App {
                         self.rebuild_keeping_selection();
                     }
                     MenuItem::Options => self.options = Some(0),
+                    MenuItem::Players => self.players = Some(crate::tui::players::Screen::default()),
                     MenuItem::Reload => self.reload(),
                     MenuItem::Quit => self.quit = true,
                     MenuItem::Favorite => {
@@ -1400,6 +1440,19 @@ impl App {
                 false
             }
         }
+    }
+
+    /// Closes the players screen, saving the order if a controller was pressed.
+    fn close_players(&mut self) {
+        let Some(screen) = self.players.take() else { return };
+        if screen.pressed.is_empty() {
+            return;
+        }
+        let order = screen.to_save(&self.pads, &self.state.players);
+        self.state = State::update(|s| s.players = order);
+        let shown = screen.order(&self.pads, &self.state.players);
+        let shown: Vec<_> = shown.iter().enumerate().map(|(i, p)| format!("{} {p}", i + 1)).collect();
+        self.set_status(Level::Info, format!("Players: {}", shown.join(", ")));
     }
 
     /// The controls screen: up and down pick a row, and A on a button waits for the one to press

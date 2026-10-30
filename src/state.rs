@@ -27,6 +27,9 @@ pub struct State {
     pub tags: BTreeMap<String, Vec<String>>,
     /// Games shown as a grid of covers rather than a list.
     pub grid: bool,
+    /// The controllers in player order, player 1's first, from the players screen, by name (see
+    /// `emu::controls::pad_names`).
+    pub players: Vec<String>,
 }
 
 impl State {
@@ -195,6 +198,7 @@ mod tests {
             sort: HashMap::new(),
             tags: [("backlog".into(), vec!["psx:a (Disc 2).chd".into()])].into(),
             grid: false,
+            players: Vec::new(),
         };
         assert!(s.mentions("psx:a (Disc 2).chd"));
         s.rename_key("psx:a (Disc 2).chd", "psx:a.m3u");

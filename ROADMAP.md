@@ -384,8 +384,16 @@ and as more systems play in romi, this is where their controls end up.
    reach games now too; they weren't read before. Left out: stick directions can be sent from
    the config (`"l": "l_x+"`), not from the screen, and the keyboard's keys can't be changed, only
    what the pad's buttons they stand for send.
-3. **More than one player**: each controller on a port of its own, in the order they connected,
-   with a screen to swap them. The remap screen is the natural place for it.
+3. ✓ **More than one player**: each controller is a player of its own, up to four, on libretro's
+   first four ports, with the keyboard as player 1. Players… in the menu, with two or more
+   controllers connected, sets the order: a button on each controller in turn. It's saved in
+   `state.json` by the controllers' names, a second of the same kind as "… #2" in the order gilrs
+   finds them, so two identical controllers can trade places if they're reconnected in another
+   order. Select and Start on any player's controller stops the game. RetroArch's remap applies to
+   each player as it has them, and romi's to every player. `romi run` scripts press other players'
+   buttons with `p2:a`. Tested with two virtual controllers; not yet with two real ones. Left out:
+   multitaps (the SNES's four players need the core's multitap option), and swapping players
+   while a game is running.
 
 ## Filling the gaps, any time
 

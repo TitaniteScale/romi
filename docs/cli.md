@@ -35,8 +35,9 @@ counts as a few seconds.
 It loads the libretro core from the game's `retroarch -L` command, or the one given with `--core`,
 and takes a game name or a ROM file, so it works on a build fresh out of a ROM hack or decomp.
 `--input` holds buttons from a script of `<frame> <buttons...>` lines, each held until the next
-line (`300 start`, then `306` to let go). The buttons are the pad's, so the core sees them through
-RetroArch's remap for the game, as it would playing. The same ROM, script and frame count always give the same
+line (`300 start`, then `306` to let go). Buttons are player 1's, or another player's after `p2:`
+(up to `p4:`), as in `300 start p2:a`. The buttons are the pad's, so the core sees them through the
+game's remap, as it would playing. The same ROM, script and frame count always give the same
 picture, so screenshots can be compared between builds. Screenshots are the core's pixels as they
 are; `--json` gives `pixel_aspect`, how wide each is meant to look (under 1 for arcade boards that
 squeeze a wide picture onto a 4:3 screen), and playing shows games at that shape. `--wav out.wav`

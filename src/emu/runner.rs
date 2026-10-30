@@ -5,7 +5,7 @@
 use crate::config::Config;
 use crate::emu::audio;
 use crate::emu::cheevos::{self, Event as CheevoEvent};
-use crate::emu::libretro::{Core, Dirs, Frame, Input};
+use crate::emu::libretro::{Core, Dirs, Frame, Players};
 use crate::emu::remap::{Controls, Remap};
 use crate::emu::timing;
 use crate::library::Library;
@@ -61,7 +61,7 @@ pub struct Shared {
     /// The newest frame and how many frames have run.
     latest: Mutex<(u64, Frame)>,
     ready: Condvar,
-    input: Mutex<Input>,
+    input: Mutex<Players>,
     quit: AtomicBool,
     /// Held before its first frame, while the launch animation plays.
     paused: AtomicBool,
@@ -100,7 +100,7 @@ impl Shared {
         let shared = Arc::new(Shared {
             latest: Mutex::new((0, Frame::default())),
             ready: Condvar::new(),
-            input: Mutex::new(Input::default()),
+            input: Mutex::new(Players::default()),
             quit: AtomicBool::new(false),
             paused: AtomicBool::new(paused),
             volume,
@@ -126,9 +126,9 @@ impl Shared {
         self.paused.store(false, Ordering::SeqCst);
     }
 
-    /// Holds `input` from the next frame on.
-    pub fn set_input(&self, input: Input) {
-        *lock(&self.input) = input;
+    /// Holds what each player holds from the next frame on.
+    pub fn set_input(&self, players: Players) {
+        *lock(&self.input) = players;
     }
 
     /// The newest frame and its number, once there's one newer than frame number `seen`, waiting up
@@ -239,7 +239,7 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
         if shared.paused.load(Ordering::Relaxed) {
             if !warm.done() {
                 let started = Instant::now();
-                core.run_frame(Input::default());
+                core.run_frame(Players::default());
                 warm.ran(started.elapsed(), period);
                 continue;
             }

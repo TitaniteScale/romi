@@ -253,6 +253,12 @@ pub fn button(name: &str) -> Option<u16> {
     BUTTONS.iter().position(|b| b.eq_ignore_ascii_case(name)).map(|i| 1 << i)
 }
 
+/// How many players a game can have in romi: one on each of libretro's first four ports.
+pub const PLAYERS: usize = 4;
+
+/// What each player holds for a frame, player 1 first.
+pub type Players = [Input; PLAYERS];
+
 /// What's held on the pad for a frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Input {
@@ -349,7 +355,7 @@ struct Shared {
     frame: Frame,
     /// The last frame's sound: interleaved left and right samples at the core's sample rate.
     audio: Vec<i16>,
-    input: Input,
+    input: Players,
     /// The core says the game is played with the left stick (see `stick_is_stick`).
     uses_left_stick: bool,
     /// What the core calls player 1's buttons, by their place in `BUTTONS`.
@@ -374,7 +380,7 @@ static SHARED: Mutex<Shared> = Mutex::new(Shared {
     save_dir: None,
     frame: Frame { width: 0, height: 0, rgb: Vec::new(), pixel_aspect: 0.0 },
     audio: Vec::new(),
-    input: Input { buttons: 0, sticks: [[0; 2]; 2], triggers: [0; 2] },
+    input: [Input { buttons: 0, sticks: [[0; 2]; 2], triggers: [0; 2] }; PLAYERS],
     uses_left_stick: false,
     button_names: Vec::new(),
     reads_sticks: false,
@@ -710,7 +716,7 @@ extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
 extern "C" fn input_poll() {}
 
 extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uint) -> i16 {
-    if port != 0 {
+    if port as usize >= PLAYERS {
         return 0;
     }
     let device = device & DEVICE_MASK;
@@ -722,7 +728,7 @@ extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uin
                 note("romi: the game is played with the left stick, so it isn't also the d-pad");
             }
         }
-        (s.input, s.uses_left_stick && s.reads_sticks)
+        (s.input[port as usize], s.uses_left_stick && s.reads_sticks)
     };
     match device {
         // The left stick is the d-pad too, unless the game plays with it as a stick: the core says
@@ -820,7 +826,7 @@ impl Core {
             save_dir: c_path(&dirs.saves),
             frame: Frame::default(),
             audio: Vec::new(),
-            input: Input::default(),
+            input: Players::default(),
             uses_left_stick: false,
             button_names: Vec::new(),
             reads_sticks: false,
@@ -975,11 +981,11 @@ impl Core {
         Ok(true)
     }
 
-    /// Runs one frame with `input` held, before it's remapped.
-    pub fn run_frame(&mut self, input: Input) {
+    /// Runs one frame with what each player holds, before it's remapped.
+    pub fn run_frame(&mut self, players: Players) {
         let max_size = {
             let mut s = shared();
-            s.input = self.remap.apply(input);
+            s.input = std::array::from_fn(|p| self.remap.apply(p, players[p]));
             s.audio.clear();
             s.max_size
         };
@@ -1180,18 +1186,19 @@ fn read_info(path: &Path) -> Result<Info> {
 
 /// Buttons to hold over a run, from a script of `<frame> <buttons...>` lines. Each line holds its
 /// buttons from that frame until the next line; a frame with no buttons lets go of everything.
+/// Buttons are player 1's, or another player's after `p2:` (up to `p4:`).
 ///
 /// ```text
 /// # wait for the title screen, then tap start
 /// 300 start
 /// 306
-/// 400 a
+/// 400 a p2:a
 /// 404
 /// ```
 #[derive(Debug, Default, PartialEq)]
 pub struct Script {
-    /// (first frame, buttons), in frame order.
-    steps: Vec<(u64, u16)>,
+    /// (first frame, each player's buttons), in frame order.
+    steps: Vec<(u64, [u16; PLAYERS])>,
 }
 
 impl Script {
@@ -1203,10 +1210,20 @@ impl Script {
             let Some(first) = words.next() else { continue };
             let frame: u64 =
                 first.parse().with_context(|| format!("line {}: {first:?} isn't a frame number", n + 1))?;
-            let mut buttons = 0;
+            let mut buttons = [0; PLAYERS];
             for w in words {
-                buttons |= button(w).with_context(|| {
-                    format!("line {}: no button called {w:?} (buttons: {})", n + 1, BUTTONS.join(" "))
+                let (player, name) = match w.split_once(':') {
+                    Some((p, name)) => {
+                        let player = p.strip_prefix(['p', 'P']).and_then(|p| p.parse::<usize>().ok());
+                        let player = player.filter(|p| (1..=PLAYERS).contains(p)).with_context(|| {
+                            format!("line {}: no player called {p:?} (players: p1 to p{PLAYERS})", n + 1)
+                        })?;
+                        (player - 1, name)
+                    }
+                    None => (0, w),
+                };
+                buttons[player] |= button(name).with_context(|| {
+                    format!("line {}: no button called {name:?} (buttons: {})", n + 1, BUTTONS.join(" "))
                 })?;
             }
             if steps.last().is_some_and(|&(last, _)| frame < last) {
@@ -1217,9 +1234,10 @@ impl Script {
         Ok(Script { steps })
     }
 
-    /// The buttons held on `frame` (counting from 0).
-    pub fn buttons_at(&self, frame: u64) -> u16 {
-        self.steps.iter().take_while(|&&(start, _)| start <= frame).last().map_or(0, |&(_, b)| b)
+    /// What each player holds on `frame` (counting from 0).
+    pub fn players_at(&self, frame: u64) -> Players {
+        let buttons = self.steps.iter().take_while(|&&(start, _)| start <= frame).last().map_or([0; PLAYERS], |s| s.1);
+        buttons.map(Input::buttons)
     }
 }
 
@@ -1230,12 +1248,24 @@ mod tests {
     #[test]
     fn scripts_hold_buttons_until_the_next_line() {
         let s = Script::parse("# title\n300 start\n306\n\n400 a+b  # both\n404 Left, UP\n").unwrap();
-        assert_eq!(s.buttons_at(0), 0);
-        assert_eq!(s.buttons_at(300), button("start").unwrap());
-        assert_eq!(s.buttons_at(305), button("start").unwrap());
-        assert_eq!(s.buttons_at(306), 0);
-        assert_eq!(s.buttons_at(401), button("a").unwrap() | button("b").unwrap());
-        assert_eq!(s.buttons_at(9999), button("left").unwrap() | button("up").unwrap());
+        let p1 = |frame| s.players_at(frame)[0].buttons;
+        assert_eq!(p1(0), 0);
+        assert_eq!(p1(300), button("start").unwrap());
+        assert_eq!(p1(305), button("start").unwrap());
+        assert_eq!(p1(306), 0);
+        assert_eq!(p1(401), button("a").unwrap() | button("b").unwrap());
+        assert_eq!(p1(9999), button("left").unwrap() | button("up").unwrap());
+        assert!(s.players_at(401)[1..].iter().all(|p| p.buttons == 0));
+    }
+
+    #[test]
+    fn scripts_press_other_players_buttons() {
+        let s = Script::parse("10 start p2:a P4:up p1:b").unwrap();
+        let held: Vec<u16> = s.players_at(10).iter().map(|p| p.buttons).collect();
+        let b = |n| button(n).unwrap();
+        assert_eq!(held, [b("start") | b("b"), b("a"), 0, b("up")]);
+        assert!(Script::parse("10 p5:a").unwrap_err().to_string().contains("no player called \"p5\""));
+        assert!(Script::parse("10 p2:jump").unwrap_err().to_string().contains("no button called \"jump\""));
     }
 
     #[test]
