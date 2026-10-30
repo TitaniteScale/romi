@@ -41,7 +41,7 @@ const ASK_FOR: Duration = Duration::from_millis(300);
 /// The wireframe for a system, by its id: its own console's, or a TV for the rest.
 pub fn for_system(system: &str) -> &'static str {
     match system {
-        "gb" | "gbc" => include_str!("wireframes/gameboy.json"),
+        "gb" | "gbc" | "gba" => include_str!("wireframes/gameboy.json"),
         "nes" | "famicom" | "fds" => include_str!("wireframes/nes.json"),
         "snes" | "snesna" | "sfc" | "satellaview" | "sufami" => include_str!("wireframes/snes.json"),
         "arcade" | "mame" | "fbneo" | "neogeo" | "cps1" | "cps2" | "cps3" => include_str!("wireframes/arcade.json"),

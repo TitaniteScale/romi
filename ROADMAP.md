@@ -227,8 +227,8 @@ It's built in steps, and the first one pays off without any of the TUI work:
      smooth patch facing front with one outline). Parts made with `--no-glass` go beside a TV with
      `--add`. Tried on a made-up CRT so far (curved glass, rounded corners, knobs): about 500
      lines, drawn in about 7 ms a frame.
-   - ✓ **Game Boy**: `gameboy.json`, made from Jason Toff's model on Poly Pizza, played for `.gb`
-     and `.gbc` games. The originals of five CC BY models (Game Boy, NES, SNES, an old TV, a DS)
+   - ✓ **Game Boy**: `gameboy.json`, made from Jason Toff's model on Poly Pizza, played for `.gb`,
+     `.gbc` and `.gba` games (the GBA's 3:2 picture sits in the middle of its 10:9 glass). The originals of five CC BY models (Game Boy, NES, SNES, an old TV, a DS)
      are in `examples/wireframe/models/`, credited in `CREDITS.md`.
    - ✓ **The terminal's look**: lines are drawn over the terminal's own background (RGBA frames,
      clear but for the lines and the game), in a colour each game's seed picks from the terminal's
