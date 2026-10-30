@@ -196,6 +196,8 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
     let mut samples = Vec::new();
     let period = Duration::from_secs_f64(1.0 / core.fps);
     let mut next = Instant::now();
+    // How long after its start each frame is handed over (see `hold_for`).
+    let mut hold = Duration::ZERO;
     let mut saved = Instant::now();
     let mut cheevos = cheevos.and_then(|setup| start_cheevos(setup, shared));
     let tell = |client: &cheevos::Client| {
@@ -243,6 +245,11 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
             None => period,
         };
         let frame = core.frame();
+        hold = hold_for(hold, started.elapsed(), period);
+        let slot = started + hold;
+        if let Some(early) = slot.checked_duration_since(Instant::now()) {
+            std::thread::sleep(early);
+        }
         {
             let mut latest = lock(&shared.latest);
             latest.0 += 1;
@@ -267,9 +274,29 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
     drop(cheevos);
 }
 
+/// How long after its start to hand a frame over, given the last answer and how long this one
+/// took. Some cores take much longer over some frames than others (Flycast: 2 to 12 ms), and
+/// handing each over as soon as it was done spaced them as unevenly, which looks choppy. Held
+/// as long as the slow ones take, they go out as evenly spaced as they start. It follows a slow
+/// frame at once, eases back over a few seconds, and stays under most of a frame, so a frame that
+/// runs long is only late, not the start of the core falling behind.
+fn hold_for(last: Duration, took: Duration, period: Duration) -> Duration {
+    took.max(last.mul_f64(0.995)).min(period * 3 / 4)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_are_held_as_long_as_slow_ones_take_and_no_more_than_most_of_a_frame() {
+        let period = Duration::from_millis(16);
+        let ms = Duration::from_millis;
+        assert_eq!(hold_for(ms(2), ms(10), period), ms(10), "follows a slow frame at once");
+        let eased = hold_for(ms(10), ms(2), period);
+        assert!(eased < ms(10) && eased > ms(9), "eases back slowly: {eased:?}");
+        assert_eq!(hold_for(ms(2), ms(100), period), ms(12), "never most of a frame");
+    }
 
     #[test]
     fn saves_are_named_after_the_rom_in_the_save_folder_or_beside_the_rom() {

@@ -41,6 +41,9 @@ pub struct Config {
     pub corner_radius: u8,
     /// An old screen's look for a game played in the middle panel: scanlines, a CRT's or an LCD's.
     pub screen_filter: crate::emu::screen::Filter,
+    /// Black edges a game leaves round its picture (most N64 games do) are cropped off in the
+    /// middle panel (see `emu::crop`).
+    pub crop_borders: bool,
     pub systems: Vec<SystemConfig>,
     pub games: Vec<GameConfig>,
     /// Tweaks to any game (ROM, hand-added or Steam) by its key, as `romi list` shows it.
@@ -210,6 +213,7 @@ impl Default for Config {
             volume: 100,
             corner_radius: 0,
             screen_filter: crate::emu::screen::Filter::None,
+            crop_borders: true,
             systems: Vec::new(),
             games: Vec::new(),
             overrides: HashMap::new(),

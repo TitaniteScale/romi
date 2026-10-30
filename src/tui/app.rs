@@ -1528,6 +1528,7 @@ impl App {
         let look = crate::emu::embedded::Appearance {
             corners: self.cfg.corners(),
             filter: self.cfg.screen_filter,
+            crop: self.cfg.crop_borders,
             badges: self.cfg.retroachievements.badges,
         };
         let started = crate::emu::runner::load(&self.cfg, &core, &rom)

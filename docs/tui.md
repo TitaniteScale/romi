@@ -97,6 +97,12 @@ The picture is square by default, as the game drew it. `"corner_radius"` rounds 
 percentage of its height: about 4 looks like an old TV. The corners are left clear, so the
 terminal's background shows there.
 
+Many games leave black edges round their picture, which a CRT's overscan hid; most N64 games draw
+inside a black border. romi crops them off: once a game has drawn for a couple of seconds and the
+area it has drawn in covers most of the screen, only that area is shown. It only ever widens
+again, if the game draws into an edge. `"crop_borders": false` (or Options → Crop black edges)
+shows the whole picture, edges and all.
+
 `"screen_filter"` gives the picture an old screen's look: `"scanlines"`, `"crt"` (scanlines and a
 phosphor mask of red, green and blue columns) or `"lcd"` (a dark grid between the pixels, like a
 handheld's). romi draws it into each frame after scaling it, so it works the same in any terminal,

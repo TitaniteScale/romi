@@ -5,6 +5,7 @@
 pub mod audio;
 pub mod cheevos;
 pub mod controls;
+pub mod crop;
 pub mod embedded;
 pub mod gl;
 pub mod kitty;

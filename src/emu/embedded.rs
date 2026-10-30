@@ -12,6 +12,7 @@
 
 use crate::emu::cheevos;
 use crate::emu::controls::Controls;
+use crate::emu::crop::Crop;
 use crate::emu::kitty;
 use crate::emu::libretro::{Core, Frame};
 use crate::emu::notice::{self, Toast};
@@ -52,6 +53,8 @@ pub struct Appearance {
     /// How round the picture's corners are, as a fraction of its height.
     pub corners: f64,
     pub filter: Filter,
+    /// Black edges round the picture are cropped off (see `crop`).
+    pub crop: bool,
     /// Achievement notices show the achievement's badge.
     pub badges: bool,
 }
@@ -115,6 +118,8 @@ pub struct Embedded {
     timing: Option<Recorder>,
     /// The last frame sent, kept to scale the next one into.
     pixels: Vec<u8>,
+    /// What's known of the game's black edges, if they're cropped.
+    crop: Option<Crop>,
 }
 
 impl Embedded {
@@ -161,6 +166,7 @@ impl Embedded {
             toasts: VecDeque::new(),
             timing: Recorder::start(about),
             pixels: Vec::new(),
+            crop: look.crop.then(Crop::default),
         })
     }
 
@@ -284,6 +290,14 @@ impl Embedded {
         Some((rect, (u32::from(cols) * cell_w, u32::from(rows) * cell_h)))
     }
 
+    /// The frame with its black edges cropped off, if they're to be.
+    fn cropped(&mut self, frame: Frame) -> Frame {
+        match &mut self.crop {
+            Some(crop) => crop.apply(frame),
+            None => frame,
+        }
+    }
+
     /// Waits up to `wait` for the core's next frame, so it can be sent as soon as it's made. False,
     /// at once, while the launch animation plays: it keeps its own time.
     pub fn wait_for_frame(&self, wait: Duration) -> bool {
@@ -313,6 +327,7 @@ impl Embedded {
         if frame.width == 0 {
             return Ok(());
         }
+        let frame = self.cropped(frame);
         self.shape = frame.display_size();
         self.send_game(n, &frame)
     }
@@ -326,6 +341,7 @@ impl Embedded {
         if let Some((n, frame)) = self.shared.newer_frame(self.seen, Duration::ZERO) {
             self.seen = n;
             if frame.width > 0 {
+                let frame = self.cropped(frame);
                 self.shape = frame.display_size();
                 intro.game = Some(frame);
             }
@@ -466,7 +482,7 @@ mod tests {
         let (fw, fh) = (240, 160);
         let rgb = (0..fw * fh * 3).map(|i| (i * 7 % 251) as u8).collect();
         let frame = Frame { width: fw, height: fh, rgb, pixel_aspect: 0.0 };
-        let look = |filter, corners| Appearance { corners, filter, badges: false };
+        let look = |filter, corners| Appearance { corners, filter, crop: false, badges: false };
         let looks = [
             ("plain", look(Filter::None, 0.0)),
             ("crt", look(Filter::Crt, 0.0)),
