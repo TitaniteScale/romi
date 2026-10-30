@@ -1,3 +1,13 @@
+
+
+https://github.com/user-attachments/assets/043b501c-1511-425e-bf12-7ec91c49a774
+
+
+
+https://github.com/user-attachments/assets/3546be21-ad2e-4cfb-91fb-bc42bb2cdb4f
+
+
+
 # romi
 
 A game launcher for the terminal. ROMs, scripts, native ports and Steam games in one list, driven
