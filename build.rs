@@ -1,9 +1,18 @@
 //! Compiles rcheevos (RetroAchievements' C library, in `vendor/rcheevos`) and romi's glue to it,
-//! for achievements in games played inside romi, and the shim that takes what cores log.
+//! for achievements in games played inside romi, and the shim that takes what cores log. Also
+//! works out the version `romi --version` says: Cargo.toml's, with `ROMI_BUILD` after a `+` when
+//! it's set, as the edge builds set it to `edge.<commit>`.
 
 use std::path::Path;
 
 fn main() {
+    let version = env!("CARGO_PKG_VERSION");
+    let version = match std::env::var("ROMI_BUILD") {
+        Ok(build) if !build.is_empty() => format!("{version}+{build}"),
+        _ => version.to_string(),
+    };
+    println!("cargo:rustc-env=ROMI_VERSION={version}");
+    println!("cargo:rerun-if-env-changed=ROMI_BUILD");
     let vendor = Path::new("vendor");
     let src = vendor.join("rcheevos/src");
     let mut sources = vec![Path::new("src/emu/cheevos.c").to_path_buf()];

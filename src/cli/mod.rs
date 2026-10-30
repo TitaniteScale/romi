@@ -84,7 +84,7 @@ fn fail<T>(code: i32, message: impl Into<String>) -> Result<T> {
 
 /// romi - a terminal game launcher. Run with no command to open the launcher.
 #[derive(Parser)]
-#[command(version, after_help = KEYS)]
+#[command(version = env!("ROMI_VERSION"), after_help = KEYS)]
 struct Cli {
     /// Use a different config file (or set ROMI_CONFIG)
     #[arg(long, global = true, value_name = "PATH")]

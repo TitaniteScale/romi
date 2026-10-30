@@ -51,7 +51,10 @@ tar -xzf romi-v*-x86_64-linux.tar.gz
 install -Dm755 romi-v*-x86_64-linux/romi ~/.local/bin/romi
 ```
 
-It needs `libudev` and ALSA's `libasound`, which nearly every desktop already has.
+It needs `libudev` and ALSA's `libasound`, which nearly every desktop already has. For the newest
+romi between releases, the [edge build](https://github.com/TitaniteScale/romi/releases/tag/edge) is
+rebuilt from `main` after every change that passes the tests (`romi-edge-x86_64-linux.tar.gz`); it
+may have bugs a release doesn't.
 [Shell completions](docs/cli.md#completions) are set up with one line.
 
 **On Arch,** build the package from a clone. It builds the latest release, and sets up shell

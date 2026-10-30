@@ -1,0 +1,86 @@
+name: Edge
+
+# Once CI passes on main, builds romi for x86_64 and aarch64 Linux, as the release workflow does,
+# and puts both on the "edge" pre-release in place of the last ones, moving its tag to that commit.
+# The newest romi between releases, at download links that stay the same
+# (releases/download/edge/romi-edge-x86_64-linux.tar.gz). Its --version is Cargo.toml's, with
+# +edge.<commit> after it.
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+# A newer push replaces a build that hasn't finished.
+concurrency:
+  group: edge
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
+    strategy:
+      matrix:
+        include:
+          # The oldest Ubuntu runners there are, so the binaries run on any glibc since 2.35.
+          - arch: x86_64
+            runner: ubuntu-22.04
+          - arch: aarch64
+            runner: ubuntu-22.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - run: ROMI_BUILD="edge.$(git rev-parse --short=7 HEAD)" cargo build --release --locked
+      - name: Package
+        run: |
+          name="romi-edge-${{ matrix.arch }}-linux"
+          mkdir -p "$name/completions" "$name/examples"
+          cp target/release/romi LICENSE CREDITS.md README.md default-config.jsonc "$name/"
+          cp packaging/completions/* "$name/completions/"
+          cp -r examples/couch "$name/examples/"
+          tar -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.arch }}
+          path: romi-edge-*.tar.gz
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Put the builds on the edge pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          cd dist
+          sha256sum romi-edge-*.tar.gz > SHA256SUMS
+          short="${SHA:0:7}"
+          notes="The newest romi, built from main at [$short](https://github.com/$GITHUB_REPOSITORY/commit/$SHA) on $(date -u +%Y-%m-%d). It moves with every change, between releases, so it may have bugs a release doesn't. For something steadier, take the [latest release](https://github.com/$GITHUB_REPOSITORY/releases/latest)."
+          # The tag goes to the commit these were built from, made the first time.
+          if gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/edge" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/edge" -f sha="$SHA" -F force=true > /dev/null
+          else
+            gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref=refs/tags/edge -f sha="$SHA" > /dev/null
+          fi
+          if gh release view edge --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload edge --repo "$GITHUB_REPOSITORY" --clobber romi-edge-*.tar.gz SHA256SUMS
+            gh release edit edge --repo "$GITHUB_REPOSITORY" --title "romi edge ($short)" --notes "$notes" --prerelease --latest=false
+          else
+            gh release create edge --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease --latest=false \
+              --title "romi edge ($short)" --notes "$notes" romi-edge-*.tar.gz SHA256SUMS
+          fi
