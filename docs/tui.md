@@ -91,10 +91,21 @@ RetroArch has for them (`config/<core>/<core>.opt`, and the ones for the game or
 game plays the same in both, and with RetroArch's remap for the game, its folder or the core
 (`config/remaps/<core>/<name>.rmp`, the first one there): which button each of the pad's buttons
 and stick directions sends, and the type of controller plugged in (a DualShock for Ape Escape, say).
-Controllers' sticks and analog triggers reach the core as they are;
-in games played with the stick (N64 ones), the left stick isn't also the d-pad. On a keyboard, the
-arrows push the stick all the way. `ROMI_CORE_LOG=file` writes what the core says there, which is
-the place to look when a game won't start.
+Controllers' sticks and analog triggers reach the core as they are; in games played with the stick
+(N64 ones), the left stick isn't also the d-pad. On a keyboard, the arrows push the stick all the
+way. `ROMI_CORE_LOG=file` writes what the core says there, which is the place to look when a game
+won't start.
+
+### Controls
+
+**Controls…** in the menu of a game that plays in romi remaps its buttons: pick one of the game's
+buttons and press the one on the controller (or the keyboard) you want for it. The two swap, so no
+button is left doing nothing, and a • marks the ones that aren't as they were. The first row picks
+whether it's for this game, saved in `overrides.jsonc`, or all its system's, saved in the config's
+`"controls"`; a game's go over its system's, which go over RetroArch's remap. Reset puts them back.
+The buttons are named as the core names them (Fire, Jump) once the game, or another of its
+system's, has been played in romi, since a core only says as a game starts; before that they're
+named as on a Super Nintendo pad. They apply to `romi run` too.
 
 The picture is square by default, as the game drew it. `"corner_radius"` rounds its corners, as a
 percentage of its height: about 4 looks like an old TV. The corners are left clear, so the

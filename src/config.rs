@@ -34,6 +34,9 @@ pub struct Config {
     pub hooks: Hooks,
     pub theme: Theme,
     pub controller: ControllerConfig,
+    /// Buttons remapped for each system's games played in romi, by system id. romi's controls
+    /// screen writes these.
+    pub controls: HashMap<String, crate::emu::remap::Controls>,
     /// How loud games played inside romi are, from 0 (silent) to 100.
     pub volume: u8,
     /// How round the corners of a game played in the middle panel are, as a percentage of its
@@ -213,6 +216,7 @@ impl Default for Config {
             hooks: Hooks::default(),
             theme: Theme::default(),
             controller: ControllerConfig::default(),
+            controls: HashMap::new(),
             volume: 100,
             corner_radius: 0,
             screen_filter: crate::emu::screen::Filter::None,
@@ -411,6 +415,9 @@ pub struct Override {
     pub players: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub year: Option<u16>,
+    /// Buttons remapped for the game when it's played in romi, over its system's.
+    #[serde(default, skip_serializing_if = "crate::emu::remap::Controls::is_empty")]
+    pub controls: crate::emu::remap::Controls,
 }
 
 impl Override {
@@ -437,6 +444,9 @@ impl Override {
         pick(&mut self.genre, other.genre);
         pick(&mut self.players, other.players);
         pick(&mut self.year, other.year);
+        for (from, to) in other.controls.0 {
+            self.controls.0.entry(from).or_insert(to);
+        }
     }
 }
 

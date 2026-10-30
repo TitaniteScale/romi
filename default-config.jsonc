@@ -62,6 +62,10 @@
     "require_focus": true
   },
 
+  // Buttons remapped for games played in romi, by system id, like { "snes": { "a": "b", "b": "a" } }.
+  // Controls… in a game's menu writes these, or a game's own in overrides.jsonc.
+  "controls": {},
+
   // How loud games played inside romi ("Play in romi", `romi run --live`) are: 0 (silent) to 100.
   "volume": 100,
 

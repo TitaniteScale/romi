@@ -6,7 +6,9 @@ use crate::config::Config;
 use crate::emu::audio;
 use crate::emu::cheevos::{self, Event as CheevoEvent};
 use crate::emu::libretro::{Core, Dirs, Frame, Input};
+use crate::emu::remap::{Controls, Remap};
 use crate::emu::timing;
+use crate::library::Library;
 use anyhow::{Context, Result};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -18,9 +20,9 @@ use std::time::{Duration, Instant};
 /// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways. The
 /// game's own save goes where RetroArch keeps it too, so a game saved in romi carries on in
 /// RetroArch and back, and the core runs with the options and remap RetroArch has for it and the
-/// game. With `shown_height`, how many screen pixels tall the game will be, 3D cores draw at about
-/// that size if `sharp_3d` is on.
-pub fn load(cfg: &Config, core: &Path, rom: &Path, shown_height: Option<u32>) -> Result<Core> {
+/// game, with `controls` remapped in romi over that (see `remap`). With `shown_height`, how many
+/// screen pixels tall the game will be, 3D cores draw at about that size if `sharp_3d` is on.
+pub fn load(cfg: &Config, core: &Path, rom: &Path, controls: &[&Controls], shown_height: Option<u32>) -> Result<Core> {
     let name = crate::emu::libretro::info(core).map(|info| info.name);
     let saves = name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom));
     if let Some(dir) = &saves {
@@ -28,9 +30,22 @@ pub fn load(cfg: &Config, core: &Path, rom: &Path, shown_height: Option<u32>) ->
     }
     let save_file = save_file(saves.as_deref(), rom);
     let options = name.as_ref().map(|name| crate::emucfg::retroarch_core_options(name, rom)).unwrap_or_default();
-    let remap = name.map(|name| crate::emucfg::retroarch_remap(&name, rom)).unwrap_or_default();
+    let remap = remap(name.as_deref(), rom, controls);
     let shown_height = shown_height.filter(|_| cfg.sharp_3d);
     Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file, options, remap, shown_height })
+}
+
+/// The remap a game plays with in `core` (by its name): RetroArch's for it, with each of `controls`
+/// over it in turn.
+pub fn remap(core: Option<&str>, rom: &Path, controls: &[&Controls]) -> Remap {
+    let retroarch = core.map(|name| crate::emucfg::retroarch_remap(name, rom)).unwrap_or_default();
+    controls.iter().fold(retroarch, |remap, controls| remap.with(controls))
+}
+
+/// The buttons remapped in romi for a game in the library, in the order they go over RetroArch's
+/// remap: its system's, then its own.
+pub fn controls_for<'a>(cfg: &'a Config, lib: &'a Library, g: usize) -> Vec<&'a Controls> {
+    cfg.controls.get(&lib.system_of(g).id).into_iter().chain([&lib.games[g].controls]).collect()
 }
 
 /// Where RetroArch keeps a game's save: the ROM's name with `.srm`, in the save folder, or next to

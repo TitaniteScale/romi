@@ -372,11 +372,18 @@ and as more systems play in romi, this is where their controls end up.
    (`input_remap_sort_by_controller_enable`), the keyboard lines (`_key_*`), turbo, and
    `analog_dpad_mode`, since romi decides for itself when the left stick is also the d-pad. There
    are no remap files on this machine yet, so it's only been tried with made-up ones.
-2. **Remapping in the TUI**, for a system or a single game, using the controller or the keyboard:
-   "press the button for A", one button at a time, with what the button does in the game next to
-   it ("B — Jump"). Cores say that as they start (`SET_INPUT_DESCRIPTORS`), so romi would remember it
-   from the last time the game was played. A single game's remap is saved in `overrides.jsonc`, and
-   it wins over the system's, which wins over a RetroArch remap file, which wins over the default.
+2. ✓ **Remapping in the TUI** (`tui/controls.rs`): Controls… in the menu of a game that plays in
+   romi lists the game's buttons and the pad's button that sends each. Pick one and press the
+   button you want for it, on the controller or the keyboard, and the two swap, so none is left
+   doing nothing. The buttons are named as the core names them (`SET_INPUT_DESCRIPTORS`), which
+   romi remembers in `buttons.json` in its state folder when a game played in romi stops, for the
+   game and its system; until then, as on a Super Nintendo pad. The controller's are named as the
+   hints name them (A at the bottom). Saved for the game in `overrides.jsonc`, or for the system in
+   the config's top-level `"controls"`, keeping only the buttons that differ, and they go over one
+   another button by button: the game's over the system's, over RetroArch's remap file. L3 and R3
+   reach games now too; they weren't read before. Left out: stick directions can be sent from
+   the config (`"l": "l_x+"`), not from the screen, and the keyboard's keys can't be changed, only
+   what the pad's buttons they stand for send.
 3. **More than one player**: each controller on a port of its own, in the order they connected,
    with a screen to swap them. The remap screen is the natural place for it.
 

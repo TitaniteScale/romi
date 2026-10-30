@@ -38,10 +38,25 @@ pub enum PadAction {
 
 #[derive(Debug)]
 pub enum PadEvent {
+    /// A button going down: which of the pad's buttons it is to a game (see `emu::controls::PAD`),
+    /// and what it does in romi's menus.
+    Pressed(Option<&'static str>, Option<PadAction>),
+    /// A held direction repeating, or the stick pushed.
     Action(PadAction),
     Connected(String),
     Disconnected,
     Unavailable(String),
+}
+
+impl PadEvent {
+    /// What it does in romi's menus.
+    pub fn action(&self) -> Option<PadAction> {
+        match self {
+            PadEvent::Pressed(_, action) => *action,
+            PadEvent::Action(action) => Some(*action),
+            _ => None,
+        }
+    }
 }
 
 impl PadAction {
@@ -111,11 +126,13 @@ fn run(tx: Sender<PadEvent>, swap_confirm: &AtomicBool) {
         if let Some(ev) = gilrs.next_event_blocking(Some(timeout)) {
             match ev.event {
                 EventType::ButtonPressed(b, _) => {
-                    if let Some(a) = map_button(b, swap_confirm.load(Ordering::Relaxed)) {
-                        out.push(a);
-                        if a.repeats() {
-                            held = Some(Held { action: a, since: Instant::now(), last: Instant::now() });
-                        }
+                    let action = map_button(b, swap_confirm.load(Ordering::Relaxed));
+                    if let Some(a) = action.filter(|a| a.repeats()) {
+                        held = Some(Held { action: a, since: Instant::now(), last: Instant::now() });
+                    }
+                    let button = crate::emu::controls::pad_name(b);
+                    if button.is_some() || action.is_some() {
+                        out.push(PadEvent::Pressed(button, action));
                     }
                 }
                 EventType::ButtonReleased(b, _) => {
@@ -132,7 +149,7 @@ fn run(tx: Sender<PadEvent>, swap_confirm: &AtomicBool) {
                         stick_y = dir;
                         held = None;
                         if let Some(a) = dir {
-                            out.push(a);
+                            out.push(PadEvent::Action(a));
                             held = Some(Held { action: a, since: Instant::now(), last: Instant::now() });
                         }
                     }
@@ -141,7 +158,7 @@ fn run(tx: Sender<PadEvent>, swap_confirm: &AtomicBool) {
                     let dir = stick(v, stick_x, PadAction::Right, PadAction::Left);
                     if dir != stick_x {
                         stick_x = dir;
-                        out.extend(dir);
+                        out.extend(dir.map(PadEvent::Action));
                     }
                 }
                 EventType::Connected => {
@@ -166,12 +183,12 @@ fn run(tx: Sender<PadEvent>, swap_confirm: &AtomicBool) {
             let every = if held_for >= REPEAT_FAST_AFTER { REPEAT_FAST } else { REPEAT_EVERY };
             if held_for >= REPEAT_DELAY && now.duration_since(h.last) >= every {
                 h.last = now;
-                out.push(h.action);
+                out.push(PadEvent::Action(h.action));
             }
         }
 
-        for a in out {
-            if tx.send(PadEvent::Action(a)).is_err() {
+        for ev in out {
+            if tx.send(ev).is_err() {
                 return; // UI is gone
             }
         }

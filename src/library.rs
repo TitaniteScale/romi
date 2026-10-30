@@ -41,6 +41,8 @@ pub struct Game {
     pub default_run: Emulator,
     /// The emulator picked for it in its menu, by name; None for the default.
     pub emulator: Option<String>,
+    /// Buttons remapped for it when it's played in romi, from its overrides.
+    pub controls: crate::emu::remap::Controls,
 }
 
 impl Game {
@@ -68,6 +70,7 @@ impl Game {
         meta.fill(&self.meta);
         self.meta = meta;
         self.hidden = ov.hidden;
+        self.controls.0.extend(ov.controls.0.clone());
     }
 }
 
@@ -404,6 +407,7 @@ impl Library {
             vars,
         };
         let game = self.push_game(idx, format!("{}:{key_rel}", sys.id), name, Some(path), meta, launch, art);
+        game.controls = ov.controls;
         if playlist.is_some() {
             game.discs = discs.iter().map(|d| dir.join(d)).collect();
             game.disc_keys = discs.iter().map(|d| format!("{}:{}", sys.id, d.to_string_lossy())).collect();
@@ -442,6 +446,7 @@ impl Library {
             hidden: false,
             default_run,
             emulator: None,
+            controls: Default::default(),
         });
         self.systems[system].games.push(self.games.len() - 1);
         self.games.last_mut().expect("just pushed")

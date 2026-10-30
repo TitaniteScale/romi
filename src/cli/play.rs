@@ -163,17 +163,24 @@ pub(super) fn run_core(
     json: bool,
     live: bool,
 ) -> Result<()> {
-    let (name, rom, launch) = match Path::new(query).is_file() {
-        true => rom_file(cfg, Path::new(query), system)?,
+    // A game in the library plays with the buttons remapped in romi for it.
+    let (name, rom, launch, controls) = match Path::new(query).is_file() {
+        true => {
+            let (name, rom, launch) = rom_file(cfg, Path::new(query), system)?;
+            (name, rom, launch, Vec::new())
+        }
         false => {
             let lib = Library::load(cfg);
-            let game = &lib.games[resolve(&lib, query, system)?];
+            let g = resolve(&lib, query, system)?;
+            let game = &lib.games[g];
             let Some(rom) = game.path.clone() else {
                 return fail(exit::USAGE, format!("{} isn't a ROM", game.name));
             };
-            (game.name.clone(), rom, Some(game.launch.clone()))
+            let controls = crate::emu::runner::controls_for(cfg, &lib, g).into_iter().cloned().collect();
+            (game.name.clone(), rom, Some(game.launch.clone()), controls)
         }
     };
+    let controls: Vec<_> = controls.iter().collect();
     let core = match core {
         Some(c) => c,
         None => {
@@ -210,7 +217,7 @@ pub(super) fn run_core(
             let (_, cell_h) = crate::emu::kitty::cell_size(&s);
             u32::from(s.rows.saturating_sub(1)) * cell_h
         });
-        let emu = crate::emu::runner::load(cfg, &core, &rom, shown)?;
+        let emu = crate::emu::runner::load(cfg, &core, &rom, &controls, shown)?;
         return crate::emu::live::play(emu, &name, cfg.volume_gain());
     }
     // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared
@@ -224,7 +231,7 @@ pub(super) fn run_core(
         saves: Some(saves.path().to_path_buf()),
         save_file: None,
         options: core_name.as_ref().map(|name| crate::emucfg::retroarch_core_options(name, &rom)).unwrap_or_default(),
-        remap: core_name.map(|name| crate::emucfg::retroarch_remap(&name, &rom)).unwrap_or_default(),
+        remap: crate::emu::runner::remap(core_name.as_deref(), &rom, &controls),
         shown_height: None,
     };
     let mut emu = crate::emu::libretro::Core::load(&core, &rom, &dirs)?;

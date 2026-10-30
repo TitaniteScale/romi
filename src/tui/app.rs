@@ -50,6 +50,8 @@ pub enum MenuItem {
     Emulator,
     /// Plays the game inside romi, in the middle panel.
     PlayHere,
+    /// Opens the controls screen on the game, which plays in romi.
+    Controls,
     /// Opens the game's tags.
     Tags,
     /// Opens the achievements screen on the game.
@@ -258,6 +260,8 @@ pub struct App {
     pub filter_panel: Option<usize>,
     /// The options panel, open on this row.
     pub options: Option<usize>,
+    /// The controls screen, while it's open.
+    pub controls: Option<crate::tui::controls::Screen>,
     /// Database metadata being looked up in the background.
     metadata: Option<Receiver<Vec<crate::meta::Found>>>,
     pub quit: bool,
@@ -330,6 +334,7 @@ impl App {
             filter_options: filter::Options::default(),
             filter_panel: None,
             options: None,
+            controls: None,
             quit: false,
             systems_list: ListState::default(),
             games_list: ListState::default(),
@@ -704,6 +709,27 @@ impl App {
             self.cheevos_op(op);
             return;
         }
+        if let Some(screen) = &mut self.controls {
+            if screen.capturing {
+                match (k.code, crate::emu::controls::key_name(k.code)) {
+                    (KeyCode::Esc, _) => screen.capturing = false,
+                    (_, Some(button)) => self.press_for_controls(button),
+                    _ => {}
+                }
+                return;
+            }
+            let op = match k.code {
+                KeyCode::Up | KeyCode::Char('k') => Op::Up,
+                KeyCode::Down | KeyCode::Char('j') => Op::Down,
+                KeyCode::Left | KeyCode::Char('h') => Op::Left,
+                KeyCode::Right | KeyCode::Char('l') => Op::Right,
+                KeyCode::Enter => Op::Confirm,
+                KeyCode::Esc | KeyCode::Char('q') => Op::Back,
+                _ => return,
+            };
+            self.apply(op);
+            return;
+        }
         if self.filter_panel.is_some() || self.options.is_some() {
             let op = match k.code {
                 KeyCode::Up | KeyCode::Char('k') => Op::Up,
@@ -804,7 +830,7 @@ impl App {
             PadEvent::Connected(name) => self.pad = PadState::Connected(name),
             PadEvent::Disconnected => self.pad = PadState::Searching,
             PadEvent::Unavailable(e) => self.pad = PadState::Unavailable(e),
-            PadEvent::Action(a) => {
+            PadEvent::Pressed(..) | PadEvent::Action(_) => {
                 // A game in the middle panel reads the controller itself.
                 if self.embedded.is_some()
                     || self.input_blocked()
@@ -812,6 +838,15 @@ impl App {
                 {
                     return;
                 }
+                if let PadEvent::Pressed(button, _) = ev
+                    && self.controls.as_ref().is_some_and(|s| s.capturing)
+                {
+                    if let Some(button) = button {
+                        self.press_for_controls(button);
+                    }
+                    return;
+                }
+                let Some(a) = ev.action() else { return };
                 self.apply(match a {
                     PadAction::Up => Op::Up,
                     PadAction::Down => Op::Down,
@@ -850,6 +885,9 @@ impl App {
                 return self.osk_op(op);
             }
             return self.cheevos_op(op);
+        }
+        if self.controls.is_some() {
+            return self.controls_op(op);
         }
         if self.filter_panel.is_some() {
             return self.filter_op(op);
@@ -1108,7 +1146,7 @@ impl App {
             Some(g) => {
                 let mut items = Vec::new();
                 if self.embeddable(g).is_some() {
-                    items.push(PlayHere);
+                    items.extend([PlayHere, Controls]);
                 }
                 items.extend([Favorite, Hide, Tags]);
                 if self.emulator_options(g).len() > 1 {
@@ -1162,6 +1200,7 @@ impl App {
             MenuItem::Options => "Options…".into(),
             MenuItem::Reload => "Reload config".into(),
             MenuItem::PlayHere => "Play in romi".into(),
+            MenuItem::Controls => "Controls…".into(),
             MenuItem::Quit => "Quit romi".into(),
             MenuItem::Favorite if game.is_some_and(|g| self.state.is_favorite(&g.key)) => "Unfavorite".into(),
             MenuItem::Favorite => "Favorite".into(),
@@ -1214,6 +1253,12 @@ impl App {
                     MenuItem::PlayHere => {
                         if let Some(g) = game {
                             self.play_here(g);
+                        }
+                    }
+                    MenuItem::Controls => {
+                        if let Some((g, (core, rom))) = game.and_then(|g| Some((g, self.embeddable(g)?))) {
+                            let core = crate::emu::libretro::info(&core).map(|info| info.name);
+                            self.controls = Some(crate::tui::controls::Screen::new(&self.lib, g, core, rom));
                         }
                     }
                     MenuItem::Search => self.apply(Op::Search),
@@ -1309,13 +1354,35 @@ impl App {
     /// Steps a setting to its next value and saves it into the config, changing only that value.
     fn change_setting(&mut self, setting: crate::tui::options::Setting, forward: bool) {
         let value = setting.step(&self.cfg, forward);
-        // Changed by hand since romi last read it: everything has to be read again, not just this.
-        let edited_elsewhere = stamps(&self.watched.files) != self.watched.seen;
-        if let Err(e) = crate::config_edit::save(&self.cfg_path, setting.path(), &value) {
-            return self.set_status(Level::Error, format!("{e:#}"));
+        if self.save_setting(setting.path(), &value) {
+            let shown = setting.shown(&self.cfg);
+            self.set_status(Level::Info, format!("{}: {shown}", setting.label()));
         }
+    }
+
+    /// Saves one setting into the config, changing only that value, and reads the config again.
+    /// False, with the error in the status, if it couldn't, or if everything was read again because
+    /// the config had been changed by hand too.
+    fn save_setting(&mut self, path: &[&str], value: &serde_json::Value) -> bool {
+        let edited_elsewhere = self.edited_elsewhere();
+        if let Err(e) = crate::config_edit::save(&self.cfg_path, path, value) {
+            self.set_status(Level::Error, format!("{e:#}"));
+            return false;
+        }
+        self.read_config_again(edited_elsewhere)
+    }
+
+    /// The config's files have changed since romi last read them.
+    fn edited_elsewhere(&self) -> bool {
+        stamps(&self.watched.files) != self.watched.seen
+    }
+
+    /// Reads the config again after romi has saved a change to it, or everything, if it had been
+    /// changed by hand too (`edited_elsewhere`), in which case it's false, as when it can't be read.
+    fn read_config_again(&mut self, edited_elsewhere: bool) -> bool {
         if edited_elsewhere {
-            return self.reload_as("Saved, and reloaded");
+            self.reload_as("Saved, and reloaded");
+            return false;
         }
         match config::load(&self.cfg_path) {
             Ok(cfg) => {
@@ -1326,10 +1393,67 @@ impl App {
                 self.cfg = cfg;
                 self.apply_settings();
                 self.watched = Watched::new(&self.cfg_path, &self.cfg);
-                let shown = setting.shown(&self.cfg);
-                self.set_status(Level::Info, format!("{}: {shown}", setting.label()));
+                true
             }
-            Err(e) => self.set_status(Level::Error, format!("Config error: {e:#}")),
+            Err(e) => {
+                self.set_status(Level::Error, format!("Config error: {e:#}"));
+                false
+            }
+        }
+    }
+
+    /// The controls screen: up and down pick a row, and A on a button waits for the one to press
+    /// for it. Left and right (or A) on the first row switch between the game and its system.
+    fn controls_op(&mut self, op: Op) {
+        use crate::tui::controls::Row;
+        let Some(screen) = &mut self.controls else { return };
+        // Waiting for a button, the stick moves nothing.
+        if screen.capturing {
+            return;
+        }
+        let n = screen.rows().len();
+        match (op, screen.row()) {
+            (Op::Up, _) => screen.selected = (screen.selected + n - 1) % n,
+            (Op::Down, _) => screen.selected = (screen.selected + 1) % n,
+            (Op::Back | Op::Menu, _) => self.controls = None,
+            (Op::Left | Op::Right | Op::Confirm, Row::For) => screen.for_system = !screen.for_system,
+            (Op::Confirm, Row::Button(_)) => screen.capturing = true,
+            (Op::Confirm, Row::Reset) => {
+                self.save_controls(crate::emu::remap::Controls::default());
+            }
+            _ => {}
+        }
+    }
+
+    /// The pad's button `pressed` now sends the button the controls screen was waiting for.
+    fn press_for_controls(&mut self, pressed: &str) {
+        let Some(screen) = &mut self.controls else { return };
+        screen.capturing = false;
+        if let Some(controls) = screen.press(&self.cfg, &self.lib, pressed) {
+            self.save_controls(controls);
+        }
+    }
+
+    /// Saves the controls screen's buttons for its game, in overrides.jsonc, or for its system, in
+    /// the config.
+    fn save_controls(&mut self, controls: crate::emu::remap::Controls) {
+        let Some(screen) = &self.controls else { return };
+        let g = screen.game;
+        let (key, system) = (self.lib.games[g].key.clone(), self.lib.system_of(g).id.clone());
+        if screen.for_system {
+            let Ok(value) = serde_json::to_value(&controls) else { return };
+            if self.save_setting(&["controls", &system], &value) {
+                self.set_status(Level::Info, format!("Saved the controls for {}", self.lib.system_of(g).name));
+            }
+            return;
+        }
+        let edited_elsewhere = self.edited_elsewhere();
+        if let Err(e) = crate::overrides::update(&self.cfg_path, &key, |ov| ov.controls = controls.clone()) {
+            return self.set_status(Level::Error, format!("Couldn't save: {e:#}"));
+        }
+        if self.read_config_again(edited_elsewhere) {
+            self.lib.games[g].controls = controls;
+            self.set_status(Level::Info, format!("Saved the controls for {}", self.lib.games[g].name));
         }
     }
 
@@ -1534,7 +1658,8 @@ impl App {
             crop: self.cfg.crop_borders,
             badges: self.cfg.retroachievements.badges,
         };
-        let started = crate::emu::runner::load(&self.cfg, &core, &rom, self.shown_height())
+        let controls = crate::emu::runner::controls_for(&self.cfg, &self.lib, g);
+        let started = crate::emu::runner::load(&self.cfg, &core, &rom, &controls, self.shown_height())
             .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume, launch, look, cheevos));
         match started {
             Ok(e) => self.embedded = Some(e),
@@ -1609,6 +1734,7 @@ impl App {
     /// don't also do something in the list.
     pub fn stop_embedded(&mut self) {
         if let Some(mut embedded) = self.embedded.take() {
+            let g = embedded.game;
             match embedded.write_timings() {
                 Some(Ok(path)) => self.set_status(Level::Info, format!("Frame timings in {}", config::tilde(&path))),
                 Some(Err(e)) => self.set_status(Level::Warn, format!("{e:#}")),
@@ -1617,6 +1743,9 @@ impl App {
             if let Some(e) = embedded.stop() {
                 self.set_status(Level::Error, format!("Not saved: {e}"));
             }
+            // For the controls screen, which can't ask the core.
+            let names = crate::emu::libretro::button_names();
+            crate::tui::controls::remember(&self.lib.games[g].key, &self.lib.system_of(g).id, names);
         }
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);
     }

@@ -138,6 +138,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.options.is_some() {
         draw_options(f, app, &theme, body);
     }
+    if app.controls.is_some() {
+        draw_controls(f, app, &theme, body);
+    }
     if app.stats.is_some() {
         draw_stats(f, app, &theme, body);
     }
@@ -213,6 +216,78 @@ fn draw_options(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     };
     let block = theme.block(" Options ", true).title_bottom(saved.right_aligned()).padding(Padding::vertical(1));
     f.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+/// The controls screen: each of the game's buttons, and the one on the pad that sends it.
+fn draw_controls(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    use crate::tui::controls::{Row, pressed_label};
+    let Some(screen) = &app.controls else { return };
+    let pad = matches!(app.pad, PadState::Connected(_));
+    let (below, now) = screen.remaps(&app.cfg, &app.lib);
+    let game = &app.lib.games[screen.game];
+    let system = &app.lib.system_of(screen.game).name;
+    const WIDTH: usize = 44;
+    let lines: Vec<Line> = screen
+        .rows()
+        .into_iter()
+        .enumerate()
+        .map(|(i, row)| {
+            let style = if i == screen.selected { theme.selected(true) } else { Style::new() };
+            let dim = style.patch(Style::new().dim());
+            match row {
+                Row::For => {
+                    let shown = if screen.for_system { format!("All {system} games") } else { "This game".into() };
+                    let shown = text::truncate(&shown, WIDTH - 17);
+                    Line::from(vec![
+                        Span::styled(format!("  {:<11}", "For"), dim),
+                        Span::styled(format!("‹ {shown:<width$} ›  ", width = WIDTH - 17), style),
+                    ])
+                }
+                Row::Button(place) => {
+                    let pressed = match screen.capturing && i == screen.selected {
+                        true => "press a button…".to_string(),
+                        false => {
+                            let by: Vec<_> = now.sent_by(place).map(|b| pressed_label(b, pad)).collect();
+                            if by.is_empty() { "nothing".into() } else { by.join(" / ") }
+                        }
+                    };
+                    let changed = now.sent_by(place).ne(below.sent_by(place));
+                    let mark = if changed { "•" } else { " " };
+                    let name = text::truncate(screen.name(place), 18);
+                    Line::from(vec![
+                        Span::styled(format!("  {name:<18} "), dim),
+                        Span::styled(format!("{mark} {pressed:<width$}", width = WIDTH - 21), style),
+                    ])
+                }
+                Row::Reset => {
+                    let changed = now.controls_over(&below);
+                    let label = format!("  {:<width$}", "Reset", width = WIDTH);
+                    Line::from(Span::styled(label, if changed.is_empty() { dim } else { style }))
+                }
+            }
+        })
+        .collect();
+    let rect = centered(area, WIDTH as u16 + 4, lines.len() as u16 + 4);
+    // Scrolled to keep the selected row in sight, when they don't all fit.
+    let shown = rect.height.saturating_sub(4) as usize;
+    let scroll = (screen.selected + 1).saturating_sub(shown) as u16;
+    f.render_widget(Clear, rect);
+    let saved = match &app.status {
+        Some(s) if matches!(s.level, Level::Error) => {
+            let text = text::truncate(&s.text, WIDTH - 2);
+            Line::from(Span::styled(format!(" {text} "), Style::new().fg(Color::Red)))
+        }
+        _ => {
+            let file = match screen.for_system {
+                true => app.cfg_path.file_name().map_or("the config".into(), |n| n.to_string_lossy().into_owned()),
+                false => crate::overrides::OVERRIDES_FILE.to_string(),
+            };
+            Line::from(Span::styled(format!(" saved in {file} "), Style::new().dim()))
+        }
+    };
+    let title = format!(" Controls: {} ", text::truncate(&game.name, WIDTH - 12));
+    let block = theme.block(title, true).title_bottom(saved.right_aligned()).padding(Padding::vertical(1));
+    f.render_widget(Paragraph::new(lines).block(block).scroll((scroll, 0)), rect);
 }
 
 fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
@@ -766,6 +841,18 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let pad = matches!(app.pad, PadState::Connected(_));
     let (ok, back) = if app.cfg.controller.swap_confirm { ("B", "A") } else { ("A", "B") };
 
+    if let Some(screen) = &app.controls {
+        let line = match (screen.capturing, pad) {
+            (true, true) => hints(&[("any button", "for it")]),
+            (true, false) => hints(&[("a key", "for it"), ("esc", "cancel")]),
+            (false, true) => hints(&[(ok, "change"), ("↑/↓", "button"), ("←/→", "game or system"), (back, "done")]),
+            (false, false) => {
+                hints(&[("enter", "change"), ("↑/↓", "button"), ("←/→", "game or system"), ("esc", "done")])
+            }
+        };
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
     if app.filter_panel.is_some() || app.options.is_some() {
         let line = if pad {
             hints(&[("←/→", "change"), ("↑/↓", "row"), (back, "done")])

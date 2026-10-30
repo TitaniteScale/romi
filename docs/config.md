@@ -90,6 +90,25 @@ it names your games, so think twice before putting it in a public dotfiles repos
 }
 ```
 
+## Controls
+
+Buttons remapped for games played in romi, which the TUI's controls screen writes: for a whole
+system in the top-level `"controls"`, by system id, and for one game in its override's
+`"controls"`. Each says what the pad's buttons send, by libretro's names for them (`a` is the right
+face button and `b` the bottom one, as on a Super Nintendo pad), and leaves out the ones that stay
+as they are. A button can send another, a stick direction (`l_x+` pushes the left stick right,
+`l_y+` down), or `"none"`. A game's go over its system's, button by button, and both go over
+RetroArch's remap for the game.
+
+```jsonc
+"controls": {
+  "snes": { "a": "b", "b": "a" }                  // Super Nintendo games with A and B swapped
+},
+"overrides": {
+  "snes:Super Metroid (USA).sfc": { "controls": { "select": "none" } }
+}
+```
+
 ## Hooks
 
 Hooks run commands when a game starts and stops: pause music, switch power profiles, move to a

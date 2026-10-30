@@ -71,25 +71,41 @@ fn add(stick: &mut [i16; 2], more: [i16; 2]) {
     }
 }
 
-/// RetroArch's default keys: arrows, X and Z for A and B, A and S for L and R, Enter for Start,
-/// and Backspace for Select (RetroArch uses right Shift, which terminals don't report alone).
+/// The keys that are the pad's buttons, by the buttons' names (see `libretro::BUTTONS`): RetroArch's
+/// default keys, arrows, X and Z for A and B, Q and W for L and R, Enter for Start, and Backspace for
+/// Select (RetroArch uses right Shift, which terminals don't report alone).
+pub const KEYS: [(&str, &str); 12] = [
+    ("up", "↑"),
+    ("down", "↓"),
+    ("left", "←"),
+    ("right", "→"),
+    ("a", "x"),
+    ("b", "z"),
+    ("x", "s"),
+    ("y", "a"),
+    ("l", "q"),
+    ("r", "w"),
+    ("start", "enter"),
+    ("select", "backspace"),
+];
+
 fn key_button(code: KeyCode) -> Option<u16> {
-    let name = match code {
-        KeyCode::Up => "up",
-        KeyCode::Down => "down",
-        KeyCode::Left => "left",
-        KeyCode::Right => "right",
-        KeyCode::Char('x' | 'X') => "a",
-        KeyCode::Char('z' | 'Z') => "b",
-        KeyCode::Char('s' | 'S') => "x",
-        KeyCode::Char('a' | 'A') => "y",
-        KeyCode::Char('q' | 'Q') => "l",
-        KeyCode::Char('w' | 'W') => "r",
-        KeyCode::Enter => "start",
-        KeyCode::Backspace => "select",
+    button(key_name(code)?)
+}
+
+/// The pad's button a key is.
+pub fn key_name(code: KeyCode) -> Option<&'static str> {
+    let key = match code {
+        KeyCode::Up => "↑".to_string(),
+        KeyCode::Down => "↓".to_string(),
+        KeyCode::Left => "←".to_string(),
+        KeyCode::Right => "→".to_string(),
+        KeyCode::Enter => "enter".to_string(),
+        KeyCode::Backspace => "backspace".to_string(),
+        KeyCode::Char(c) => c.to_ascii_lowercase().to_string(),
         _ => return None,
     };
-    button(name)
+    KEYS.iter().find(|(_, k)| *k == key).map(|(name, _)| *name)
 }
 
 /// The arrows also push the left stick all the way, so a keyboard can walk in 3D games.
@@ -103,26 +119,35 @@ fn key_stick(code: KeyCode) -> [i16; 2] {
     }
 }
 
-/// What's held on one controller, in libretro's layout: A on the right face button, B on the
-/// bottom one, as on a Super Nintendo pad.
+/// A controller's buttons, by the names games know them by: libretro's layout, with A on the right
+/// face button and B on the bottom one, as on a Super Nintendo pad.
+pub const PAD: [(Button, &str); 16] = [
+    (Button::East, "a"),
+    (Button::South, "b"),
+    (Button::North, "x"),
+    (Button::West, "y"),
+    (Button::LeftTrigger, "l"),
+    (Button::RightTrigger, "r"),
+    (Button::LeftTrigger2, "l2"),
+    (Button::RightTrigger2, "r2"),
+    (Button::Select, "select"),
+    (Button::Start, "start"),
+    (Button::DPadUp, "up"),
+    (Button::DPadDown, "down"),
+    (Button::DPadLeft, "left"),
+    (Button::DPadRight, "right"),
+    (Button::LeftThumb, "l3"),
+    (Button::RightThumb, "r3"),
+];
+
+/// The pad's button a controller's button is.
+pub fn pad_name(b: Button) -> Option<&'static str> {
+    PAD.iter().find(|(p, _)| *p == b).map(|(_, n)| *n)
+}
+
+/// What's held on one controller.
 fn pad_input(pad: &gilrs::Gamepad) -> Input {
-    const MAP: [(Button, &str); 14] = [
-        (Button::East, "a"),
-        (Button::South, "b"),
-        (Button::North, "x"),
-        (Button::West, "y"),
-        (Button::LeftTrigger, "l"),
-        (Button::RightTrigger, "r"),
-        (Button::LeftTrigger2, "l2"),
-        (Button::RightTrigger2, "r2"),
-        (Button::Select, "select"),
-        (Button::Start, "start"),
-        (Button::DPadUp, "up"),
-        (Button::DPadDown, "down"),
-        (Button::DPadLeft, "left"),
-        (Button::DPadRight, "right"),
-    ];
-    let buttons = MAP.iter().filter(|(b, _)| pad.is_pressed(*b)).fold(0, |acc, (_, n)| acc | button(n).unwrap());
+    let buttons = PAD.iter().filter(|(b, _)| pad.is_pressed(*b)).fold(0, |acc, (_, n)| acc | button(n).unwrap());
     let axis = |a| (pad.value(a).clamp(-1.0, 1.0) * f32::from(i16::MAX)) as i16;
     // gilrs has up as positive; libretro has down.
     let stick = |x, y| [axis(x), axis(y).saturating_neg()];

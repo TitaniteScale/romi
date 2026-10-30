@@ -1,8 +1,10 @@
 //! Remapped controls: which of libretro's buttons and stick directions each of the pad's sends, and
-//! the type of controller plugged into each port, as a RetroArch remap file sets them (see
-//! `emucfg::retroarch_remap`). Only player 1's buttons, since romi only plays on port 1 so far.
+//! the type of controller plugged into each port. They come from RetroArch's remap file (see
+//! `emucfg::retroarch_remap`), with the buttons remapped in romi over it: the system's, then the
+//! game's. Only player 1's buttons, since romi only plays on port 1 so far.
 
 use crate::emu::libretro::{BUTTONS, Input};
+use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 /// The sticks' directions, after the 16 buttons, in RetroArch's order and with its names. Y+ is
@@ -27,6 +29,44 @@ fn unchanged() -> [Option<u8>; CONTROLS] {
     std::array::from_fn(|i| Some(i as u8))
 }
 
+/// A button's or stick direction's name, by its place.
+fn name(place: usize) -> &'static str {
+    BUTTONS.get(place).or_else(|| DIRECTIONS.get(place - BUTTONS.len())).copied().unwrap_or("none")
+}
+
+fn place(name: &str) -> Option<usize> {
+    BUTTONS.iter().chain(&DIRECTIONS).position(|n| *n == name)
+}
+
+/// Buttons remapped in romi: what each of the pad's buttons sends, by name, as a button, a stick
+/// direction or "none". Only what differs from the remap below is kept.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct Controls(pub BTreeMap<String, String>);
+
+impl Controls {
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<'de> Deserialize<'de> for Controls {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Controls, D::Error> {
+        let map = BTreeMap::<String, String>::deserialize(d)?;
+        let buttons = BUTTONS.join(", ");
+        for (from, to) in &map {
+            if !BUTTONS.contains(&from.as_str()) {
+                return Err(serde::de::Error::custom(format!("no button called \"{from}\" (there's {buttons})")));
+            }
+            if to != "none" && place(to).is_none() {
+                let all = format!("{buttons}, {}, or none", DIRECTIONS.join(", "));
+                return Err(serde::de::Error::custom(format!("{from} can't send \"{to}\" (it can send {all})")));
+            }
+        }
+        Ok(Controls(map))
+    }
+}
+
 impl Default for Remap {
     fn default() -> Remap {
         Remap { sends: unchanged(), devices: [None; 4] }
@@ -48,6 +88,42 @@ impl Remap {
             *device = lines.get(format!("input_libretro_device_p{}", port + 1).as_str()).and_then(|v| v.parse().ok());
         }
         remap
+    }
+
+    /// With `controls` over it, button by button.
+    pub fn with(mut self, controls: &Controls) -> Remap {
+        for (from, to) in &controls.0 {
+            if let Some(from) = place(from).filter(|&p| p < BUTTONS.len()) {
+                self.sends[from] = place(to).map(|p| p as u8);
+            }
+        }
+        self
+    }
+
+    /// The pad's buttons that send the button at `place` (see `libretro::BUTTONS`).
+    pub fn sent_by(&self, place: usize) -> impl Iterator<Item = usize> + '_ {
+        (0..BUTTONS.len()).filter(move |&b| self.sends[b] == Some(place as u8))
+    }
+
+    /// Has the pad's button `pressed` send the button at `place`, and the button that sent it
+    /// before send what `pressed` did, so the two swap and none is left doing nothing.
+    pub fn swap(&mut self, place: usize, pressed: usize) {
+        let before = self.sent_by(place).next();
+        let was = self.sends[pressed];
+        self.sends[pressed] = Some(place as u8);
+        if let Some(before) = before.filter(|&b| b != pressed) {
+            self.sends[before] = was;
+        }
+    }
+
+    /// The buttons that differ from `below`'s, to keep as romi's remap over it.
+    pub fn controls_over(&self, below: &Remap) -> Controls {
+        let changed = (0..BUTTONS.len()).filter(|&b| self.sends[b] != below.sends[b]);
+        Controls(
+            changed
+                .map(|b| (name(b).to_string(), name(self.sends[b].map_or(usize::MAX, usize::from)).to_string()))
+                .collect(),
+        )
     }
 
     /// What the core sees when `input` is held. A button sent to a stick direction pushes the stick
@@ -140,6 +216,43 @@ mod tests {
         assert_eq!(out.triggers, [0, 8000]);
         // Y pushes the left stick all the way left.
         assert_eq!((out.buttons, out.sticks[0]), (0, [-i16::MAX, 0]));
+    }
+
+    #[test]
+    fn romis_buttons_go_over_retroarchs_one_by_one() {
+        let below = remap("input_player1_btn_a = 0\ninput_player1_btn_b = 8\ninput_player1_btn_l = 16");
+        let controls: Controls = serde_json::from_str(r#"{ "a": "x", "select": "none" }"#).unwrap();
+        let r = below.clone().with(&controls);
+        assert_eq!(r.apply(Input::buttons(button("a").unwrap())).buttons, button("x").unwrap());
+        // B still sends A, and L the left stick to the right, as RetroArch's remap has them.
+        assert_eq!(r.apply(Input::buttons(button("b").unwrap())).buttons, button("a").unwrap());
+        assert_eq!(r.apply(Input::buttons(button("l").unwrap())).sticks[0], [i16::MAX, 0]);
+        assert_eq!(r.apply(Input::buttons(button("select").unwrap())).buttons, 0);
+        assert_eq!(r.controls_over(&below), controls);
+        assert!(below.controls_over(&below).is_empty());
+    }
+
+    #[test]
+    fn swapping_leaves_no_button_doing_nothing() {
+        let place = |n| BUTTONS.iter().position(|b| *b == n).unwrap();
+        let mut r = Remap::default();
+        // Y for A: Y sends A, and A sends what Y did.
+        r.swap(place("a"), place("y"));
+        assert_eq!(r.sent_by(place("a")).collect::<Vec<_>>(), [place("y")]);
+        assert_eq!(r.sent_by(place("y")).collect::<Vec<_>>(), [place("a")]);
+        let saved = r.controls_over(&Remap::default());
+        assert_eq!(saved.0, BTreeMap::from([("a".into(), "y".into()), ("y".into(), "a".into())]));
+        // Back again, there's nothing to keep.
+        r.swap(place("a"), place("a"));
+        assert!(r.controls_over(&Remap::default()).is_empty());
+    }
+
+    #[test]
+    fn controls_name_real_buttons() {
+        let err = |json| serde_json::from_str::<Controls>(json).unwrap_err().to_string();
+        assert!(err(r#"{ "jump": "a" }"#).starts_with("no button called \"jump\""));
+        assert!(err(r#"{ "a": "fire" }"#).starts_with("a can't send \"fire\""));
+        assert!(serde_json::from_str::<Controls>(r#"{ "l3": "r_y-", "r3": "none" }"#).is_ok());
     }
 
     #[test]

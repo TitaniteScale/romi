@@ -242,6 +242,12 @@ impl Api {
 pub const BUTTONS: [&str; 16] =
     ["b", "y", "select", "start", "up", "down", "left", "right", "a", "x", "l", "r", "l2", "r2", "l3", "r3"];
 
+/// What the core loaded last calls player 1's buttons (`SET_INPUT_DESCRIPTORS`), by their place
+/// in `BUTTONS`, in the order it listed them.
+pub fn button_names() -> Vec<(usize, String)> {
+    shared().button_names.clone()
+}
+
 /// The bit for a button name, if it is one.
 pub fn button(name: &str) -> Option<u16> {
     BUTTONS.iter().position(|b| b.eq_ignore_ascii_case(name)).map(|i| 1 << i)
@@ -346,6 +352,8 @@ struct Shared {
     input: Input,
     /// The core says the game is played with the left stick (see `stick_is_stick`).
     uses_left_stick: bool,
+    /// What the core calls player 1's buttons, by their place in `BUTTONS`.
+    button_names: Vec<(usize, String)>,
     /// The core has asked where the sticks are.
     reads_sticks: bool,
     memory_map: Descriptors,
@@ -368,6 +376,7 @@ static SHARED: Mutex<Shared> = Mutex::new(Shared {
     audio: Vec::new(),
     input: Input { buttons: 0, sticks: [[0; 2]; 2], triggers: [0; 2] },
     uses_left_stick: false,
+    button_names: Vec::new(),
     reads_sticks: false,
     memory_map: Descriptors(Vec::new(), 0),
     hw: None,
@@ -463,12 +472,22 @@ extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             ENV_SET_INPUT_DESCRIPTORS => {
                 let mut d = data as *const InputDescriptor;
                 let mut left_stick = false;
+                let mut names = Vec::new();
                 while !(*d).description.is_null() {
                     let d_ = &*d;
-                    left_stick |= d_.port == 0 && d_.device == DEVICE_ANALOG && d_.index == ANALOG_LEFT;
+                    let device = d_.device & DEVICE_MASK;
+                    left_stick |= d_.port == 0 && device == DEVICE_ANALOG && d_.index == ANALOG_LEFT;
+                    if d_.port == 0 && device == DEVICE_JOYPAD && (d_.id as usize) < BUTTONS.len() {
+                        let name = CStr::from_ptr(d_.description).to_string_lossy().trim().to_string();
+                        if !name.is_empty() && !names.iter().any(|(id, _)| *id == d_.id as usize) {
+                            names.push((d_.id as usize, name));
+                        }
+                    }
                     d = d.add(1);
                 }
-                shared().uses_left_stick = left_stick;
+                let mut s = shared();
+                s.uses_left_stick = left_stick;
+                s.button_names = names;
             }
             ENV_SET_MESSAGE
             | ENV_SET_PERFORMANCE_LEVEL
@@ -803,6 +822,7 @@ impl Core {
             audio: Vec::new(),
             input: Input::default(),
             uses_left_stick: false,
+            button_names: Vec::new(),
             reads_sticks: false,
             memory_map: Descriptors::default(),
             hw: None,

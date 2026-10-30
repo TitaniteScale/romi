@@ -217,7 +217,9 @@ fn wait_for_any_input(rx: &Receiver<PadEvent>) {
         {
             return;
         }
-        if let Ok(PadEvent::Action(PadAction::Confirm | PadAction::Back | PadAction::Menu)) = rx.try_recv() {
+        if let Ok(ev) = rx.try_recv()
+            && matches!(ev.action(), Some(PadAction::Confirm | PadAction::Back | PadAction::Menu))
+        {
             return;
         }
     }
