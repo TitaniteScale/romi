@@ -165,9 +165,21 @@ extern "C" fn on_http(
     let agent = me.agent.clone();
     let user_agent = me.user_agent.get().cloned().unwrap_or_else(|| user_agent(""));
     std::thread::spawn(move || {
-        let (status, body) = match request(&agent, &user_agent, &url, post.as_deref(), content_type.as_deref()) {
-            Ok(answer) => answer,
-            Err(_) => (RETRYABLE_CLIENT_ERROR, Vec::new()),
+        // rcheevos tries unlocks again itself, but not logins or loads, so a request that never got
+        // an answer is tried again here first. Asking twice is harmless: the server takes an
+        // unlock it already has as done.
+        let mut tries = RETRY_AFTER.iter();
+        let (status, body) = loop {
+            match request(&agent, &user_agent, &url, post.as_deref(), content_type.as_deref()) {
+                Ok(answer) => break answer,
+                Err(e) => {
+                    log(&format!("request failed: {e:#}"));
+                    match tries.next() {
+                        Some(wait) => std::thread::sleep(*wait),
+                        None => break (RETRYABLE_CLIENT_ERROR, Vec::new()),
+                    }
+                }
+            }
         };
         // SAFETY: rcheevos' callback and its data, as it gave them, answered exactly once.
         unsafe {
@@ -232,11 +244,20 @@ extern "C" fn on_done(rust: *mut c_void, what: c_int, result: c_int, error: *con
 /// rcheevos' warnings go to the file named by this, when it's set; the TUI has nowhere for them.
 const LOG_VAR: &str = "ROMI_RA_LOG";
 
-extern "C" fn on_log(_rust: *mut c_void, message: *const c_char) {
+/// How long to wait before trying a request again that never got an answer, each time.
+const RETRY_AFTER: [Duration; 2] = [Duration::from_millis(500), Duration::from_secs(1)];
+
+fn log(message: &str) {
     use std::io::Write;
-    let (Some(message), Ok(path)) = (text(message), std::env::var(LOG_VAR)) else { return };
+    let Ok(path) = std::env::var(LOG_VAR) else { return };
     if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = writeln!(file, "{message}");
+    }
+}
+
+extern "C" fn on_log(_rust: *mut c_void, message: *const c_char) {
+    if let Some(message) = text(message) {
+        log(&message);
     }
 }
 

@@ -97,6 +97,14 @@ def set_up_an_nes_game(sandbox, server, core_source=COUNTING_CORE, animation=Fal
     sandbox.extra_env["ROMI_RA_HOST"] = server.url
 
 
+def wait_for_unlock(romi, server):
+    """Waits for the fake server to be sent an unlock, then for romi to draw its notice. romi's
+    output is searched rather than the screen, which ALSA's complaints about the sandbox's sound
+    devices can scroll and garble."""
+    romi.wait_for(lambda: server.calls("awardachievement"), timeout=20)
+    romi.wait_for(lambda: b"Achievement unlocked" in romi.output, timeout=5)
+
+
 def log_in(sandbox):
     out = run_cli(sandbox, "achievements", "login", USER, stdin=PASSWORD + "\n")
     assert out.returncode == 0, out.stderr
@@ -132,10 +140,10 @@ def test_achievements_unlock_while_a_game_plays_in_romi(start, sandbox, server):
     romi.keys("o")
     romi.wait_for("Play in romi")
     romi.keys("\r")
-    romi.wait_for("0 of 1 achievement unlocked", timeout=10)
+    romi.wait_for(lambda: b"0 of 1 achievement unlocked" in romi.output, timeout=10)
     # The counter reaches 200 within about four seconds of play.
-    romi.wait_for("Achievement unlocked", timeout=10)
-    assert "Count to 200" in romi.text()
+    wait_for_unlock(romi, server)
+    assert b"Count to 200" in romi.output
     award = server.calls("awardachievement")
     assert [(a["a"], a["h"]) for a in award] == [("5501", "0")], "sent once, softcore"
     # The game was asked for by the ROM's hash, which skips the iNES header.
@@ -154,7 +162,7 @@ def test_memory_a_core_maps_on_its_first_frame_is_found(start, sandbox, server):
     romi.keys("o")
     romi.wait_for("Play in romi")
     romi.keys("\r")
-    romi.wait_for("Achievement unlocked", timeout=20)
+    wait_for_unlock(romi, server)
     assert [a["a"] for a in server.calls("awardachievement")] == ["5501"]
     assert "Disabled" not in log.read_text()
 
@@ -168,6 +176,7 @@ def test_a_game_retroachievements_doesnt_know_says_so(start, sandbox):
         romi.keys("o")
         romi.wait_for("Play in romi")
         romi.keys("\r")
+        # The status bar only redraws the letters that changed, so this is looked for on screen.
         romi.wait_for("RetroAchievements:", timeout=10)
         assert not fake.calls("awardachievement")
     finally:
