@@ -274,6 +274,35 @@ It's built in steps, and the first one pays off without any of the TUI work:
 The spike settled 60 fps in Ghostty. Still to check: kitty and other terminals, and how much input
 lag there is.
 
+## 7. Systems that need a GPU
+
+Playing in romi only works with cores that draw in software, handing over each frame in memory.
+Flycast (Dreamcast, Naomi), Dolphin (GameCube, Wii), PPSSPP (PSP), Mupen64Plus-Next (N64),
+Beetle PSX HW, Citra (3DS) and LRPS2 (PS2) ask for an OpenGL or Vulkan context to draw into
+(`SET_HW_RENDER`) instead. romi says no, and some crash at that (Flycast does, which is why a core
+is tried in a separate process first). In the order worth trying:
+
+1. **GPU drawing for libretro cores**, as RetroArch does it but with no window: an OpenGL context
+   made through Mesa's EGL with no surface, a framebuffer the core draws into, and each frame read
+   back from the GPU into the same shared-memory Kitty path as now. Screen filters, rounded
+   corners, achievements and saves all come after that, so they'd carry over. OpenGL alone covers
+   Flycast, Dolphin, PPSSPP, Mupen64Plus-Next and Beetle PSX HW; Vulkan (which needs the core's
+   context negotiation interface) can come later. Start with Flycast, since it's the crash already
+   seen. The fiddly parts: the GL version and profile each core asks for, and cores that draw on
+   their own threads. Reading frames back is cheap at these sizes, even rendered above native
+   resolution.
+2. **Core options** (`GET_VARIABLE`, which romi answers with "no" now, so every core runs on its
+   defaults). On its own this lets romi pick the software renderers some cores still have:
+   ParaLLEl/angrylion in Mupen64Plus-Next, and Dolphin's and PPSSPP's. Dolphin's is far too slow
+   for full speed and the others depend on the CPU, so it's a stepping stone, but options are
+   worth having anyway.
+3. **Any emulator's window, captured**: run a standalone emulator in a compositor with no screen
+   and draw its frames in the panel. This is the only way for systems with no libretro core at
+   all: Switch (Ryujinx), PS3 (RPCS3), Wii U (Cemu), PCSX2. Valve's `gamescope` has a headless
+   backend and can stream its output over PipeWire, so romi may only need to read that stream; not
+   tried yet. The emulator keeps its own sound, controller, saves and achievements, so romi is just
+   the window. Costs more latency and has many moving parts.
+
 ## Filling the gaps, any time
 
 Smaller items that fit between phases.
