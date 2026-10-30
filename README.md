@@ -1,10 +1,5 @@
-
-
-https://github.com/user-attachments/assets/043b501c-1511-425e-bf12-7ec91c49a774
-
-
-
 https://github.com/user-attachments/assets/3546be21-ad2e-4cfb-91fb-bc42bb2cdb4f
+<img width="720" height="450" alt="romi-demo" src="https://github.com/user-attachments/assets/226ba686-b2f8-4c54-805b-b708a5a86dc3" />
 
 
 
