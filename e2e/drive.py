@@ -167,12 +167,15 @@ class Romi:
     """romi running in a pty, with the screen kept up to date by pyte.
 
     `answer_queries=False` plays a terminal that ignores romi's image-support query.
+    `answer_modes` says which modes it knows, by number, when romi asks (DECRQM): 1 or 2 for set
+    or reset. Others it says it doesn't know.
     """
 
-    def __init__(self, sandbox=None, cols=100, rows=30, args=(), pad=None, answer_queries=True):
+    def __init__(self, sandbox=None, cols=100, rows=30, args=(), pad=None, answer_queries=True, answer_modes=None):
         self.cols, self.rows = cols, rows
         self.pad = pad
         self.answer_queries = answer_queries
+        self.answer_modes = answer_modes or {}
         self.screen = pyte.Screen(cols, rows)
         self.stream = pyte.ByteStream(self.screen)
         # Everything romi wrote, for what pyte doesn't show, like Kitty graphics.
@@ -208,6 +211,9 @@ class Romi:
             if self.answer_queries:
                 if b"\x1b[16t" in data:
                     os.write(self.fd, b"\x1b[6;20;10t")
+                # Before the device attributes, which end romi's wait for answers.
+                for mode in re.findall(rb"\x1b\[\?(\d+)\$p", data):
+                    os.write(self.fd, b"\x1b[?%s;%d$y" % (mode, self.answer_modes.get(int(mode), 0)))
                 if b"\x1b[c" in data:
                     os.write(self.fd, b"\x1b[?62;22c")
                 if b"\x1b[5n" in data:
@@ -236,6 +242,18 @@ class Romi:
             "".join(self.screen.buffer[y][x].data or " " for x in range(self.cols)).rstrip()
             for y in range(self.rows)
         ]
+
+    def choose(self, label, tries=20):
+        """Moves down the open menu to the item that says `label`, and picks it. Menus are found by
+        name, since what's installed on the machine can add items: a libretro core in RetroArch's
+        system folder adds Play in romi."""
+        for _ in range(tries):
+            if any(label in s for s in self.selected()):
+                break
+            self.keys("j")
+        else:
+            raise AssertionError(f"no {label!r} in the menu; screen:\n{self.text()}")
+        self.keys("\r")
 
     def selected(self):
         """The highlighted (reverse video) text on each row, left to right."""

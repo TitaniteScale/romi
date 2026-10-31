@@ -76,7 +76,8 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     // animation's colors are set up even when they're off, since the options can turn them on.
     let answers = terminal_answers();
     if answers {
-        app.terminal_colors = emu::wireframe::ask_colors();
+        let told = emu::wireframe::ask_terminal();
+        (app.terminal_colors, app.pixel_mouse) = (told.colors, told.pixel_mouse);
     }
     app.apply_settings();
     let picker = if answers {

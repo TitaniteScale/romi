@@ -1,7 +1,7 @@
 //! What romi can tell from emulators' own settings files: for `romi check`, whether
 //! RetroAchievements is on and logged in and whether a controller is bound; for games played in
-//! romi, where RetroArch keeps saves, and the core options and remaps it has. romi only ever reads
-//! these files.
+//! romi, where RetroArch keeps saves (or melonDS, for DS games it runs), and the core options and
+//! remaps RetroArch has. romi only ever reads these files.
 
 use crate::config::{Config, expand_path};
 use crate::emu::remap::Remap;
@@ -234,6 +234,34 @@ pub fn retroarch_save_dir(core: &str, rom: &Path) -> Option<PathBuf> {
     save_dir(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
 }
 
+/// The folder where the emulator `command` runs keeps `rom`'s save, when the libretro core called
+/// `core` (its name without the version) keeps saves just as it does, so a game played in romi
+/// carries on outside it and back. Only for DS games that run in standalone melonDS, played in
+/// romi with RetroArch's melonDS core: both keep the game's save as `<name>.sav`, the same inside.
+pub fn shared_save_dir(command: &str, core: &str, rom: &Path) -> Option<PathBuf> {
+    match Emulator::of(command)? {
+        (Emulator::MelonDs, flatpak) if core == "melonDS" => {
+            melonds_save_dir(&Emulator::MelonDs.config_dir(flatpak), rom)
+        }
+        _ => None,
+    }
+}
+
+/// Where melonDS keeps `rom`'s save: next to it, unless its settings name a folder. A relative
+/// folder is relative to wherever melonDS was started, which romi can't know.
+fn melonds_save_dir(config_dir: &Path, rom: &Path) -> Option<PathBuf> {
+    let toml = config_dir.join("melonDS.toml");
+    // melonDS before 1.0 kept its settings in another format, with the same name for this.
+    let set = match toml.exists() {
+        true => Ini::read(&toml).get("Instance0", "SaveFilePath").map(str::to_string),
+        false => Ini::read(&config_dir.join("melonDS.ini")).get("", "SaveFilePath").map(str::to_string),
+    };
+    match set.filter(|dir| !dir.is_empty()).map(|dir| expand_path(&dir)) {
+        None => rom.parent().map(Path::to_path_buf),
+        Some(dir) => dir.is_absolute().then_some(dir),
+    }
+}
+
 /// The core options RetroArch has for the core called `core` (its name without the version), by
 /// key: the core's, then the ones for `rom`'s folder, then for `rom` itself, each over the last, as
 /// RetroArch takes them. With global core options on, there's one file for every core instead.
@@ -378,6 +406,27 @@ mod tests {
         assert_eq!(at(by_content), Some(PathBuf::from("/s/FinalBurn Neo/neogeo")));
         assert_eq!(at("savefile_directory = \"default\""), None);
         assert_eq!(at("savefile_directory = \"/s\"\nsavefiles_in_content_dir = \"true\""), None);
+    }
+
+    #[test]
+    fn ds_saves_are_where_melonds_keeps_them() {
+        let dir = std::env::temp_dir().join(format!("romi-melonds-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let rom = Path::new("/roms/nds/Pokemon - Platinum Version (USA).nds");
+        let at = |toml: &str| {
+            std::fs::write(dir.join("melonDS.toml"), toml).unwrap();
+            melonds_save_dir(&dir, rom)
+        };
+        assert_eq!(at("[Instance0]\nSaveFilePath = \"\"\n"), Some(PathBuf::from("/roms/nds")));
+        assert_eq!(at("[Instance0]\nSaveFilePath = \"/saves/ds\"\n"), Some(PathBuf::from("/saves/ds")));
+        assert_eq!(at("[Instance0]\nSaveFilePath = \"saves\"\n"), None);
+        std::fs::remove_file(dir.join("melonDS.toml")).unwrap();
+        std::fs::write(dir.join("melonDS.ini"), "SaveFilePath=/old\n").unwrap();
+        assert_eq!(melonds_save_dir(&dir, rom), Some(PathBuf::from("/old")));
+        std::fs::remove_dir_all(&dir).unwrap();
+        // Only melonDS's own core keeps saves as melonDS does.
+        assert_eq!(shared_save_dir("retroarch -L {cores}/melonds_libretro.so {rom}", "melonDS", rom), None);
+        assert_eq!(shared_save_dir("melonDS -f {rom}", "melonDS DS", rom), None);
     }
 
     #[test]

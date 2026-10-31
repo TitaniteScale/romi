@@ -6,6 +6,7 @@ use crate::init::Catalog;
 use crate::launch::Launch;
 use crate::library::{Game, Library};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 /// The other emulators for each system, looked up once per system since finding the installed
 /// ones means reading ES-DE's definitions and looking for programs.
@@ -58,6 +59,17 @@ impl Emulators {
         options.extend(others.iter().filter(|e| !is_default(e)).cloned());
         options
     }
+}
+
+/// The libretro core a game plays in romi with: the one its own command runs, or else the first
+/// installed one among the other ways it can run (`options`), so a DS game that runs in
+/// standalone melonDS still plays in romi through RetroArch's melonDS core.
+pub fn core(game: &Game, options: &[Emulator]) -> Option<PathBuf> {
+    let core = |command: &str| {
+        let argv = Launch { command: command.to_string(), ..game.launch.clone() }.prepare().ok()?.argv;
+        crate::emu::libretro::core_in(&argv).filter(|core| core.is_file())
+    };
+    core(&game.launch.command).or_else(|| options.iter().find_map(|e| core(&e.command)))
 }
 
 /// Which of `options` the game uses now.

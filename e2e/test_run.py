@@ -13,7 +13,9 @@ def run_cli(sandbox, *args):
 
 
 def test_a_game_without_a_libretro_core_asks_for_one(sandbox):
-    out = run_cli(sandbox, "run", "advance wars")
+    # Given as a file, so only its system's command counts: a game in the library would also try
+    # its other emulators, and the machine may have RetroArch with a core for it.
+    out = run_cli(sandbox, "run", str(sandbox.home / "ROMs/gba/Advance Wars (USA).gba"))
     assert out.returncode == 64
     assert "doesn't run through a libretro core; pass --core" in out.stderr
 

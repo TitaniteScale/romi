@@ -5,7 +5,9 @@
 //!
 //! The exception is how big a 3D core draws. Drawn at the console's size (640×480) and scaled
 //! up to the panel, a pixel at a time, 3D games look blocky, so romi asks for the size closest to
-//! the panel's instead, when it's told how tall that is, up to `MAX_DRAWN`.
+//! the panel's instead, when it's told how tall that is, up to `MAX_DRAWN`. And melonDS's
+//! touchscreen follows the mouse as a pointer in romi, where the mouse says where it is, rather
+//! than moving a cursor of its own (see `in_romi`).
 
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -171,6 +173,17 @@ fn fitted(d: &Declared, height: u32) -> Option<&String> {
     tall_enough.or(sizes.iter().max_by_key(|(h, _)| *h)).map(|(_, v)| *v)
 }
 
+/// A value that works better in romi than the one picked, for an option where there's one:
+/// melonDS's "Mouse" touch mode (RetroArch's default) moves a cursor of its own by how far the
+/// mouse moves, which drifts from the mouse in romi, where the mouse says where it is.
+fn in_romi(d: &Declared, value: &str) -> Option<&'static str> {
+    let better = match (d.key.as_str(), value) {
+        ("melonds_touch_mode", "Mouse") => "Touch",
+        _ => return None,
+    };
+    d.values.iter().any(|v| v == better).then_some(better)
+}
+
 /// The options a game is played with.
 #[derive(Default)]
 pub struct Options {
@@ -198,8 +211,9 @@ impl Options {
                 super::libretro::note(&format!("romi: {} = {value}, to draw about as tall as it's shown", d.key));
             }
             let chosen = self.chosen.get(&d.key).filter(|v| d.values.is_empty() || d.values.contains(v));
-            let value = fitted.or(chosen).or(d.default.as_ref()).or(d.values.first());
-            if let Some(value) = value.and_then(|v| CString::new(v.as_str()).ok()) {
+            let value = fitted.or(chosen).or(d.default.as_ref()).or(d.values.first()).map(String::as_str);
+            let value = value.map(|v| in_romi(&d, v).unwrap_or(v));
+            if let Some(value) = value.and_then(|v| CString::new(v).ok()) {
                 self.values.insert(d.key, value);
             }
         }
@@ -276,6 +290,28 @@ mod tests {
         let mut not_sized = Options::new(BTreeMap::new(), None);
         not_sized.declare(vec![declare("mupen64plus-43screensize", &["640x480", "1280x960"])]);
         assert_eq!(value(&mut not_sized, "mupen64plus-43screensize").as_deref(), Some("640x480"));
+    }
+
+    #[test]
+    fn melonds_touches_where_the_mouse_is() {
+        let touch = |values: &[&str]| Declared {
+            key: "melonds_touch_mode".into(),
+            values: values.iter().map(|v| v.to_string()).collect(),
+            default: None,
+        };
+        let chosen = |mode: &str| [("melonds_touch_mode".to_string(), mode.to_string())].into_iter().collect();
+        let mut options = Options::new(chosen("Mouse"), None);
+        options.declare(vec![touch(&["Mouse", "Touch", "Joystick"])]);
+        assert_eq!(value(&mut options, "melonds_touch_mode").as_deref(), Some("Touch"));
+        let mut default = Options::new(BTreeMap::new(), None);
+        default.declare(vec![touch(&["Mouse", "Touch", "Joystick"])]);
+        assert_eq!(value(&mut default, "melonds_touch_mode").as_deref(), Some("Touch"));
+        let mut stick = Options::new(chosen("Joystick"), None);
+        stick.declare(vec![touch(&["Mouse", "Touch", "Joystick"])]);
+        assert_eq!(value(&mut stick, "melonds_touch_mode").as_deref(), Some("Joystick"));
+        let mut no_touch = Options::new(chosen("Mouse"), None);
+        no_touch.declare(vec![touch(&["Mouse", "Joystick"])]);
+        assert_eq!(value(&mut no_touch, "melonds_touch_mode").as_deref(), Some("Mouse"));
     }
 
     #[test]

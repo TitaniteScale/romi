@@ -68,7 +68,9 @@ only counts in the totals, and the year fills in as you play.
 
 ## Play in romi
 
-A game's menu (`o`) has **Play in romi** for games run through a libretro core. It plays the game
+A game's menu (`o`) has **Play in romi** for games run through a libretro core, or that could be:
+a game that runs in another emulator, like a DS game in standalone melonDS, plays in romi through
+the first of its other emulators that's RetroArch with a core installed. It plays the game
 in the middle panel, with the systems and details still around it, drawn behind Kitty Unicode
 placeholders. Esc, or holding Select+Start, stops it. Arcade games on their side, like Ms. Pac-Man,
 are turned upright.
@@ -78,7 +80,9 @@ name with `.srm`, in RetroArch's save folder for that core (or next to the ROM, 
 there), so a game saved in romi carries on in RetroArch and back. romi writes the save within a
 second of the game saving, and again when you stop. What a core keeps itself (FinalBurn Neo's high
 scores and NVRAM) goes to the same folder. A save that's there but can't be read stops the game
-from starting, rather than being written over. The first time a core is played, romi starts it in a separate process
+from starting, rather than being written over. A DS game that runs in standalone melonDS keeps its
+save where melonDS does (next to the ROM, as `<name>.sav`, unless melonDS's settings name a
+folder), since RetroArch's melonDS core keeps saves the same way, so it carries on in either. The first time a core is played, romi starts it in a separate process
 for a moment, so one that crashes shows an error instead of taking romi down. Sound plays through
 PulseAudio (or PipeWire's stand-in for it), or ALSA without either; `"volume"` in the config sets
 how loud, from 0 to 100.
@@ -95,6 +99,16 @@ Controllers' sticks and analog triggers reach the core as they are; in games pla
 (N64 ones), the left stick isn't also the d-pad. On a keyboard, the arrows push the stick all the
 way. `ROMI_CORE_LOG=file` writes what the core says there, which is the place to look when a game
 won't start.
+
+### Touching the screen
+
+The mouse touches a game's screen, the DS's lower one say: hold the left button where you'd put
+the stylus, and drag. Dragged off the picture, it stays on the edge until you let go. Terminals that
+say where the mouse is in pixels (mode 1016, which romi asks about when it starts) touch the pixel
+under it; others touch the middle of the cell. melonDS's touch mode is taken as Touch in romi when
+RetroArch has it as Mouse (its default), which moves a cursor of its own that would drift from the
+mouse; Joystick (the right stick moves a cursor, R3 touches) works as in RetroArch. The DS's two
+screens show one above the other, as `melonds_screen_layout` in RetroArch has them.
 
 ### Controls
 

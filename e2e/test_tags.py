@@ -24,7 +24,7 @@ def test_tag_a_game_with_a_new_tag(start, sandbox):
     romi = start()
     romi.keys("o")
     romi.wait_for("Tags…")
-    romi.keys("jj\r")
+    romi.choose("Tags")
     romi.wait_for("+ New tag…")
     romi.keys("\r")
     romi.wait_for("New tag")
@@ -38,7 +38,9 @@ def test_tag_a_game_with_a_new_tag(start, sandbox):
     romi.wait_for("# Couch co-op")
 
     # Ticking it again untags the game, and the tag goes with its last game.
-    romi.keys("ojj\r")
+    romi.keys("o")
+    romi.wait_for("Tags: Couch co-op")
+    romi.choose("Tags")
     romi.wait_for("✓ Couch co-op")
     romi.keys("\r")
     eventually(lambda: sandbox.state().get("tags") == {})
@@ -48,7 +50,9 @@ def test_typing_an_existing_tag_reuses_it(start, sandbox):
     # The collection would come first; start on the GBA games.
     sandbox.write_state({"tags": {"backlog": ["snes:Chrono Trigger (USA).sfc"]}, "selected_system": "gba"})
     romi = start()
-    romi.keys("ojj\r")
+    romi.keys("o")
+    romi.wait_for("Tags…")
+    romi.choose("Tags")
     romi.wait_for("backlog")
     romi.keys("j\r")
     romi.wait_for("New tag")
@@ -85,8 +89,8 @@ def test_name_a_tag_with_the_controller(sandbox, start, pad):
     romi.wait_for("Advance Wars…")
     romi.press("SOUTH")
     romi.wait_for("Tags…")
-    romi.press("DOWN")
-    romi.press("DOWN")
+    while not any("Tags…" in s for s in romi.selected()):
+        romi.press("DOWN")
     romi.press("SOUTH")
     romi.wait_for("+ New tag…")
     romi.press("SOUTH")

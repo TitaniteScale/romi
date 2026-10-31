@@ -24,8 +24,8 @@ use anyhow::Result;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use ratatui::crossterm::event::{
-    KeyCode, KeyEvent, KeyEventKind, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
+    KeyCode, KeyEvent, KeyEventKind, KeyboardEnhancementFlags, MouseButton, MouseEvent, MouseEventKind,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::{execute, terminal};
 use ratatui::layout::Rect;
@@ -34,6 +34,12 @@ use std::io::Write;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+/// Mouse reporting while a game plays: presses, releases and drags with a button held (1000,
+/// 1002), told as SGR (1006), or in pixels rather than cells (1016) where the terminal can.
+const MOUSE_ON: &str = "\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+const PIXEL_MOUSE_ON: &str = "\x1b[?1016h";
+const MOUSE_OFF: &str = "\x1b[?1016l\x1b[?1006l\x1b[?1002l\x1b[?1000l";
 
 /// The image id, which the placeholder cells carry as their colour ("rom" in ASCII).
 pub const IMAGE: u32 = 0x72_6f_6d;
@@ -120,11 +126,19 @@ pub struct Embedded {
     pixels: Vec<u8>,
     /// What's known of the game's black edges, if they're cropped.
     crop: Option<Crop>,
+    /// The part of the core's frame the picture shows, its edges cropped or not: left, top,
+    /// right, bottom (the last two past the end).
+    shown: [u32; 4],
+    /// The terminal says where the mouse is in pixels, not cells.
+    pixel_mouse: bool,
+    /// Where the left mouse button is touching the game's screen, as a pixel of the core's frame.
+    touch: Option<[u16; 2]>,
 }
 
 impl Embedded {
     /// Starts the game, after the launch animation if there's one, looking as `look` says, and
-    /// its achievements checked with `cheevos`.
+    /// its achievements checked with `cheevos`. The mouse touches the screen, where it points to
+    /// the pixel if the terminal tells it in pixels (`pixel_mouse`), else to the cell.
     pub fn start(
         game: usize,
         core: Core,
@@ -132,6 +146,7 @@ impl Embedded {
         launch: Option<Launch>,
         look: Appearance,
         cheevos: Option<cheevos::Setup>,
+        pixel_mouse: bool,
     ) -> Result<Embedded> {
         let about = format!("{} in the TUI, filter {}, corners {}", core.name, look.filter.name(), look.corners);
         // With the animation, the game's cells are placed before it draws, in the shape it says.
@@ -140,6 +155,7 @@ impl Embedded {
         // Key releases are needed to know when a button is let go.
         let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
         execute!(std::io::stdout(), PushKeyboardEnhancementFlags(flags))?;
+        write!(std::io::stdout(), "{MOUSE_ON}{}", if pixel_mouse { PIXEL_MOUSE_ON } else { "" })?;
         let intro = launch.map(|launch| Intro {
             plan: Plan::new(&launch.model, &Settings::default(), launch.seed.max(1)),
             launch,
@@ -167,6 +183,9 @@ impl Embedded {
             timing: Recorder::start(about),
             pixels: Vec::new(),
             crop: look.crop.then(Crop::default),
+            shown: [0; 4],
+            pixel_mouse,
+            touch: None,
         })
     }
 
@@ -183,10 +202,43 @@ impl Embedded {
         true
     }
 
-    /// Reads the controllers and hands what's held to the core. False when Select+Start has been
-    /// held long enough to stop the game. While the animation plays, a button skips it.
+    /// Takes the mouse: the left button touches the game's screen where it's pressed, and goes on
+    /// touching where it's dragged until it's let go. While the animation plays, a click skips it.
+    pub fn on_mouse(&mut self, m: MouseEvent) {
+        match m.kind {
+            MouseEventKind::Down(MouseButton::Left) => match &mut self.intro {
+                Some(intro) => intro.skip(),
+                None => self.touch = self.touched(m.column, m.row, false),
+            },
+            // Dragged off the picture, it touches the nearest edge, as a stylus would stop there.
+            MouseEventKind::Drag(MouseButton::Left) if self.touch.is_some() => {
+                self.touch = self.touched(m.column, m.row, true);
+            }
+            MouseEventKind::Up(MouseButton::Left) => self.touch = None,
+            _ => {}
+        }
+    }
+
+    /// The pixel of the core's frame under the mouse at `column`, `row` (pixels or cells, as the
+    /// terminal tells them), or None off the picture, unless it's to be held to its edge.
+    fn touched(&self, column: u16, row: u16, to_edge: bool) -> Option<[u16; 2]> {
+        let (rect, (w, h)) = self.cells?;
+        let (cell_w, cell_h) = kitty::cell_size(&terminal::window_size().ok()?);
+        let at = |n: u16, cell: u32| match self.pixel_mouse {
+            true => f64::from(n),
+            false => (f64::from(n) + 0.5) * f64::from(cell),
+        };
+        let x = (at(column, cell_w) - f64::from(u32::from(rect.x) * cell_w)) / f64::from(w);
+        let y = (at(row, cell_h) - f64::from(u32::from(rect.y) * cell_h)) / f64::from(h);
+        touch_at(self.shown, [x, y], to_edge)
+    }
+
+    /// Reads the controllers and hands what's held to the core, with the mouse's touch as player
+    /// 1's. False when Select+Start has been held long enough to stop the game. While the
+    /// animation plays, a button skips it.
     pub fn read_pads(&mut self) -> bool {
-        let Some(players) = self.controls.input() else { return false };
+        let Some(mut players) = self.controls.input() else { return false };
+        players[0].touch = self.touch;
         match &mut self.intro {
             Some(intro) if players.iter().any(|p| p.buttons != 0) => intro.skip(),
             Some(_) => {}
@@ -290,12 +342,16 @@ impl Embedded {
         Some((rect, (u32::from(cols) * cell_w, u32::from(rows) * cell_h)))
     }
 
-    /// The frame with its black edges cropped off, if they're to be.
+    /// The frame with its black edges cropped off, if they're to be, keeping which part shows.
     fn cropped(&mut self, frame: Frame) -> Frame {
-        match &mut self.crop {
-            Some(crop) => crop.apply(frame),
-            None => frame,
-        }
+        let whole = [0, 0, frame.width, frame.height];
+        let Some(crop) = &mut self.crop else {
+            self.shown = whole;
+            return frame;
+        };
+        let frame = crop.apply(frame);
+        self.shown = crop.cropped_to().unwrap_or(whole);
+        frame
     }
 
     /// Waits up to `wait` for the core's next frame, so it can be sent as soon as it's made. False,
@@ -437,6 +493,21 @@ impl Embedded {
     }
 }
 
+/// The pixel of the core's frame at `[x, y]` across the picture (0 to 1 each way), which shows the
+/// `shown` part of the frame. None off the picture, unless it's held `to_edge`.
+fn touch_at(shown: [u32; 4], [x, y]: [f64; 2], to_edge: bool) -> Option<[u16; 2]> {
+    let [l, t, r, b] = shown;
+    let on = (0.0..1.0).contains(&x) && (0.0..1.0).contains(&y);
+    if r <= l || b <= t || !(on || to_edge) {
+        return None;
+    }
+    let pixel = |at: f64, from: u32, to: u32| {
+        let across = f64::from(to - from);
+        (f64::from(from) + (at.clamp(0.0, 1.0) * across).min(across - 1.0)) as u16
+    };
+    Some([pixel(x, l, r), pixel(y, t, b)])
+}
+
 /// A game frame as it's sent, into `pixels` in place of what they were: scaled to `w`×`h`,
 /// filtered, its corners rounded if they're to be (clear, so the terminal's background shows
 /// there). Gives back their format: RGB (24) or RGBA (32).
@@ -470,6 +541,7 @@ impl Drop for Embedded {
         }
         let mut out = std::io::stdout();
         let _ = write!(out, "{}{}{}", kitty::delete(IMAGE), kitty::delete(INTRO_IMAGE), kitty::delete(BADGE_IMAGE));
+        let _ = write!(out, "{MOUSE_OFF}");
         let _ = execute!(out, PopKeyboardEnhancementFlags);
         for name in &self.pending {
             kitty::remove_shm(name);
@@ -480,6 +552,21 @@ impl Drop for Embedded {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_mouse_touches_the_pixel_it_points_at() {
+        // A DS's two screens, 256×384, the bottom one touched.
+        let whole = [0, 0, 256, 384];
+        assert_eq!(touch_at(whole, [0.5, 0.75], false), Some([128, 288]));
+        assert_eq!(touch_at(whole, [0.0, 0.0], false), Some([0, 0]));
+        assert_eq!(touch_at(whole, [0.9999, 0.9999], false), Some([255, 383]));
+        assert_eq!(touch_at(whole, [1.0, 0.5], false), None, "just off the right");
+        assert_eq!(touch_at(whole, [-0.1, 0.5], false), None);
+        assert_eq!(touch_at(whole, [1.3, -2.0], true), Some([255, 0]), "dragged off, held to the edge");
+        // Black edges cropped off: the picture is only the middle of the frame.
+        assert_eq!(touch_at([32, 16, 288, 224], [0.0, 0.5], false), Some([32, 120]));
+        assert_eq!(touch_at([0; 4], [0.5, 0.5], false), None, "no frame yet");
+    }
 
     /// How long romi takes to get a frame ready for the terminal, by the panel's size in pixels
     /// and how the game looks. Not a test: run it with

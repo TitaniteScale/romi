@@ -22,9 +22,21 @@ use std::time::{Duration, Instant};
 /// RetroArch and back, and the core runs with the options and remap RetroArch has for it and the
 /// game, with `controls` remapped in romi over that (see `remap`). With `shown_height`, how many
 /// screen pixels tall the game will be, 3D cores draw at about that size if `sharp_3d` is on.
-pub fn load(cfg: &Config, core: &Path, rom: &Path, controls: &[&Controls], shown_height: Option<u32>) -> Result<Core> {
+///
+/// `runs_with` is the command the game runs with outside romi. When that's an emulator that keeps
+/// saves just as the core does (standalone melonDS, see `emucfg::shared_save_dir`), the core gets
+/// its save folder instead, so the game carries on there.
+pub fn load(
+    cfg: &Config,
+    core: &Path,
+    rom: &Path,
+    runs_with: Option<&str>,
+    controls: &[&Controls],
+    shown_height: Option<u32>,
+) -> Result<Core> {
     let name = crate::emu::libretro::info(core).map(|info| info.name);
-    let saves = name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom));
+    let shared = name.as_ref().zip(runs_with).and_then(|(name, cmd)| crate::emucfg::shared_save_dir(cmd, name, rom));
+    let saves = shared.or_else(|| name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom)));
     if let Some(dir) = &saves {
         std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;
     }

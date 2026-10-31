@@ -25,7 +25,7 @@ def test_hide_and_bring_back(start, sandbox):
     assert "Advance Wars" in romi.selected()
     romi.keys("o")
     romi.wait_for("Favorite")
-    romi.keys("j\r")
+    romi.choose("Hide")
     romi.wait_for("Hid Advance Wars")
     assert not any("Advance Wars" in line for line in romi.lines()[:-1])
     assert "Metroid Fusion" in romi.selected()
@@ -45,7 +45,7 @@ def test_hide_and_bring_back(start, sandbox):
     romi.wait_for(lambda: "Advance Wars" in romi.selected())
     romi.keys("o")
     romi.wait_for("Unhide")
-    romi.keys("j\r")
+    romi.choose("Unhide")
     romi.wait_for("Unhid Advance Wars")
     assert overrides(sandbox) == {}
 

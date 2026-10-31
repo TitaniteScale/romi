@@ -21,6 +21,8 @@
 #[allow(dead_code)]
 #[path = "../../src/emu/kitty.rs"]
 mod kitty;
+// The mouse isn't asked about here.
+#[allow(dead_code)]
 #[path = "../../src/emu/wireframe.rs"]
 mod wireframe;
 
@@ -117,7 +119,7 @@ fn main() -> Result<()> {
     };
     let mut seed = args.seed.unwrap_or_else(|| wireframe::fnv1a(&args.game));
     let mut screen = Screen::enter()?;
-    let look = Look::new(listed, wireframe::ask_colors());
+    let look = Look::new(listed, wireframe::ask_terminal().colors);
     let mut painter = Painter::default();
     loop {
         match play(&args, &model, seed, &look, &mut screen, &mut painter)? {

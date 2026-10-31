@@ -22,6 +22,13 @@ use std::thread::ThreadId;
 const API_VERSION: c_uint = 1;
 const DEVICE_JOYPAD: c_uint = 1;
 const DEVICE_ANALOG: c_uint = 5;
+/// A touchscreen, or a light gun aimed at the screen: where it's touched, from -32767 to 32767
+/// across the picture each way, and whether it is.
+const DEVICE_POINTER: c_uint = 6;
+const POINTER_X: c_uint = 0;
+const POINTER_Y: c_uint = 1;
+const POINTER_PRESSED: c_uint = 2;
+const POINTER_COUNT: c_uint = 3;
 /// The base type in a device id, without the subclass (a DualShock is a kind of analog pad).
 const DEVICE_MASK: c_uint = 0xff;
 /// The analog device's indexes: its two sticks, and its buttons' analog values (the triggers).
@@ -268,9 +275,13 @@ pub struct Input {
     pub sticks: [[i16; 2]; 2],
     /// How far L2 and R2 are pressed, from 0 to 32767.
     pub triggers: [i16; 2],
+    /// Where the screen is touched, if it is: a pixel of the frame as it's shown (upright), from
+    /// its top left. Only player 1's is read.
+    pub touch: Option<[u16; 2]>,
 }
 
 impl Input {
+    #[cfg(test)]
     pub fn buttons(buttons: u16) -> Input {
         Input { buttons, ..Input::default() }
     }
@@ -380,7 +391,7 @@ static SHARED: Mutex<Shared> = Mutex::new(Shared {
     save_dir: None,
     frame: Frame { width: 0, height: 0, rgb: Vec::new(), pixel_aspect: 0.0 },
     audio: Vec::new(),
-    input: [Input { buttons: 0, sticks: [[0; 2]; 2], triggers: [0; 2] }; PLAYERS],
+    input: [Input { buttons: 0, sticks: [[0; 2]; 2], triggers: [0; 2], touch: None }; PLAYERS],
     uses_left_stick: false,
     button_names: Vec::new(),
     reads_sticks: false,
@@ -720,7 +731,7 @@ extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uin
         return 0;
     }
     let device = device & DEVICE_MASK;
-    let (input, stick_is_stick) = {
+    let (input, stick_is_stick, size) = {
         let mut s = shared();
         if device == DEVICE_ANALOG && !s.reads_sticks {
             s.reads_sticks = true;
@@ -728,7 +739,7 @@ extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uin
                 note("romi: the game is played with the left stick, so it isn't also the d-pad");
             }
         }
-        (s.input[port as usize], s.uses_left_stick && s.reads_sticks)
+        (s.input[port as usize], s.uses_left_stick && s.reads_sticks, (s.frame.width, s.frame.height))
     };
     match device {
         // The left stick is the d-pad too, unless the game plays with it as a stick: the core says
@@ -755,8 +766,28 @@ extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uin
                 _ => 0,
             }
         }
+        // One finger, player 1's.
+        DEVICE_POINTER => {
+            let Some([x, y]) = input.touch.filter(|_| port == 0 && index == 0) else { return 0 };
+            match id {
+                POINTER_X => pointer_axis(x, size.0),
+                POINTER_Y => pointer_axis(y, size.1),
+                POINTER_PRESSED | POINTER_COUNT => 1,
+                _ => 0,
+            }
+        }
         _ => 0,
     }
+}
+
+/// Pixel `at` of a picture `across` pixels wide (or tall) as a pointer's position, which goes from
+/// -32767 to 32767 across it: the middle of the pixel, so cores scaling it back land on the pixel.
+fn pointer_axis(at: u16, across: c_uint) -> i16 {
+    if across == 0 {
+        return 0;
+    }
+    let at = (f64::from(at) + 0.5).min(f64::from(across));
+    (at * 65536.0 / f64::from(across) - 32768.0).round().clamp(-32767.0, 32767.0) as i16
 }
 
 // ---- a loaded core ----
@@ -1186,7 +1217,8 @@ fn read_info(path: &Path) -> Result<Info> {
 
 /// Buttons to hold over a run, from a script of `<frame> <buttons...>` lines. Each line holds its
 /// buttons from that frame until the next line; a frame with no buttons lets go of everything.
-/// Buttons are player 1's, or another player's after `p2:` (up to `p4:`).
+/// Buttons are player 1's, or another player's after `p2:` (up to `p4:`). `touch:XxY` touches
+/// the screen at pixel X, Y of the frame, from its top left, as a finger or the mouse would.
 ///
 /// ```text
 /// # wait for the title screen, then tap start
@@ -1194,11 +1226,13 @@ fn read_info(path: &Path) -> Result<Info> {
 /// 306
 /// 400 a p2:a
 /// 404
+/// 500 touch:128x300
+/// 504
 /// ```
 #[derive(Debug, Default, PartialEq)]
 pub struct Script {
-    /// (first frame, each player's buttons), in frame order.
-    steps: Vec<(u64, [u16; PLAYERS])>,
+    /// (first frame, what each player holds), in frame order.
+    steps: Vec<(u64, Players)>,
 }
 
 impl Script {
@@ -1210,8 +1244,14 @@ impl Script {
             let Some(first) = words.next() else { continue };
             let frame: u64 =
                 first.parse().with_context(|| format!("line {}: {first:?} isn't a frame number", n + 1))?;
-            let mut buttons = [0; PLAYERS];
+            let mut players = Players::default();
             for w in words {
+                if let Some(at) = w.strip_prefix("touch:") {
+                    let at = at.split_once(['x', 'X']).and_then(|(x, y)| Some([x.parse().ok()?, y.parse().ok()?]));
+                    players[0].touch =
+                        Some(at.with_context(|| format!("line {}: {w:?} isn't touch:XxY, like touch:128x300", n + 1))?);
+                    continue;
+                }
                 let (player, name) = match w.split_once(':') {
                     Some((p, name)) => {
                         let player = p.strip_prefix(['p', 'P']).and_then(|p| p.parse::<usize>().ok());
@@ -1222,22 +1262,21 @@ impl Script {
                     }
                     None => (0, w),
                 };
-                buttons[player] |= button(name).with_context(|| {
+                players[player].buttons |= button(name).with_context(|| {
                     format!("line {}: no button called {name:?} (buttons: {})", n + 1, BUTTONS.join(" "))
                 })?;
             }
             if steps.last().is_some_and(|&(last, _)| frame < last) {
                 bail!("line {}: frame {frame} comes before the line above it", n + 1);
             }
-            steps.push((frame, buttons));
+            steps.push((frame, players));
         }
         Ok(Script { steps })
     }
 
     /// What each player holds on `frame` (counting from 0).
     pub fn players_at(&self, frame: u64) -> Players {
-        let buttons = self.steps.iter().take_while(|&&(start, _)| start <= frame).last().map_or([0; PLAYERS], |s| s.1);
-        buttons.map(Input::buttons)
+        self.steps.iter().take_while(|&&(start, _)| start <= frame).last().map_or_else(Players::default, |s| s.1)
     }
 }
 
@@ -1266,6 +1305,29 @@ mod tests {
         assert_eq!(held, [b("start") | b("b"), b("a"), 0, b("up")]);
         assert!(Script::parse("10 p5:a").unwrap_err().to_string().contains("no player called \"p5\""));
         assert!(Script::parse("10 p2:jump").unwrap_err().to_string().contains("no button called \"jump\""));
+    }
+
+    #[test]
+    fn scripts_touch_the_screen() {
+        let s = Script::parse("10 touch:128x300 a\n12\n").unwrap();
+        assert_eq!(s.players_at(10)[0], Input { touch: Some([128, 300]), ..Input::buttons(button("a").unwrap()) });
+        assert_eq!(s.players_at(12)[0].touch, None);
+        assert!(Script::parse("10 touch:128").unwrap_err().to_string().contains("isn't touch:XxY"));
+    }
+
+    #[test]
+    fn touches_land_on_the_pixel_when_scaled_back() {
+        // melonDS's sum: (pointer + 0x8000) * width / 0x10000.
+        let back =
+            |at, across: u32| ((i64::from(pointer_axis(at, across)) + 0x8000) * i64::from(across) / 0x10000) as u16;
+        for across in [192, 256, 384, 640] {
+            for at in 0..across as u16 {
+                assert_eq!(back(at, across), at, "pixel {at} of {across}");
+            }
+        }
+        assert_eq!(pointer_axis(0, 256), -32640);
+        assert_eq!(pointer_axis(999, 256), 32767);
+        assert_eq!(pointer_axis(5, 0), 0);
     }
 
     #[test]

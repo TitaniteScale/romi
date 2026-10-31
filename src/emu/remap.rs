@@ -140,7 +140,8 @@ impl Remap {
     /// pushed halfway.
     pub fn apply(&self, player: usize, input: Input) -> Input {
         let Some(sends) = self.players.get(player).filter(|s| **s != unchanged()) else { return input };
-        let mut out = Input::default();
+        // Touches go through as they are.
+        let mut out = Input { touch: input.touch, ..Input::default() };
         let mut pushed = [0i16; CONTROLS];
         for (from, to) in sends.iter().enumerate() {
             let Some(to) = to.map(usize::from) else { continue };

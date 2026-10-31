@@ -198,5 +198,6 @@ fn pad_input(pad: &gilrs::Gamepad) -> Input {
         buttons,
         sticks: [stick(Axis::LeftStickX, Axis::LeftStickY), stick(Axis::RightStickX, Axis::RightStickY)],
         triggers: [trigger(Button::LeftTrigger2), trigger(Button::RightTrigger2)],
+        touch: None,
     }
 }

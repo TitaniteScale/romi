@@ -1065,18 +1065,28 @@ pub struct TerminalColors {
     palette: Vec<[u8; 3]>,
 }
 
-/// Asks the terminal for its background and ANSI colors (OSC 11 and OSC 4), then for its device
-/// attributes, which every terminal answers, so one that ignores the color queries doesn't keep
-/// this waiting. Needs raw mode, and has to run before crossterm reads any input.
-pub fn ask_colors() -> TerminalColors {
+/// What the terminal says about itself.
+#[derive(Default)]
+pub struct TerminalAnswers {
+    pub colors: TerminalColors,
+    /// It can say where the mouse is in pixels rather than cells (SGR-Pixels, mode 1016), which
+    /// touches a game's screen where the mouse points, not in the middle of a cell.
+    pub pixel_mouse: bool,
+}
+
+/// Asks the terminal for its background and ANSI colors (OSC 11 and OSC 4) and whether it knows
+/// mode 1016 (DECRQM), then for its device attributes, which every terminal answers, so one that
+/// ignores the other queries doesn't keep this waiting. Needs raw mode, and has to run before
+/// crossterm reads any input.
+pub fn ask_terminal() -> TerminalAnswers {
     let mut ask = String::from("\x1b]11;?\x1b\\");
     for n in ANSI {
         let _ = write!(ask, "\x1b]4;{n};?\x1b\\");
     }
-    ask += "\x1b[c";
+    ask += "\x1b[?1016$p\x1b[c";
     let mut out = std::io::stdout();
     if out.write_all(ask.as_bytes()).and_then(|()| out.flush()).is_err() {
-        return TerminalColors::default();
+        return TerminalAnswers::default();
     }
     let stdin = std::io::stdin();
     let (mut got, mut buf) = (Vec::new(), [0u8; 4096]);
@@ -1092,7 +1102,15 @@ pub fn ask_colors() -> TerminalColors {
             _ => break,
         }
     }
-    read_answers(&got)
+    TerminalAnswers { colors: read_answers(&got), pixel_mouse: knows_pixel_mouse(&got) }
+}
+
+/// Whether the answer to DECRQM for mode 1016, `ESC [ ? 1016 ; Ps $ y`, says the terminal knows
+/// it: set or reset (1 or 2), or set for good (3). 0 is a mode it doesn't know, 4 one it can't set.
+fn knows_pixel_mouse(got: &[u8]) -> bool {
+    let text = String::from_utf8_lossy(got);
+    let ps = text.split("\x1b[?1016;").nth(1).and_then(|rest| rest.split_once("$y")).map(|(ps, _)| ps);
+    matches!(ps, Some("1" | "2" | "3"))
 }
 
 /// Whether the device attributes answer, `ESC [ ? 6 2 ; … c`, has come.
@@ -1149,6 +1167,15 @@ mod tests {
         // In ANSI's order, whatever order they came in.
         assert_eq!(colors.palette, [[255, 0, 0], [0, 0x88, 255]]);
         assert!(!answered(b"\x1b]11;rgb:0/0/0\x07\x1b[?62;22"));
+    }
+
+    #[test]
+    fn asks_whether_the_mouse_can_be_told_in_pixels() {
+        assert!(knows_pixel_mouse(b"\x1b]11;rgb:0/0/0\x07\x1b[?1016;2$y\x1b[?62;22c"));
+        assert!(!knows_pixel_mouse(b"\x1b[?1016;0$y\x1b[?62;22c"));
+        assert!(!knows_pixel_mouse(b"\x1b[?62;22c"));
+        // The answer to the modes query doesn't end the wait; the device attributes do.
+        assert!(!answered(b"\x1b[?1016;2$y"));
     }
 
     #[test]

@@ -395,6 +395,51 @@ and as more systems play in romi, this is where their controls end up.
    multitaps (the SNES's four players need the core's multitap option), and swapping players
    while a game is running.
 
+## 9. More systems played in romi
+
+The systems that still only run outside romi: the DS, GameCube, PS2, and Steam with the systems
+that have no libretro core. In the order they're worth doing:
+
+1. ✓ **DS**, through RetroArch's melonDS core (0.9.3), which draws in software. Both screens come as
+   one frame, one above the other (256×384), as `melonds_screen_layout` has them.
+   - **Play in romi from any emulator**: a game whose own command isn't RetroArch (the DS games
+     run in standalone melonDS) plays in romi through the first of its other emulators that has a
+     core installed, ES-DE's "melonDS" among them. `romi run` does the same for games in the
+     library.
+   - **Saves shared with standalone melonDS**: the core writes `<name>.sav` in the save folder
+     it's given, as melonDS does, so a DS game that runs in standalone melonDS gets melonDS's save
+     folder (next to the ROM unless `SaveFilePath` says otherwise, `emucfg::shared_save_dir`).
+   - **Touch with the mouse**: libretro's pointer (`RETRO_DEVICE_POINTER`) answers with player 1's
+     touch. While a game plays, the terminal reports the left button's presses and drags (modes
+     1000, 1002, 1006), in pixels where it says it can (1016, asked about with DECRQM at start),
+     and romi maps that through the picture's cells and cropped edges to a pixel of the core's
+     frame. melonDS's "Mouse" touch mode (RetroArch's default, which moves a cursor of its own by
+     how far the mouse moves) is taken as "Touch" in romi. `romi run` scripts touch with
+     `touch:XxY`; tapping YES at Platinum's "Please touch a button" moved it on, headless.
+   - **A laptop's touchscreen** doesn't work in Ghostty 1.4 (GTK, Hyprland), though it does in
+     standalone melonDS: Ghostty reports a tap as a left-button press and release, but at the
+     mouse pointer's last position rather than the finger's, and a finger's drag sends no motion.
+     romi can't tell where the finger was, so this waits on Ghostty. Reading the touchscreen
+     itself (evdev) is out: it gives a place on the whole screen, and Wayland doesn't say where
+     the window is.
+   - Still to do: checking the mouse in kitty (it plays well in Ghostty); fitting the layout to the panel (side by side in a
+     wide one); a DS wireframe (the model is in `examples/wireframe/models/`); the real BIOS and
+     firmware (the core uses FreeBIOS, as standalone melonDS does here); touch in `romi run --live`;
+     the microphone (L2 in the core blows into it) and closing the lid (L3); the newer melonDS DS
+     core, which keeps saves in a folder of its own.
+2. **GameCube**, through RetroArch's Dolphin core: `libretro-dolphin` is in Arch's repos, not
+   installed here. It draws with OpenGL, so it goes through section 7's GPU drawing, untried with
+   Dolphin. Saves won't line up with standalone Dolphin's on their own: its memory cards are GCI
+   folders or `.raw` files in its own user folder, and the core's are in RetroArch's. Wii is a
+   separate job, for the Wiimote.
+3. **PS2**, through the Play! core (`libretro-play`, installed): it crashes in its first frames,
+   calling a null GL function in `CGSH_OpenGL::SetupFramebuffer`, so it's asking for a GL function
+   romi's EGL context doesn't give it, or before the context is current. LRPS2 (PCSX2's core) isn't
+   packaged for Arch. Saves would be memory cards in RetroArch's folder, not PCSX2's.
+4. **Steam, and systems with no core** (Switch, PS3, Wii U): 7.3, an emulator or game in a
+   compositor with no screen, its frames drawn in the panel. Last, and starting with an experiment
+   to see whether `gamescope`'s headless backend works here at all.
+
 ## Filling the gaps, any time
 
 Smaller items that fit between phases.

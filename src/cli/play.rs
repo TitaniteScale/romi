@@ -163,11 +163,12 @@ pub(super) fn run_core(
     json: bool,
     live: bool,
 ) -> Result<()> {
-    // A game in the library plays with the buttons remapped in romi for it.
-    let (name, rom, launch, controls) = match Path::new(query).is_file() {
+    // A game in the library plays with the buttons remapped in romi for it, and with the core
+    // from another of its emulators if its own isn't one.
+    let (name, rom, launch, controls, other_core) = match Path::new(query).is_file() {
         true => {
             let (name, rom, launch) = rom_file(cfg, Path::new(query), system)?;
-            (name, rom, launch, Vec::new())
+            (name, rom, launch, Vec::new(), None)
         }
         false => {
             let lib = Library::load(cfg);
@@ -177,7 +178,10 @@ pub(super) fn run_core(
                 return fail(exit::USAGE, format!("{} isn't a ROM", game.name));
             };
             let controls = crate::emu::runner::controls_for(cfg, &lib, g).into_iter().cloned().collect();
-            (game.name.clone(), rom, Some(game.launch.clone()), controls)
+            let mut emulators = crate::emulators::Emulators::default();
+            emulators.find(cfg, &lib, g);
+            let other_core = crate::emulators::core(game, &emulators.options(&lib, g));
+            (game.name.clone(), rom, Some(game.launch.clone()), controls, other_core)
         }
     };
     let controls: Vec<_> = controls.iter().collect();
@@ -189,7 +193,9 @@ pub(super) fn run_core(
                 Some(Err(e)) => return fail(exit::CONFIG, format!("{name}: {e:#}")),
                 None => Vec::new(),
             };
-            match crate::emu::libretro::core_in(&argv) {
+            // Its own core even when it isn't there, if there's no other, to say so.
+            let own = crate::emu::libretro::core_in(&argv);
+            match own.clone().filter(|c| c.is_file()).or(other_core).or(own) {
                 Some(c) => c,
                 None => return fail(exit::USAGE, format!("{name} doesn't run through a libretro core; pass --core")),
             }
@@ -217,7 +223,8 @@ pub(super) fn run_core(
             let (_, cell_h) = crate::emu::kitty::cell_size(&s);
             u32::from(s.rows.saturating_sub(1)) * cell_h
         });
-        let emu = crate::emu::runner::load(cfg, &core, &rom, &controls, shown)?;
+        let runs_with = launch.as_ref().map(|l| l.command.as_str());
+        let emu = crate::emu::runner::load(cfg, &core, &rom, runs_with, &controls, shown)?;
         return crate::emu::live::play(emu, &name, cfg.volume_gain());
     }
     // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared

@@ -235,6 +235,8 @@ pub struct App {
     pub look: crate::emu::wireframe::Look,
     /// What the terminal said its colors are, when romi started.
     pub terminal_colors: crate::emu::wireframe::TerminalColors,
+    /// The terminal says where the mouse is in pixels, when asked.
+    pub pixel_mouse: bool,
     /// Whether B confirms and A goes back, for the controller's thread, which reads it on each press.
     pub swap_confirm: Arc<AtomicBool>,
     watched: Watched,
@@ -323,6 +325,7 @@ impl App {
             middle: ratatui::layout::Rect::default(),
             look: crate::emu::wireframe::Look::new(None, Default::default()),
             terminal_colors: Default::default(),
+            pixel_mouse: false,
             swap_confirm,
             watched,
             cores_tried: HashSet::new(),
@@ -631,12 +634,15 @@ impl App {
     }
 
     pub fn on_term_event(&mut self, ev: Event) {
-        // A game in the middle panel gets every key, releases too.
+        // A game in the middle panel gets every key, releases too, and the mouse.
         if let (Some(embedded), Event::Key(k)) = (&mut self.embedded, &ev) {
             if !embedded.on_key(*k) {
                 self.stop_embedded();
             }
             return;
+        }
+        if let (Some(embedded), Event::Mouse(m)) = (&mut self.embedded, &ev) {
+            return embedded.on_mouse(*m);
         }
         match ev {
             Event::FocusGained => {
@@ -1693,8 +1699,8 @@ impl App {
     fn embeddable(&self, g: usize) -> Option<(PathBuf, PathBuf)> {
         let game = &self.lib.games[g];
         let rom = game.path.clone()?;
-        let core = crate::emu::libretro::core_in(&game.launch.prepare().ok()?.argv)?;
-        (core.is_file() && crate::emu::libretro::can_open(&core, &rom)).then_some((core, rom))
+        let core = crate::emulators::core(game, &self.emulator_options(g))?;
+        crate::emu::libretro::can_open(&core, &rom).then_some((core, rom))
     }
 
     fn play_here(&mut self, g: usize) {
@@ -1712,8 +1718,11 @@ impl App {
             badges: self.cfg.retroachievements.badges,
         };
         let controls = crate::emu::runner::controls_for(&self.cfg, &self.lib, g);
-        let started = crate::emu::runner::load(&self.cfg, &core, &rom, &controls, self.shown_height())
-            .and_then(|core| crate::emu::embedded::Embedded::start(g, core, volume, launch, look, cheevos));
+        let runs_with = Some(self.lib.games[g].launch.command.as_str());
+        let started = crate::emu::runner::load(&self.cfg, &core, &rom, runs_with, &controls, self.shown_height())
+            .and_then(|core| {
+                crate::emu::embedded::Embedded::start(g, core, volume, launch, look, cheevos, self.pixel_mouse)
+            });
         match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),

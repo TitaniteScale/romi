@@ -46,8 +46,9 @@ impl Crop {
         }
     }
 
-    /// The box to crop to, if it's settled and worth it.
-    fn cropped_to(&self) -> Option<[u32; 4]> {
+    /// The box to crop to, if it's settled and worth it: left, top, right, bottom (the last two
+    /// past the end).
+    pub fn cropped_to(&self) -> Option<[u32; 4]> {
         let [l, t, r, b] = self.seen?;
         let (w, h) = (f64::from(self.size.0), f64::from(self.size.1));
         let (cw, ch) = (f64::from(r - l), f64::from(b - t));

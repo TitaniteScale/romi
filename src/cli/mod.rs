@@ -159,7 +159,7 @@ pub enum Command {
         json: bool,
     },
     /// Run a game inside romi for a number of frames, with no window, and save the last frame.
-    /// Uses the libretro core from the game's RetroArch command
+    /// Uses the libretro core from the game's RetroArch command, or from another of its emulators
     Run {
         /// A ROM file, or a game key (from `romi list`), exact name or words from the name
         #[arg(add = ArgValueCompleter::new(complete_games))]
@@ -180,7 +180,8 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         wav: Option<PathBuf>,
         /// Buttons to press: lines of `<frame> <buttons...>`, each held until the next line
-        /// (buttons: a b x y l r l2 r2 l3 r3 start select up down left right)
+        /// (buttons: a b x y l r l2 r2 l3 r3 start select up down left right; touch:XxY touches
+        /// the frame's pixel X, Y)
         #[arg(long, value_name = "PATH")]
         input: Option<PathBuf>,
         /// Print the outcome as JSON
