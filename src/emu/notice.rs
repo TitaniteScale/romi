@@ -104,7 +104,10 @@ impl Toast {
             Event::Mastered { title } => {
                 Ok(Toast::new("Mastered".into(), vec![title, "Every achievement unlocked".into()], 6))
             }
-            Event::Progress { .. } | Event::ProgressHidden => Err(None),
+            Event::Progress { .. }
+            | Event::ProgressHidden
+            | Event::ChallengeShown { .. }
+            | Event::ChallengeHidden { .. } => Err(None),
             Event::Offline => Err(Some("Can't reach RetroAchievements; unlocks will be sent when it's back".into())),
             Event::Online => Err(Some("RetroAchievements is back; unlocks sent".into())),
             Event::Problem(p) => Err(Some(p)),
@@ -220,6 +223,35 @@ impl Tracker {
         let text = Rect { x: area.x + 2, y: area.y + 1, width: text_w, height: 2 };
         Some(Layout { area, badge: None, text, centered: false, lines })
     }
+}
+
+/// The most challenges listed at once; the rest are counted.
+const MAX_CHALLENGES: usize = 3;
+
+/// The achievements whose challenges are under way, in a box at the top right of the game's
+/// picture, for as long as they last. None if there are none, or the picture is too small.
+pub fn challenges_layout(challenges: &[(u32, String)], picture: Rect) -> Option<Layout> {
+    if challenges.is_empty() || picture.height < 4 {
+        return None;
+    }
+    let room = picture.width.checked_sub(2).filter(|&w| w >= 8)?;
+    let inner = (TRACKER_MAX_WIDTH - 4).min(room - 4);
+    let shown = challenges.len().min(MAX_CHALLENGES);
+    let mut lines = vec![("Challenge".to_string(), Weight::Heading)];
+    lines.extend(challenges[..shown].iter().map(|(_, title)| (title.clone(), Weight::Plain)));
+    if challenges.len() > shown {
+        lines.push((format!("+{} more", challenges.len() - shown), Weight::Plain));
+    }
+    lines.truncate(picture.height as usize - 2);
+    let longest = lines.iter().map(|(l, _)| l.chars().count() as u16).max().unwrap_or(1);
+    let text_w = longest.min(inner).max(1);
+    for (line, _) in &mut lines {
+        *line = crate::text::truncate(line, text_w as usize);
+    }
+    let (w, h) = (text_w + 4, lines.len() as u16 + 2);
+    let area = Rect { x: picture.x + picture.width - 1 - w, y: picture.y, width: w, height: h };
+    let text = Rect { x: area.x + 2, y: area.y + 1, width: text_w, height: lines.len() as u16 };
+    Some(Layout { area, badge: None, text, centered: false, lines })
 }
 
 /// A badge, `w`×`h` pixels of RGBA: square, as big as fits, in the middle, clear around it.
@@ -372,6 +404,19 @@ mod tests {
         assert!(l.lines[1].0.chars().count() <= l.text.width as usize);
         assert!(tracker.layout(Rect { x: 0, y: 0, width: 6, height: 20 }).is_none());
         assert!(!tracker.stale());
+    }
+
+    #[test]
+    fn challenges_list_at_the_top_right_and_the_rest_are_counted() {
+        let picture = Rect { x: 10, y: 5, width: 60, height: 20 };
+        assert!(challenges_layout(&[], picture).is_none());
+        let some: Vec<(u32, String)> = (1..=5).map(|i| (i, format!("Don't get hit {i}"))).collect();
+        let l = challenges_layout(&some, picture).unwrap();
+        assert_eq!(l.lines[0].0, "Challenge");
+        assert_eq!(l.lines.len(), 1 + MAX_CHALLENGES + 1);
+        assert_eq!(l.lines.last().unwrap().0, "+2 more");
+        assert_eq!(l.area.x + l.area.width, picture.x + picture.width - 1, "against the right edge");
+        assert_eq!(l.area.y, picture.y);
     }
 
     #[test]

@@ -807,6 +807,9 @@ fn draw_embedded(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
         if let Some(layout) = embedded.place_tracker(cells) {
             draw_toast(f, theme, &layout);
         }
+        if let Some(layout) = embedded.place_challenges(cells) {
+            draw_toast(f, theme, &layout);
+        }
         if let Some(layout) = embedded.place_toast(cells) {
             draw_toast(f, theme, &layout);
         }

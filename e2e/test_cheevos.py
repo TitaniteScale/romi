@@ -5,6 +5,7 @@ frames."""
 import json
 import os
 import subprocess
+import time
 
 import pytest
 
@@ -242,6 +243,24 @@ def test_progress_towards_an_achievement_shows_while_it_counts_and_goes(start, s
         fake.close()
 
 
+def test_a_challenge_shows_while_it_is_under_way_and_goes_when_it_ends(start, sandbox):
+    # Primed once the counter is past 10; earned when it reaches 200.
+    fake = FakeRetroAchievements([(5503, "Stay on the road", 5, "0xH0000>=10_T:0xH0000=200")])
+    try:
+        set_up_an_nes_game(sandbox, fake)
+        log_in(sandbox)
+        romi = start()
+        romi.keys("o")
+        romi.wait_for("Play in romi")
+        romi.keys("\r")
+        romi.wait_for(lambda: "Challenge" in romi.text() and "Stay on the road" in romi.text(), timeout=10)
+        assert not fake.calls("awardachievement"), "still under way"
+        wait_for_unlock(romi, fake)
+        romi.wait_for(lambda: "Challenge" not in romi.text().split("Achievement unlocked")[0], timeout=10)
+    finally:
+        fake.close()
+
+
 PENDING = ".local/state/romi/retroachievements-pending.json"
 
 
@@ -264,14 +283,20 @@ def test_an_unlock_the_server_missed_is_sent_when_the_next_game_starts(start, sa
 
     server.fail_awards = False
     sent = len(server.calls("awardachievement"))
+    # A replay within the second the unlock was earned has no offset to give (nor does rcheevos'
+    # own, for an unlock sent at once), so let a couple of seconds go by.
+    time.sleep(2)
     romi = start()
     romi.keys("o")
     romi.wait_for("Play in romi")
     romi.keys("\r")
     romi.wait_for(lambda: 5501 in server.unlocked, timeout=20)
     romi.wait_for(lambda: not pending.exists(), timeout=5)
-    late = server.calls("awardachievement")[sent]
-    assert (late["a"], late["h"]) == ("5501", "0") and int(late["o"]) > 0, "it says when it was earned"
+    late = server.calls("awardachievement")[sent:]
+    detail = [(c["a"], c["h"], c.get("o")) for c in server.calls("awardachievement")]
+    assert late and (late[0]["a"], late[0]["h"]) == ("5501", "0") and int(late[0].get("o", 0)) > 0, (
+        f"it says when it was earned: {detail}, sent {sent} before"
+    )
 
 
 def test_without_a_login_games_play_without_achievements(start, sandbox, server):

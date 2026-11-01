@@ -89,6 +89,8 @@ const RC_OK: c_int = 0;
 const RETRYABLE_CLIENT_ERROR: c_int = -2;
 
 const EVENT_ACHIEVEMENT_TRIGGERED: u32 = 1;
+const EVENT_CHALLENGE_SHOW: u32 = 5;
+const EVENT_CHALLENGE_HIDE: u32 = 6;
 const EVENT_PROGRESS_SHOW: u32 = 7;
 const EVENT_PROGRESS_HIDE: u32 = 8;
 const EVENT_PROGRESS_UPDATE: u32 = 9;
@@ -126,6 +128,15 @@ pub enum Event {
     },
     /// The progress stopped changing, and is to go.
     ProgressHidden,
+    /// An achievement's challenge is under way (everything but its last condition holds: stay
+    /// alive, don't get hit), and ends when it's earned or fails.
+    ChallengeShown {
+        id: u32,
+        title: String,
+    },
+    ChallengeHidden {
+        id: u32,
+    },
     /// Every achievement in the game is unlocked.
     Mastered {
         title: String,
@@ -255,6 +266,8 @@ extern "C" fn on_event(rust: *mut c_void, raw: *const RawEvent) {
             return;
         }
         EVENT_PROGRESS_HIDE => Event::ProgressHidden,
+        EVENT_CHALLENGE_SHOW => Event::ChallengeShown { id: raw.id, title: text(raw.title).unwrap_or_default() },
+        EVENT_CHALLENGE_HIDE => Event::ChallengeHidden { id: raw.id },
         EVENT_GAME_COMPLETED => Event::Mastered { title: text(raw.title).unwrap_or_default() },
         EVENT_SERVER_ERROR => Event::Problem(format!(
             "RetroAchievements: {}",

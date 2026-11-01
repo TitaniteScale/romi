@@ -44,6 +44,9 @@ Some achievements count up, like 12 of 50 coins. While one changes, a small box 
 the game shows how far along it is and which achievement it is, and goes a couple of seconds after
 it stops changing.
 
+Challenges (stay alive, don't get hit) are listed under a Challenge heading at the top right while
+they're under way, and go when the achievement is earned or the challenge fails.
+
 romi uses RetroAchievements' own library, rcheevos, so achievements are checked the same way as in
 RetroArch. Unlocks are softcore: the server only accepts hardcore unlocks from emulators it has
 approved, and treats others' as softcore. Systems are the ones romi plays in the middle panel

@@ -122,6 +122,8 @@ pub struct Embedded {
     toasts: VecDeque<Toast>,
     /// Progress towards an achievement that's counting up, while it changes.
     tracker: Option<notice::Tracker>,
+    /// Achievements whose challenges are under way: their ids and titles, oldest first.
+    challenges: Vec<(u32, String)>,
     /// Frame timings, if `ROMI_FRAME_LOG` asks for them.
     timing: Option<Recorder>,
     /// The last frame sent, kept to scale the next one into.
@@ -183,6 +185,7 @@ impl Embedded {
             look,
             toasts: VecDeque::new(),
             tracker: None,
+            challenges: Vec::new(),
             timing: Recorder::start(about),
             pixels: Vec::new(),
             crop: look.crop.then(Crop::default),
@@ -274,6 +277,16 @@ impl Embedded {
                     self.tracker = None;
                     continue;
                 }
+                cheevos::Event::ChallengeShown { id, title } => {
+                    if !self.challenges.iter().any(|(i, _)| *i == id) {
+                        self.challenges.push((id, title));
+                    }
+                    continue;
+                }
+                cheevos::Event::ChallengeHidden { id } => {
+                    self.challenges.retain(|(i, _)| *i != id);
+                    continue;
+                }
                 _ => {}
             }
             match Toast::for_event(event, self.look.badges) {
@@ -293,6 +306,17 @@ impl Embedded {
             return None;
         }
         self.tracker.as_ref()?.layout(picture)
+    }
+
+    /// Where to list the achievements whose challenges are under way, over the game's `picture`,
+    /// if there are any and there's room beside the progress box.
+    pub fn place_challenges(&mut self, picture: Rect) -> Option<notice::Layout> {
+        if self.intro.is_some() {
+            return None;
+        }
+        let layout = notice::challenges_layout(&self.challenges, picture)?;
+        let tracker = self.tracker.as_ref().and_then(|t| t.layout(picture));
+        tracker.is_none_or(|t| !t.area.intersects(layout.area)).then_some(layout)
     }
 
     /// The notice to show over the game's `picture` now, if there's one, with its badge sent

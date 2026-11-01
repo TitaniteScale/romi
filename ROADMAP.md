@@ -232,8 +232,10 @@ It's built in steps, and the first one pays off without any of the TUI work:
    - ✓ **Progress indicators**: an achievement that counts up (rcheevos' measured progress) shows
      `12/50` and its title in a box at the top left of the game while it changes, ended by
      rcheevos' own hide event; text only, with no badge yet.
-   - Still to do: challenge indicators (a mark while an achievement's challenge is under way),
-     a badge in the progress box, and leaderboards (rcheevos sends the events, romi ignores them); rich presence
+   - ✓ **Challenge indicators**: while an achievement is primed (all but its last condition
+     holds), its title is listed under "Challenge" at the top right, up to three and a count of
+     the rest; text only. It yields to the progress box if they'd overlap on a narrow picture.
+   - Still to do: badges in the progress and challenge boxes, and leaderboards (rcheevos sends the events, romi ignores them); rich presence
      is sent but not shown; `romi run --live` and headless `romi run` (where a scripted run
      earning an achievement would make a good regression test for ROM hacks); hardcore, which
      would need RetroAchievements to approve romi.
