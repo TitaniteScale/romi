@@ -1,4 +1,6 @@
-# romi
+<h1 align="center">
+  <img src="Images/romi_logo.png" alt="romi" width="498" />
+</h1>
 
 A game launcher for the terminal. ROMs, scripts, native ports and Steam games in one list, driven
 by a keyboard or a controller. Games can also play right inside it, with sound, saves and
