@@ -103,9 +103,9 @@ romi scrape    # find box art on disk, download the rest (or: romi scrape psx gb
 romi guide -- CMD          # run CMD when a controller's Guide button is pressed (couch mode)
 ```
 
-To play a game inside romi, open its menu (`o`) and pick **Play in
-romi**. [Play in romi](docs/tui.md#play-in-romi) covers the filters, saves and the launch
-animation, and [achievements](docs/achievements.md) how to log in to RetroAchievements.
+A (or Enter) plays a game inside romi when it can, and **Play with** in its menu (`o`) starts its
+emulator instead; Options → A plays turns that round. [Play in romi](docs/tui.md#play-in-romi)
+covers the filters, saves and the launch animation, and [achievements](docs/achievements.md) how to log in to RetroAchievements.
 
 ## Controls
 

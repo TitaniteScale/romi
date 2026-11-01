@@ -68,11 +68,13 @@ only counts in the totals, and the year fills in as you play.
 
 ## Play in romi
 
-A game's menu (`o`) has **Play in romi** for games run through a libretro core, or that could be:
-a game that runs in another emulator, like a DS game in standalone melonDS, plays in romi through
+A (or Enter) plays a game in romi when it runs through a libretro core, or could: a game that
+runs in another emulator, like a DS game in standalone melonDS, plays in romi through
 the first of its other emulators that's RetroArch with a core installed. For PS2 games, which
 usually run in PCSX2, that's RetroArch's Play! core (`libretro-play`), which romi adds to the
-emulators ES-DE knows, as ES-DE doesn't list it. It plays the game
+emulators ES-DE knows, as ES-DE doesn't list it. Its emulator is still in its menu (`o`), as
+**Play with** and the emulator's name. `"play_in_romi": false` (or Options → A plays) turns that
+round: A starts the emulator, and **Play in romi** is in the menu. It plays the game
 in the middle panel, with the systems and details still around it, drawn behind Kitty Unicode
 placeholders. Esc, or holding Select+Start, stops it. Arcade games on their side, like Ms. Pac-Man,
 are turned upright.

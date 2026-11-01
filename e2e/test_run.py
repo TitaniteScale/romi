@@ -6,6 +6,7 @@ import json
 import subprocess
 
 from drive import CONFIG, binary
+from test_play import eventually
 
 
 def run_cli(sandbox, *args):
@@ -238,6 +239,23 @@ def test_round_corners_clear_the_corners_of_the_picture(start, sandbox):
 
 # Where RetroArch keeps the game's save, sorted by core as it does by default.
 SAVE = ".config/retroarch/saves/Blank/Pocket Lantern (USA).srm"
+
+
+def test_with_play_in_romi_on_enter_plays_in_romi_and_the_menu_starts_the_emulator(start, sandbox):
+    set_up_a_game_boy_game(sandbox, launch_animation={"enabled": False}, play_in_romi=True)
+    romi = start()
+    seen = len(romi.output)
+    romi.keys("\r")
+    romi.wait_for(lambda: GAME_IMAGE in romi.output[seen:], timeout=10)
+    romi.keys("\x1b")
+    romi.wait_for(lambda: b"a=d,d=I," + GAME_IMAGE[:-1] in romi.output[seen:])
+    romi.pump(1)  # past the pause for buttons still held from the game
+    romi.keys("o")
+    romi.wait_for("Play with")
+    assert "Play in romi" not in romi.text()
+    romi.choose("Play with")
+    romi.wait_for("Played Pocket Lantern")
+    eventually(lambda: sandbox.state().get("recent", [None])[0] == "gb:Pocket Lantern (USA).gb")
 
 
 def test_games_played_in_romi_save_where_retroarch_does_and_carry_on_from_it(start, sandbox):

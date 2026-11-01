@@ -37,6 +37,9 @@ pub struct Config {
     /// Buttons remapped for each system's games played in romi, by system id. romi's controls
     /// screen writes these.
     pub controls: HashMap<String, crate::emu::remap::Controls>,
+    /// A (or Enter) plays a game inside romi, when it can play there, and its emulator is in the
+    /// game's menu. Off, A starts its emulator, and Play in romi is in the menu.
+    pub play_in_romi: bool,
     /// How loud games played inside romi are, from 0 (silent) to 100.
     pub volume: u8,
     /// How round the corners of a game played in the middle panel are, as a percentage of its
@@ -222,6 +225,7 @@ impl Default for Config {
             screen_filter: crate::emu::screen::Filter::None,
             crop_borders: true,
             sharp_3d: true,
+            play_in_romi: true,
             systems: Vec::new(),
             games: Vec::new(),
             overrides: HashMap::new(),

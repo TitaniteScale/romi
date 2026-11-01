@@ -77,6 +77,10 @@
   // (scanlines and a phosphor mask) or "lcd" (a grid between the pixels, like a handheld's).
   "screen_filter": "none",
 
+  // A (or Enter) plays a game inside romi, when it can play there, and "Play with" in the game's
+  // menu starts its emulator. false: A starts the emulator, and "Play in romi" is in the menu.
+  "play_in_romi": true,
+
   // Crop off the black edges a game leaves round its picture (most N64 games draw inside a black
   // border a CRT hid), once it's clear where its picture ends.
   "crop_borders": true,

@@ -168,8 +168,9 @@ def test_options_save_into_the_config_keeping_comments(start, sandbox):
     romi.wait_for("Options…")
     romi.keys("kkk\r")
     romi.wait_for("Launch animation")
-    # Volume goes from 100 (the default) round to muted, then accent color from blue to cyan.
-    romi.keys("l")
+    # Past what A plays, volume goes from 100 (the default) round to muted, then accent color from
+    # blue to cyan.
+    romi.keys("jl")
     romi.wait_for("‹ muted")
     romi.keys("jjjjjjjjl")
     romi.wait_for("‹ cyan")

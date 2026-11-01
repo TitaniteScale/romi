@@ -43,6 +43,9 @@ CONFIG = {
     "art": {"online": False},
     "controller": {"enabled": False},
     "steam": {"enabled": False},
+    # Enter starts a game's emulator, as the tests expect, even where a core RetroArch has installed
+    # could play it in romi.
+    "play_in_romi": False,
     "systems": [
         {
             "id": "gba", "name": "Game Boy Advance", "extensions": ["gba"], "command": "true {rom}",

@@ -52,6 +52,8 @@ pub enum MenuItem {
     Emulator,
     /// Plays the game inside romi, in the middle panel.
     PlayHere,
+    /// Starts the game in its emulator, when A plays it in romi instead.
+    PlayOutside,
     /// Opens the controls screen on the game, which plays in romi.
     Controls,
     /// Opens the game's tags.
@@ -964,7 +966,7 @@ impl App {
                 Pane::Systems if self.search.is_none() => self.focus = Pane::Games,
                 _ => {
                     if let Some(g) = self.selected_game() {
-                        self.launch(g);
+                        self.play(g);
                     }
                 }
             },
@@ -1187,7 +1189,7 @@ impl App {
             Some(g) => {
                 let mut items = Vec::new();
                 if self.embeddable(g).is_some() {
-                    items.extend([PlayHere, Controls]);
+                    items.extend([if self.cfg.play_in_romi { PlayOutside } else { PlayHere }, Controls]);
                 }
                 items.extend([Favorite, Hide, Tags]);
                 if self.emulator_options(g).len() > 1 {
@@ -1245,6 +1247,10 @@ impl App {
             MenuItem::Players => "Players…".into(),
             MenuItem::Reload => "Reload config".into(),
             MenuItem::PlayHere => "Play in romi".into(),
+            MenuItem::PlayOutside => match self.menu.as_ref().and_then(|m| m.game) {
+                Some(g) => format!("Play with {}", self.runs_with_name(g)),
+                None => "Play".into(),
+            },
             MenuItem::Controls => "Controls…".into(),
             MenuItem::Quit => "Quit romi".into(),
             MenuItem::Favorite if game.is_some_and(|g| self.state.is_favorite(&g.key)) => "Unfavorite".into(),
@@ -1298,6 +1304,11 @@ impl App {
                     MenuItem::PlayHere => {
                         if let Some(g) = game {
                             self.play_here(g);
+                        }
+                    }
+                    MenuItem::PlayOutside => {
+                        if let Some(g) = game {
+                            self.launch(g);
                         }
                     }
                     MenuItem::Controls => {
@@ -1701,6 +1712,29 @@ impl App {
         let rom = game.path.clone()?;
         let core = crate::emulators::core(game, &self.emulator_options(g))?;
         crate::emu::libretro::can_open(&core, &rom).then_some((core, rom))
+    }
+
+    /// Plays a game as A does: inside romi when `play_in_romi` is on and it can play there, or
+    /// else in its emulator.
+    fn play(&mut self, g: usize) {
+        if self.cfg.play_in_romi {
+            // A game that runs in another emulator may play in romi through one of its others.
+            self.emulators.find(&self.cfg, &self.lib, g);
+            if self.embeddable(g).is_some() {
+                return self.play_here(g);
+            }
+        }
+        self.launch(g);
+    }
+
+    /// What a game runs with outside romi, by the name of its emulator: the one picked for it in
+    /// its menu, or the program its command runs.
+    fn runs_with_name(&self, g: usize) -> String {
+        let options = self.emulator_options(g);
+        match options.get(self.current_emulator(g, &options)) {
+            Some(e) => e.name.clone(),
+            None => crate::tui::ui::runs_label(&self.lib.games[g].launch.command),
+        }
     }
 
     fn play_here(&mut self, g: usize) {

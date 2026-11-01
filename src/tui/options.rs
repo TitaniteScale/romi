@@ -8,6 +8,7 @@ use serde_json::{Value, json};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Setting {
+    PlayInRomi,
     Volume,
     Corners,
     Filter,
@@ -21,7 +22,8 @@ pub enum Setting {
     Confirm,
 }
 
-pub const SETTINGS: [Setting; 11] = [
+pub const SETTINGS: [Setting; 12] = [
+    Setting::PlayInRomi,
     Setting::Volume,
     Setting::Corners,
     Setting::Filter,
@@ -41,6 +43,7 @@ const BORDERS: [&str; 5] = ["rounded", "plain", "thick", "double", "none"];
 impl Setting {
     pub fn label(self) -> &'static str {
         match self {
+            Setting::PlayInRomi => "A plays",
             Setting::Volume => "Volume",
             Setting::Corners => "Corners",
             Setting::Filter => "Screen filter",
@@ -58,6 +61,7 @@ impl Setting {
     /// Where it is in the config.
     pub fn path(self) -> &'static [&'static str] {
         match self {
+            Setting::PlayInRomi => &["play_in_romi"],
             Setting::Volume => &["volume"],
             Setting::Corners => &["corner_radius"],
             Setting::Filter => &["screen_filter"],
@@ -75,6 +79,7 @@ impl Setting {
     /// What it's set to now.
     fn current(self, cfg: &Config) -> Value {
         match self {
+            Setting::PlayInRomi => json!(cfg.play_in_romi),
             Setting::Volume => json!(cfg.volume),
             Setting::Corners => json!(cfg.corner_radius),
             Setting::Filter => json!(cfg.screen_filter.name()),
@@ -97,7 +102,8 @@ impl Setting {
             Setting::Filter => Filter::ALL.map(|f| json!(f.name())).to_vec(),
             Setting::Accent => ACCENTS.map(|a| json!(a)).to_vec(),
             Setting::Borders => BORDERS.map(|b| json!(b)).to_vec(),
-            Setting::Crop
+            Setting::PlayInRomi
+            | Setting::Crop
             | Setting::Sharp
             | Setting::Animation
             | Setting::Covers
@@ -127,6 +133,8 @@ impl Setting {
     pub fn shown(self, cfg: &Config) -> String {
         let on = |b: bool| if b { "on" } else { "off" }.to_string();
         match self {
+            Setting::PlayInRomi if cfg.play_in_romi => "in romi, when it can".into(),
+            Setting::PlayInRomi => "in its emulator".into(),
             Setting::Volume if cfg.volume == 0 => "muted".into(),
             Setting::Volume => format!("{}%", cfg.volume.min(100)),
             Setting::Corners if cfg.corner_radius == 0 => "square".into(),
