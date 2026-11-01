@@ -125,6 +125,7 @@ pub enum Event {
     Progress {
         title: String,
         progress: String,
+        badge_url: Option<String>,
     },
     /// The progress stopped changing, and is to go.
     ProgressHidden,
@@ -133,6 +134,7 @@ pub enum Event {
     ChallengeShown {
         id: u32,
         title: String,
+        badge_url: Option<String>,
     },
     ChallengeHidden {
         id: u32,
@@ -262,11 +264,16 @@ extern "C" fn on_event(rust: *mut c_void, raw: *const RawEvent) {
             events.push(Event::Progress {
                 title: text(raw.title).unwrap_or_default(),
                 progress: text(raw.progress).unwrap_or_default(),
+                badge_url: text(raw.badge_url),
             });
             return;
         }
         EVENT_PROGRESS_HIDE => Event::ProgressHidden,
-        EVENT_CHALLENGE_SHOW => Event::ChallengeShown { id: raw.id, title: text(raw.title).unwrap_or_default() },
+        EVENT_CHALLENGE_SHOW => Event::ChallengeShown {
+            id: raw.id,
+            title: text(raw.title).unwrap_or_default(),
+            badge_url: text(raw.badge_url),
+        },
         EVENT_CHALLENGE_HIDE => Event::ChallengeHidden { id: raw.id },
         EVENT_GAME_COMPLETED => Event::Mastered { title: text(raw.title).unwrap_or_default() },
         EVENT_SERVER_ERROR => Event::Problem(format!(

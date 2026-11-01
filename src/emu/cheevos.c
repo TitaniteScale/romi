@@ -82,7 +82,10 @@ static void RC_CCONV event_handler(const rc_client_event_t* event, rc_client_t* 
     out.title = a->title;
     out.description = a->description;
     out.progress = a->measured_progress;
-    if (event->type == RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED &&
+    if ((event->type == RC_CLIENT_EVENT_ACHIEVEMENT_TRIGGERED ||
+         event->type == RC_CLIENT_EVENT_ACHIEVEMENT_CHALLENGE_INDICATOR_SHOW ||
+         event->type == RC_CLIENT_EVENT_ACHIEVEMENT_PROGRESS_INDICATOR_SHOW ||
+         event->type == RC_CLIENT_EVENT_ACHIEVEMENT_PROGRESS_INDICATOR_UPDATE) &&
         rc_client_achievement_get_image_url(a, RC_CLIENT_ACHIEVEMENT_STATE_UNLOCKED, badge_url, sizeof(badge_url)) == RC_OK)
       out.badge_url = badge_url;
   }

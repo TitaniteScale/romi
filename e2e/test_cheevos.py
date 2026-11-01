@@ -152,8 +152,11 @@ def test_achievements_unlock_while_a_game_plays_in_romi(start, sandbox, server):
     assert session["g"] == "1234" and len(server.calls("achievementsets")[0]["m"]) == 32
 
 
-# The badge's Kitty image id, as Kitty commands name it ("ach").
+# The badge's Kitty image id, as Kitty commands name it ("ach"); the progress box's and the first
+# challenge's are the next ones.
 BADGE_IMAGE = b"i=%d," % 0x616368
+BADGE_IMAGE_PROGRESS = b"i=%d," % (0x616368 + 1)
+BADGE_IMAGE_CHALLENGE = b"i=%d," % (0x616368 + 2)
 
 
 def test_an_unlock_shows_its_badge_which_is_cached(start, sandbox, server):
@@ -235,6 +238,9 @@ def test_progress_towards_an_achievement_shows_while_it_counts_and_goes(start, s
         romi.keys("\r")
         romi.wait_for(lambda: "/250" in romi.text(), timeout=10)
         assert "Count to 250" in romi.text()
+        # Its badge is sent as an image of its own, and drawn beside it.
+        romi.wait_for(lambda: BADGE_IMAGE_PROGRESS in romi.output, timeout=5)
+        assert "/Badge/5502.png" in fake.badges
         # It's a box of its own, not a notice, and the unlock that ends it still gets one.
         wait_for_unlock(romi, fake)
         # Two seconds after the count stops changing it goes.
@@ -255,6 +261,7 @@ def test_a_challenge_shows_while_it_is_under_way_and_goes_when_it_ends(start, sa
         romi.keys("\r")
         romi.wait_for(lambda: "Challenge" in romi.text() and "Stay on the road" in romi.text(), timeout=10)
         assert not fake.calls("awardachievement"), "still under way"
+        romi.wait_for(lambda: BADGE_IMAGE_CHALLENGE in romi.output, timeout=5)
         wait_for_unlock(romi, fake)
         romi.wait_for(lambda: "Challenge" not in romi.text().split("Achievement unlocked")[0], timeout=10)
     finally:

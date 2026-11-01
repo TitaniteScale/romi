@@ -47,6 +47,12 @@ pub const IMAGE: u32 = 0x72_6f_6d;
 const INTRO_IMAGE: u32 = 0x77_69_72;
 /// An achievement's badge, in a notice over the game ("ach").
 pub const BADGE_IMAGE: u32 = 0x61_63_68;
+
+/// The Kitty image a badge slot (`notice::SLOT_*`) is sent as: the unlock notice's is `BADGE_IMAGE`,
+/// and the others follow it.
+pub fn badge_image(slot: usize) -> u32 {
+    BADGE_IMAGE + slot as u32
+}
 /// Frames sent but maybe not read yet; older ones still around were never read and are removed.
 const PENDING: usize = 30;
 /// The animation is drawn at 1/this of the panel's pixels, and the terminal scales it up.
@@ -122,8 +128,10 @@ pub struct Embedded {
     toasts: VecDeque<Toast>,
     /// Progress towards an achievement that's counting up, while it changes.
     tracker: Option<notice::Tracker>,
-    /// Achievements whose challenges are under way: their ids and titles, oldest first.
-    challenges: Vec<(u32, String)>,
+    /// Achievements whose challenges are under way, oldest first.
+    challenges: Vec<notice::Challenge>,
+    /// The cells each badge image (`notice::SLOT_*`) was last sent for, so it's sent once.
+    badge_cells: [Option<Rect>; notice::SLOTS],
     /// Frame timings, if `ROMI_FRAME_LOG` asks for them.
     timing: Option<Recorder>,
     /// The last frame sent, kept to scale the next one into.
@@ -186,6 +194,7 @@ impl Embedded {
             toasts: VecDeque::new(),
             tracker: None,
             challenges: Vec::new(),
+            badge_cells: [None; notice::SLOTS],
             timing: Recorder::start(about),
             pixels: Vec::new(),
             crop: look.crop.then(Crop::default),
@@ -269,22 +278,27 @@ impl Embedded {
         let mut status = None;
         for event in self.shared.take_cheevo_events() {
             match event {
-                cheevos::Event::Progress { title, progress } => {
-                    self.tracker = Some(notice::Tracker::new(title, progress));
+                cheevos::Event::Progress { title, progress, badge_url } => {
+                    let url = badge_url.as_deref().filter(|_| self.look.badges);
+                    match &mut self.tracker {
+                        Some(tracker) => tracker.update(title, progress, url),
+                        None => self.tracker = Some(notice::Tracker::new(title, progress, url)),
+                    }
                     continue;
                 }
                 cheevos::Event::ProgressHidden => {
                     self.tracker = None;
                     continue;
                 }
-                cheevos::Event::ChallengeShown { id, title } => {
-                    if !self.challenges.iter().any(|(i, _)| *i == id) {
-                        self.challenges.push((id, title));
+                cheevos::Event::ChallengeShown { id, title, badge_url } => {
+                    if !self.challenges.iter().any(|c| c.id == id) {
+                        let badge = badge_url.filter(|_| self.look.badges).map(|u| notice::BadgeImage::fetch(&u));
+                        self.challenges.push(notice::Challenge { id, title, badge });
                     }
                     continue;
                 }
                 cheevos::Event::ChallengeHidden { id } => {
-                    self.challenges.retain(|(i, _)| *i != id);
+                    self.challenges.retain(|c| c.id != id);
                     continue;
                 }
                 _ => {}
@@ -297,26 +311,78 @@ impl Embedded {
         status
     }
 
-    /// Where to show progress towards an achievement over the game's `picture` now, if there is any.
+    /// Where to show progress towards an achievement over the game's `picture` now, if there is
+    /// any, with its badge sent for the cells it goes in.
     pub fn place_tracker(&mut self, picture: Rect) -> Option<notice::Layout> {
         if self.tracker.as_ref().is_some_and(notice::Tracker::stale) {
             self.tracker = None;
         }
-        if self.intro.is_some() {
+        if self.tracker.is_none() && self.badge_cells[notice::SLOT_TRACKER].is_none() {
             return None;
         }
-        self.tracker.as_ref()?.layout(picture)
+        let cell = terminal::window_size().map_or((8, 16), |size| kitty::cell_size(&size));
+        let layout = self.tracker.as_ref().filter(|_| self.intro.is_none()).and_then(|t| t.layout(picture, cell));
+        let badge = self.tracker.as_ref().and_then(notice::Tracker::badge);
+        self.sync_badges(notice::SLOT_TRACKER..=notice::SLOT_TRACKER, layout.as_ref(), cell, |_| badge.clone());
+        layout
     }
 
     /// Where to list the achievements whose challenges are under way, over the game's `picture`,
-    /// if there are any and there's room beside the progress box.
+    /// if there are any and there's room beside the progress box, with their badges sent.
     pub fn place_challenges(&mut self, picture: Rect) -> Option<notice::Layout> {
-        if self.intro.is_some() {
+        let sent = self.badge_cells[notice::SLOT_CHALLENGE..].iter().any(Option::is_some);
+        if self.challenges.is_empty() && !sent {
             return None;
         }
-        let layout = notice::challenges_layout(&self.challenges, picture)?;
-        let tracker = self.tracker.as_ref().and_then(|t| t.layout(picture));
-        tracker.is_none_or(|t| !t.area.intersects(layout.area)).then_some(layout)
+        let cell = terminal::window_size().map_or((8, 16), |size| kitty::cell_size(&size));
+        let layout = notice::challenges_layout(&self.challenges, picture, cell).filter(|layout| {
+            self.intro.is_none()
+                && self
+                    .tracker
+                    .as_ref()
+                    .and_then(|t| t.layout(picture, cell))
+                    .is_none_or(|t| !t.area.intersects(layout.area))
+        });
+        let badges: Vec<_> = self
+            .challenges
+            .iter()
+            .take(notice::MAX_CHALLENGES)
+            .map(|c| c.badge.as_ref().and_then(|b| b.image()))
+            .collect();
+        let slots = notice::SLOT_CHALLENGE..=notice::SLOT_CHALLENGE + notice::MAX_CHALLENGES - 1;
+        self.sync_badges(slots, layout.as_ref(), cell, |slot| badges.get(slot - notice::SLOT_CHALLENGE)?.clone());
+        layout
+    }
+
+    /// Makes the badge images in `slots` match `layout`: each one it places is sent for its cells
+    /// (once, `badge` giving the picture), and the rest are taken away.
+    fn sync_badges(
+        &mut self,
+        slots: std::ops::RangeInclusive<usize>,
+        layout: Option<&notice::Layout>,
+        cell: (u32, u32),
+        badge: impl Fn(usize) -> Option<image::RgbaImage>,
+    ) {
+        for slot in slots {
+            let want = layout.and_then(|l| l.badges.iter().find(|(_, s)| *s == slot)).map(|(cells, _)| *cells);
+            match want {
+                Some(cells) if self.badge_cells[slot] != Some(cells) => {
+                    let Some(image) = badge(slot) else { continue };
+                    let size = (u32::from(cells.width) * cell.0, u32::from(cells.height) * cell.1);
+                    let pixels = notice::badge_pixels(&image, size);
+                    match self.send(badge_image(slot), cells, &pixels, size, 32) {
+                        Ok(_) => self.badge_cells[slot] = Some(cells),
+                        Err(e) => crate::emu::cheevos::note(&format!("can't show a badge: {e:#}")),
+                    }
+                }
+                Some(_) => {}
+                None if self.badge_cells[slot].is_some() => {
+                    let _ = write!(std::io::stdout(), "{}", kitty::delete(badge_image(slot)));
+                    self.badge_cells[slot] = None;
+                }
+                None => {}
+            }
+        }
     }
 
     /// The notice to show over the game's `picture` now, if there's one, with its badge sent
@@ -336,7 +402,7 @@ impl Embedded {
         let toast = self.toasts.front_mut()?;
         toast.show();
         let layout = toast.layout(picture, cell)?;
-        if let Some(cells) = layout.badge
+        if let Some(&(cells, _)) = layout.badges.first()
             && toast.badge_sent != Some(cells)
             && let Some(badge) = toast.badge()
         {
@@ -589,7 +655,10 @@ impl Drop for Embedded {
             self.shared.stop_and_wait(thread);
         }
         let mut out = std::io::stdout();
-        let _ = write!(out, "{}{}{}", kitty::delete(IMAGE), kitty::delete(INTRO_IMAGE), kitty::delete(BADGE_IMAGE));
+        let _ = write!(out, "{}{}", kitty::delete(IMAGE), kitty::delete(INTRO_IMAGE));
+        for slot in 0..notice::SLOTS {
+            let _ = write!(out, "{}", kitty::delete(badge_image(slot)));
+        }
         let _ = write!(out, "{MOUSE_OFF}");
         let _ = execute!(out, PopKeyboardEnhancementFlags);
         for name in &self.pending {

@@ -824,8 +824,8 @@ fn draw_toast(f: &mut Frame, theme: &Theme, layout: &crate::emu::notice::Layout)
     use crate::emu::notice::Weight;
     f.render_widget(Clear, layout.area);
     f.render_widget(theme.block("", true), layout.area);
-    if let Some(cells) = layout.badge {
-        crate::emu::kitty::placeholders(f.buffer_mut(), cells, crate::emu::embedded::BADGE_IMAGE);
+    for &(cells, slot) in &layout.badges {
+        crate::emu::kitty::placeholders(f.buffer_mut(), cells, crate::emu::embedded::badge_image(slot));
     }
     let lines: Vec<Line> = layout
         .lines

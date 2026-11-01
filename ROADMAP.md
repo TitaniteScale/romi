@@ -231,11 +231,13 @@ It's built in steps, and the first one pays off without any of the TUI work:
      when they were earned, the next time a game starts or romi opens.
    - ✓ **Progress indicators**: an achievement that counts up (rcheevos' measured progress) shows
      `12/50` and its title in a box at the top left of the game while it changes, ended by
-     rcheevos' own hide event; text only, with no badge yet.
+     rcheevos' own hide event, with the achievement's badge beside it once it's here.
    - ✓ **Challenge indicators**: while an achievement is primed (all but its last condition
      holds), its title is listed under "Challenge" at the top right, up to three and a count of
-     the rest; text only. It yields to the progress box if they'd overlap on a narrow picture.
-   - Still to do: badges in the progress and challenge boxes, and leaderboards (rcheevos sends the events, romi ignores them); rich presence
+     the rest, each with its badge when every one is here and the picture is tall enough (titles
+     only otherwise). It yields to the progress box if they'd overlap on a narrow picture. Badge
+     images are one Kitty image per slot (`notice::SLOT_*`), the unlock notice's first.
+   - Still to do: leaderboards (rcheevos sends the events, romi ignores them); rich presence
      is sent but not shown; `romi run --live` and headless `romi run` (where a scripted run
      earning an achievement would make a good regression test for ROM hacks); hardcore, which
      would need RetroAchievements to approve romi.

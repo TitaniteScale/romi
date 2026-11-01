@@ -12,6 +12,14 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// The images badges are sent as: an unlock's, the progress box's, then one for each challenge
+/// listed.
+pub const SLOT_TOAST: usize = 0;
+pub const SLOT_TRACKER: usize = 1;
+pub const SLOT_CHALLENGE: usize = 2;
+/// How many badge images there are.
+pub const SLOTS: usize = SLOT_CHALLENGE + MAX_CHALLENGES;
+
 /// How long a notice waits for its badge before going up without it.
 const BADGE_WAIT: Duration = Duration::from_millis(500);
 /// How many rows tall a badge is: as tall as a notice's heading, title and first line of detail.
@@ -35,8 +43,8 @@ pub enum Weight {
 pub struct Layout {
     /// The whole notice, border and all.
     pub area: Rect,
-    /// The badge's cells, if it's shown.
-    pub badge: Option<Rect>,
+    /// The cells of each badge shown, and which image slot (see `SLOT_*`) it is.
+    pub badges: Vec<(Rect, usize)>,
     /// Where the lines go, and whether they're centered there (without a badge) or start at its
     /// left (beside one).
     pub text: Rect,
@@ -179,7 +187,37 @@ fn layout(heading: &str, body: &[String], badge: bool, picture: Rect, (cw, ch): 
     let area = Rect { x: picture.x + (picture.width - w) / 2, y: picture.y + picture.height - h, width: w, height: h };
     let badge = badge.then_some(Rect { x: area.x + 2, y: area.y + 1, width: badge_cols, height: badge_rows });
     let text = Rect { x: area.x + 2 + beside, y: area.y + 1, width: text_w, height: lines.len() as u16 };
-    Some(Layout { area, badge, text, centered: badge.is_none(), lines })
+    let centered = badge.is_none();
+    Some(Layout { area, badges: badge.map(|b| (b, SLOT_TOAST)).into_iter().collect(), text, centered, lines })
+}
+
+/// A badge being fetched, and what's been sent of it.
+pub struct BadgeImage {
+    url: String,
+    state: Arc<Mutex<BadgeState>>,
+}
+
+impl BadgeImage {
+    pub fn fetch(url: &str) -> BadgeImage {
+        BadgeImage { url: url.to_string(), state: fetch_badge(url) }
+    }
+
+    /// The badge, once it's here.
+    pub fn image(&self) -> Option<image::RgbaImage> {
+        match &*self.state.lock().unwrap_or_else(|e| e.into_inner()) {
+            BadgeState::Loaded(image) => Some(image.clone()),
+            _ => None,
+        }
+    }
+
+    fn here(&self) -> bool {
+        matches!(*self.state.lock().unwrap_or_else(|e| e.into_inner()), BadgeState::Loaded(_))
+    }
+}
+
+/// How many columns of cells a badge `rows` tall takes, to be square.
+fn badge_cols(rows: u16, (cw, ch): (u32, u32)) -> u16 {
+    (f64::from(rows) * f64::from(ch) / f64::from(cw.max(1))).ceil() as u16
 }
 
 /// Progress towards an achievement that counts up, in a small box at the top left of the game's
@@ -189,6 +227,7 @@ pub struct Tracker {
     title: String,
     progress: String,
     updated: Instant,
+    badge: Option<BadgeImage>,
 }
 
 /// How long progress stays up with no news, whatever the game says.
@@ -197,50 +236,94 @@ const STALE: Duration = Duration::from_secs(6);
 const TRACKER_MAX_WIDTH: u16 = 32;
 
 impl Tracker {
-    pub fn new(title: String, progress: String) -> Tracker {
-        Tracker { title, progress, updated: Instant::now() }
+    pub fn new(title: String, progress: String, badge_url: Option<&str>) -> Tracker {
+        Tracker { title, progress, updated: Instant::now(), badge: badge_url.map(BadgeImage::fetch) }
+    }
+
+    /// The count moved on, perhaps for another achievement.
+    pub fn update(&mut self, title: String, progress: String, badge_url: Option<&str>) {
+        if self.badge.as_ref().map(|b| b.url.as_str()) != badge_url {
+            self.badge = badge_url.map(BadgeImage::fetch);
+        }
+        (self.title, self.progress, self.updated) = (title, progress, Instant::now());
     }
 
     pub fn stale(&self) -> bool {
         self.updated.elapsed() >= STALE
     }
 
-    /// Where it goes in `picture`'s cells: two lines, the progress and then the achievement.
-    /// None if the picture is too small.
-    pub fn layout(&self, picture: Rect) -> Option<Layout> {
+    pub fn badge(&self) -> Option<image::RgbaImage> {
+        self.badge.as_ref()?.image()
+    }
+
+    /// Where it goes in `picture`'s cells, cells being `cell` pixels: two lines, the progress and
+    /// then the achievement, with the achievement's badge beside them once it's here. None if the
+    /// picture is too small.
+    pub fn layout(&self, picture: Rect, cell: (u32, u32)) -> Option<Layout> {
         let room = picture.width.checked_sub(2).filter(|&w| w >= 8)?;
         if picture.height < 4 {
             return None;
         }
-        let inner = (TRACKER_MAX_WIDTH - 4).min(room - 4);
+        let cols = badge_cols(2, cell);
+        let with_badge =
+            self.badge.as_ref().is_some_and(BadgeImage::here) && room >= 4 + cols + 1 + MIN_TEXT_BESIDE_BADGE.min(8);
+        let beside = if with_badge { cols + 1 } else { 0 };
+        let inner = (TRACKER_MAX_WIDTH - 4 - beside).min(room - 4 - beside);
         let longest = self.progress.chars().count().max(self.title.chars().count()) as u16;
         let text_w = longest.min(inner).max(1);
         let lines = vec![
             (crate::text::truncate(&self.progress, text_w as usize), Weight::Heading),
             (crate::text::truncate(&self.title, text_w as usize), Weight::Plain),
         ];
-        let area = Rect { x: picture.x + 1, y: picture.y, width: text_w + 4, height: 4 };
-        let text = Rect { x: area.x + 2, y: area.y + 1, width: text_w, height: 2 };
-        Some(Layout { area, badge: None, text, centered: false, lines })
+        let area = Rect { x: picture.x + 1, y: picture.y, width: text_w + beside + 4, height: 4 };
+        let text = Rect { x: area.x + 2 + beside, y: area.y + 1, width: text_w, height: 2 };
+        let badges = if with_badge {
+            vec![(Rect { x: area.x + 2, y: area.y + 1, width: cols, height: 2 }, SLOT_TRACKER)]
+        } else {
+            Vec::new()
+        };
+        Some(Layout { area, badges, text, centered: false, lines })
     }
 }
 
 /// The most challenges listed at once; the rest are counted.
-const MAX_CHALLENGES: usize = 3;
+pub const MAX_CHALLENGES: usize = 3;
+
+/// An achievement whose challenge is under way.
+pub struct Challenge {
+    pub id: u32,
+    pub title: String,
+    pub badge: Option<BadgeImage>,
+}
 
 /// The achievements whose challenges are under way, in a box at the top right of the game's
-/// picture, for as long as they last. None if there are none, or the picture is too small.
-pub fn challenges_layout(challenges: &[(u32, String)], picture: Rect) -> Option<Layout> {
+/// picture, for as long as they last: each with its badge when the picture has the room and every
+/// listed badge is here, else as titles. None if there are none, or the picture is too small.
+pub fn challenges_layout(challenges: &[Challenge], picture: Rect, cell: (u32, u32)) -> Option<Layout> {
     if challenges.is_empty() || picture.height < 4 {
         return None;
     }
     let room = picture.width.checked_sub(2).filter(|&w| w >= 8)?;
-    let inner = (TRACKER_MAX_WIDTH - 4).min(room - 4);
     let shown = challenges.len().min(MAX_CHALLENGES);
+    let more = challenges.len() - shown;
+    let cols = badge_cols(2, cell);
+    // A badge and its title take two rows; the heading and the border, three more.
+    let tall = 3 + 2 * shown as u16 + u16::from(more > 0);
+    let with_badges = challenges[..shown].iter().all(|c| c.badge.as_ref().is_some_and(BadgeImage::here))
+        && picture.height >= tall
+        && room >= 4 + cols + 1 + 8;
+    let beside = if with_badges { cols + 1 } else { 0 };
+    let inner = (TRACKER_MAX_WIDTH - 4 - beside).min(room - 4 - beside);
+
     let mut lines = vec![("Challenge".to_string(), Weight::Heading)];
-    lines.extend(challenges[..shown].iter().map(|(_, title)| (title.clone(), Weight::Plain)));
-    if challenges.len() > shown {
-        lines.push((format!("+{} more", challenges.len() - shown), Weight::Plain));
+    for c in &challenges[..shown] {
+        lines.push((c.title.clone(), Weight::Plain));
+        if with_badges {
+            lines.push((String::new(), Weight::Plain));
+        }
+    }
+    if more > 0 {
+        lines.push((format!("+{more} more"), Weight::Plain));
     }
     lines.truncate(picture.height as usize - 2);
     let longest = lines.iter().map(|(l, _)| l.chars().count() as u16).max().unwrap_or(1);
@@ -248,10 +331,20 @@ pub fn challenges_layout(challenges: &[(u32, String)], picture: Rect) -> Option<
     for (line, _) in &mut lines {
         *line = crate::text::truncate(line, text_w as usize);
     }
-    let (w, h) = (text_w + 4, lines.len() as u16 + 2);
+    let (w, h) = (text_w + beside + 4, lines.len() as u16 + 2);
     let area = Rect { x: picture.x + picture.width - 1 - w, y: picture.y, width: w, height: h };
-    let text = Rect { x: area.x + 2, y: area.y + 1, width: text_w, height: lines.len() as u16 };
-    Some(Layout { area, badge: None, text, centered: false, lines })
+    let text = Rect { x: area.x + 2 + beside, y: area.y + 1, width: text_w, height: lines.len() as u16 };
+    let badges = if with_badges {
+        (0..shown)
+            .map(|i| {
+                let cells = Rect { x: area.x + 2, y: area.y + 2 + 2 * i as u16, width: cols, height: 2 };
+                (cells, SLOT_CHALLENGE + i)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    Some(Layout { area, badges, text, centered: false, lines })
 }
 
 /// A badge, `w`×`h` pixels of RGBA: square, as big as fits, in the middle, clear around it.
@@ -326,7 +419,7 @@ mod tests {
     #[test]
     fn without_a_badge_the_lines_are_centered_and_long_ones_wrap() {
         let l = layout("Achievement unlocked · 1 point", &body(), false, PICTURE, (10, 20)).unwrap();
-        assert!(l.centered && l.badge.is_none());
+        assert!(l.centered && l.badges.is_empty());
         let lines: Vec<&str> = l.lines.iter().map(|(s, _)| s.as_str()).collect();
         assert_eq!(
             lines,
@@ -350,7 +443,7 @@ mod tests {
     fn a_badge_is_square_three_rows_tall_with_the_text_beside_it() {
         // Cells twice as tall as they're wide: three rows make six columns.
         let l = layout("Achievement unlocked · 1 point", &body(), true, PICTURE, (10, 20)).unwrap();
-        assert_eq!(l.badge, Some(Rect { x: l.area.x + 2, y: l.area.y + 1, width: 6, height: 3 }));
+        assert_eq!(l.badges, vec![(Rect { x: l.area.x + 2, y: l.area.y + 1, width: 6, height: 3 }, SLOT_TOAST)]);
         assert!(!l.centered);
         assert_eq!(l.text.x, l.area.x + 2 + 6 + 1);
         assert!(l.lines.iter().all(|(s, _)| s.chars().count() <= 56 - 7));
@@ -359,7 +452,7 @@ mod tests {
     #[test]
     fn a_narrow_picture_leaves_the_badge_out_and_a_tiny_one_the_notice() {
         let narrow = Rect { width: 20, ..PICTURE };
-        assert!(layout("Unlocked", &body(), true, narrow, (10, 20)).unwrap().badge.is_none());
+        assert!(layout("Unlocked", &body(), true, narrow, (10, 20)).unwrap().badges.is_empty());
         assert!(layout("Unlocked", &body(), true, Rect { width: 4, ..PICTURE }, (10, 20)).is_none());
     }
 
@@ -393,30 +486,74 @@ mod tests {
         assert_eq!(Toast::for_event(Event::Problem("nope".into()), true).err(), Some(Some("nope".into())));
     }
 
+    fn here() -> Option<BadgeImage> {
+        let image = image::RgbaImage::from_pixel(64, 64, image::Rgba([1, 2, 3, 255]));
+        Some(BadgeImage { url: "x".into(), state: Arc::new(Mutex::new(BadgeState::Loaded(image))) })
+    }
+
+    const CELL: (u32, u32) = (10, 20);
+
     #[test]
     fn progress_sits_at_the_top_left_and_long_titles_are_cut() {
         let picture = Rect { x: 10, y: 5, width: 60, height: 20 };
-        let tracker = Tracker::new("Collect every single coin in the whole wide world".into(), "12/50".into());
-        let l = tracker.layout(picture).unwrap();
+        let tracker = Tracker::new("Collect every single coin in the whole wide world".into(), "12/50".into(), None);
+        let l = tracker.layout(picture, CELL).unwrap();
         assert_eq!((l.area.x, l.area.y, l.area.height), (11, 5, 4));
-        assert!(l.area.width <= TRACKER_MAX_WIDTH);
+        assert!(l.area.width <= TRACKER_MAX_WIDTH && l.badges.is_empty());
         assert_eq!(l.lines[0], ("12/50".to_string(), Weight::Heading));
         assert!(l.lines[1].0.chars().count() <= l.text.width as usize);
-        assert!(tracker.layout(Rect { x: 0, y: 0, width: 6, height: 20 }).is_none());
+        assert!(tracker.layout(Rect { x: 0, y: 0, width: 6, height: 20 }, CELL).is_none());
         assert!(!tracker.stale());
+    }
+
+    #[test]
+    fn progress_has_its_badge_beside_it_once_it_is_here() {
+        let picture = Rect { x: 10, y: 5, width: 60, height: 20 };
+        let mut tracker = Tracker::new("Coins".into(), "12/50".into(), None);
+        tracker.badge = here();
+        let l = tracker.layout(picture, CELL).unwrap();
+        // Two rows of 20px, so four columns of 10px.
+        assert_eq!(l.badges, vec![(Rect { x: l.area.x + 2, y: l.area.y + 1, width: 4, height: 2 }, SLOT_TRACKER)]);
+        assert_eq!(l.text.x, l.area.x + 2 + 4 + 1);
+        assert!(l.area.width <= TRACKER_MAX_WIDTH);
+    }
+
+    fn challenge(i: u32, badge: bool) -> Challenge {
+        Challenge { id: i, title: format!("Don't get hit {i}"), badge: if badge { here() } else { None } }
     }
 
     #[test]
     fn challenges_list_at_the_top_right_and_the_rest_are_counted() {
         let picture = Rect { x: 10, y: 5, width: 60, height: 20 };
-        assert!(challenges_layout(&[], picture).is_none());
-        let some: Vec<(u32, String)> = (1..=5).map(|i| (i, format!("Don't get hit {i}"))).collect();
-        let l = challenges_layout(&some, picture).unwrap();
+        assert!(challenges_layout(&[], picture, CELL).is_none());
+        let some: Vec<Challenge> = (1..=5).map(|i| challenge(i, false)).collect();
+        let l = challenges_layout(&some, picture, CELL).unwrap();
         assert_eq!(l.lines[0].0, "Challenge");
         assert_eq!(l.lines.len(), 1 + MAX_CHALLENGES + 1);
         assert_eq!(l.lines.last().unwrap().0, "+2 more");
         assert_eq!(l.area.x + l.area.width, picture.x + picture.width - 1, "against the right edge");
         assert_eq!(l.area.y, picture.y);
+        assert!(l.badges.is_empty());
+    }
+
+    #[test]
+    fn challenges_get_badges_when_every_one_is_here_and_there_is_room() {
+        let picture = Rect { x: 10, y: 5, width: 60, height: 20 };
+        let all: Vec<Challenge> = (1..=2).map(|i| challenge(i, true)).collect();
+        let l = challenges_layout(&all, picture, CELL).unwrap();
+        assert_eq!(l.badges.len(), 2);
+        assert_eq!(l.badges[0], (Rect { x: l.area.x + 2, y: l.area.y + 2, width: 4, height: 2 }, SLOT_CHALLENGE));
+        assert_eq!(l.badges[1].0.y, l.area.y + 4);
+        assert_eq!(l.badges[1].1, SLOT_CHALLENGE + 1);
+        // The title is on the badge's first row.
+        assert_eq!(l.lines[1].0, "Don't get hit 1");
+        assert_eq!(l.lines[2].0, "");
+        // One badge still on its way: titles only.
+        let one_late = vec![challenge(1, true), challenge(2, false)];
+        assert!(challenges_layout(&one_late, picture, CELL).unwrap().badges.is_empty());
+        // Too short for the badges: titles only.
+        let short = Rect { height: 6, ..picture };
+        assert!(challenges_layout(&all, short, CELL).unwrap().badges.is_empty());
     }
 
     #[test]

@@ -42,10 +42,11 @@ Unlocks are dropped after 30 days.
 
 Some achievements count up, like 12 of 50 coins. While one changes, a small box at the top left of
 the game shows how far along it is and which achievement it is, and goes a couple of seconds after
-it stops changing.
+it stops changing, with the achievement's badge beside it.
 
 Challenges (stay alive, don't get hit) are listed under a Challenge heading at the top right while
-they're under way, and go when the achievement is earned or the challenge fails.
+they're under way, each with its badge when there's room, and go when the achievement is earned
+or the challenge fails. `"retroachievements": { "badges": false }` leaves the badges out of these too.
 
 romi uses RetroAchievements' own library, rcheevos, so achievements are checked the same way as in
 RetroArch. Unlocks are softcore: the server only accepts hardcore unlocks from emulators it has
