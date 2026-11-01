@@ -226,12 +226,14 @@ It's built in steps, and the first one pays off without any of the TUI work:
      waits up to half a second for one. Drawn like the game, a Kitty image behind placeholder
      cells, square, three rows tall, with the text beside it; long descriptions wrap.
      `"retroachievements": { "badges": false }` turns them off (in the config only, for now).
+   - ✓ **Unlocks the server missed** are written down as they're sent and crossed out when it
+     answers (`emu/unlocks.rs`), so ones still waiting when a game stops are sent, re-signed with
+     when they were earned, the next time a game starts or romi opens.
    - Still to do: progress and challenge
      indicators, and leaderboards (rcheevos sends the events, romi ignores them); rich presence
      is sent but not shown; `romi run --live` and headless `romi run` (where a scripted run
-     earning an achievement would make a good regression test for ROM hacks); unlocks still
-     waiting when a game stops are lost; hardcore, which would need RetroAchievements to approve
-     romi.
+     earning an achievement would make a good regression test for ROM hacks); hardcore, which
+     would need RetroAchievements to approve romi.
 8. **Launch animation**: a wireframe of the system (a console and a CRT, or a cabinet) builds itself
    out of lines, then the camera dives into its screen and lands on the cells the game is drawn in.
    Each game's file name seeds how the lines enter (pen trace, reverse explode, scan flash, fly in,

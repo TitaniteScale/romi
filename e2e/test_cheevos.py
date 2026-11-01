@@ -216,10 +216,42 @@ def test_a_game_retroachievements_doesnt_know_says_so(start, sandbox):
         romi.wait_for("Play in romi")
         romi.keys("\r")
         # The status bar only redraws the letters that changed, so this is looked for on screen.
-        romi.wait_for("RetroAchievements:", timeout=10)
+        romi.wait_for("RetroAchievements doesn't know this dump (", timeout=10)
         assert not fake.calls("awardachievement")
     finally:
         fake.close()
+
+
+PENDING = ".local/state/romi/retroachievements-pending.json"
+
+
+def test_an_unlock_the_server_missed_is_sent_when_the_next_game_starts(start, sandbox, server):
+    set_up_an_nes_game(sandbox, server)
+    log_in(sandbox)
+    server.fail_awards = True
+    romi = start()
+    romi.keys("o")
+    romi.wait_for("Play in romi")
+    romi.keys("\r")
+    romi.wait_for(lambda: server.calls("awardachievement"), timeout=20)
+    pending = sandbox.home / PENDING
+    romi.wait_for(lambda: pending.exists(), timeout=5)
+    assert [p["achievement"] for p in json.loads(pending.read_text())] == [5501]
+    assert os.stat(pending).st_mode & 0o777 == 0o600, "it holds a token"
+    # The game stops with the server still busy, so rcheevos' retries are lost with it.
+    romi.close()
+    assert pending.exists() and 5501 not in server.unlocked
+
+    server.fail_awards = False
+    sent = len(server.calls("awardachievement"))
+    romi = start()
+    romi.keys("o")
+    romi.wait_for("Play in romi")
+    romi.keys("\r")
+    romi.wait_for(lambda: 5501 in server.unlocked, timeout=20)
+    romi.wait_for(lambda: not pending.exists(), timeout=5)
+    late = server.calls("awardachievement")[sent]
+    assert (late["a"], late["h"]) == ("5501", "0") and int(late["o"]) > 0, "it says when it was earned"
 
 
 def test_without_a_login_games_play_without_achievements(start, sandbox, server):

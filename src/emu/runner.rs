@@ -274,6 +274,7 @@ fn start_cheevos(setup: cheevos::Setup, shared: &Shared) -> Option<cheevos::Clie
     let problem = |p: String| lock(&shared.cheevos).push(CheevoEvent::Problem(p));
     let client =
         cheevos::Client::new(setup.console).inspect_err(|e| problem(format!("RetroAchievements: {e:#}"))).ok()?;
+    cheevos::resend_waiting();
     let started = client.login_with_token(&setup.login).and_then(|()| client.load_game(&setup.hash));
     started.inspect_err(|e| problem(format!("RetroAchievements: {e:#}"))).ok()?;
     Some(client)

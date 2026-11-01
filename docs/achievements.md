@@ -35,7 +35,10 @@ notice over it says how many of its achievements you have; each unlock gets one 
 the achievement's badge, and is sent to your account as it happens. Badges are kept in
 `~/.cache/romi/ra/badges/` once shown; `"retroachievements": { "badges": false }` leaves them
 out. If the server can't be reached, unlocks wait and go through
-when it's back, as long as the game is still running.
+when it's back. One still waiting when the game stops, or romi is closed or crashes, is kept in
+`~/.local/state/romi/retroachievements-pending.json` (readable only by you, as it holds your
+login token) and sent the next time you start a game or open romi, with the time you earned it.
+Unlocks are dropped after 30 days.
 
 romi uses RetroAchievements' own library, rcheevos, so achievements are checked the same way as in
 RetroArch. Unlocks are softcore: the server only accepts hardcore unlocks from emulators it has

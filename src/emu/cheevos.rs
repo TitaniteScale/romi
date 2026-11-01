@@ -12,6 +12,7 @@
 //! answered, since the answer calls back into it.
 
 use crate::emu::libretro::{Core, MemoryDataFn, MemoryMap, MemorySizeFn};
+use crate::emu::unlocks;
 use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use std::ffi::{CStr, CString, c_char, c_int, c_uint, c_void};
@@ -168,12 +169,17 @@ extern "C" fn on_http(
     let agent = me.agent.clone();
     let user_agent = me.user_agent.get().cloned().unwrap_or_else(|| user_agent(""));
     std::thread::spawn(move || {
+        // An unlock is written down until the server answers it (see `unlocks`).
+        let unlock = post.as_deref().and_then(|body| unlocks::parse(&url, body));
+        if let Some(unlock) = &unlock {
+            unlocks::add(unlock.clone());
+        }
         // rcheevos tries unlocks again itself, but not logins or loads, so a request that never got
         // an answer is tried again here first. Asking twice is harmless: the server takes an
         // unlock it already has as done.
         let mut tries = RETRY_AFTER.iter();
         let (status, body) = loop {
-            match request(&agent, &user_agent, &url, post.as_deref(), content_type.as_deref()) {
+            match send(&agent, &user_agent, &url, post.as_deref(), content_type.as_deref()) {
                 Ok(answer) => break answer,
                 Err(e) => {
                     note(&format!("request failed: {e:#}"));
@@ -184,6 +190,9 @@ extern "C" fn on_http(
                 }
             }
         };
+        if let Some(unlock) = unlock.filter(|_| unlocks::answered(status, &body)) {
+            unlocks::remove(&unlock);
+        }
         // SAFETY: rcheevos' callback and its data, as it gave them, answered exactly once.
         unsafe {
             romi_rc_respond(respond as Respond, respond_data as *mut c_void, body.as_ptr().cast(), body.len(), status);
@@ -193,7 +202,7 @@ extern "C" fn on_http(
 }
 
 /// Sends a request, with its status and body back whatever the status.
-fn request(
+pub(super) fn send(
     agent: &ureq::Agent,
     user_agent: &str,
     url: &str,
@@ -267,6 +276,20 @@ extern "C" fn on_log(_rust: *mut c_void, message: *const c_char) {
 
 static CALLBACKS: Callbacks = Callbacks { http: on_http, event: on_event, done: on_done, log: on_log };
 
+fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(30)))
+        .http_status_as_error(false)
+        .build()
+        .into()
+}
+
+/// Sends again, in the background, the unlocks an earlier game couldn't get to the server (see
+/// `unlocks`). Called when a game starts and when romi opens.
+pub fn resend_waiting() {
+    unlocks::resend(agent(), user_agent(""));
+}
+
 fn user_agent(clause: &str) -> String {
     format!("romi/{} {clause}", env!("CARGO_PKG_VERSION")).trim().to_string()
 }
@@ -293,11 +316,7 @@ fn c_string(s: &str) -> Result<CString> {
 impl Client {
     /// A client for a game on `console` (RetroAchievements' id for it; 0 when there's no game).
     pub fn new(console: u32) -> Result<Client> {
-        let agent: ureq::Agent = ureq::Agent::config_builder()
-            .timeout_global(Some(Duration::from_secs(30)))
-            .http_status_as_error(false)
-            .build()
-            .into();
+        let agent = agent();
         let inner = Arc::into_raw(Arc::new(Inner {
             events: Mutex::new(Vec::new()),
             done: Mutex::new(Vec::new()),
@@ -504,17 +523,21 @@ pub fn saved_login() -> Option<Login> {
 
 /// Saves the login, readable only by the user.
 pub fn save_login(login: &Login) -> Result<()> {
+    write_private(&login_path(), &serde_json::to_vec_pretty(login)?)
+}
+
+/// Writes a file that holds login tokens: all at once, and readable only by the user.
+pub(super) fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     use std::io::Write;
     use std::os::unix::fs::OpenOptionsExt;
-    let path = login_path();
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("json.tmp");
     let mut file = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&tmp)?;
-    file.write_all(&serde_json::to_vec_pretty(login)?)?;
+    file.write_all(bytes)?;
     file.sync_all()?;
-    std::fs::rename(&tmp, &path)?;
+    std::fs::rename(&tmp, path)?;
     Ok(())
 }
 

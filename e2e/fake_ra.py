@@ -32,6 +32,8 @@ class FakeRetroAchievements:
         # Badges asked for, by path.
         self.badges = []
         self.unlocked = set()
+        # Answer unlocks as a server that's busy does, so they have to wait.
+        self.fail_awards = False
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -83,7 +85,7 @@ class FakeRetroAchievements:
             return 401, {"Success": False, "Error": "Invalid user/token", "Code": "invalid_credentials"}
         if r == "achievementsets":
             if self.known_hashes is not None and p.get("m") not in self.known_hashes:
-                return 200, {"Success": True, "GameId": 0}
+                return 200, {"Success": True, "GameId": 0, "Title": "Unknown Game", "ConsoleId": 0, "ImageIconUrl": "", "RichPresenceGameId": 0, "RichPresencePatch": "", "Sets": []}
             achievements = [
                 {"ID": i, "Title": t, "Description": f"Do {t.lower()}", "Flags": 3, "Points": pts, "MemAddr": cond,
                  "Author": "Tester", "BadgeName": f"{i}", "BadgeURL": f"{self.url}/Badge/{i}.png",
@@ -100,6 +102,8 @@ class FakeRetroAchievements:
             return 200, {"Success": True, "Unlocks": [{"ID": i, "When": 1700000000} for i in sorted(self.unlocked)],
                          "HardcoreUnlocks": [], "ServerNow": 1700000000}
         if r == "awardachievement":
+            if self.fail_awards:
+                return 503, {"Success": False, "Error": "Service unavailable"}
             self.unlocked.add(int(p["a"]))
             remaining = len(self.achievements) - len(self.unlocked)
             return 200, {"Success": True, "Score": 0, "SoftcoreScore": 5, "AchievementID": int(p["a"]),

@@ -390,6 +390,7 @@ impl App {
             self.achievements_rx = None;
             return;
         }
+        crate::emu::cheevos::resend_waiting();
         let (tx, rx) = std::sync::mpsc::channel();
         let (cfg, lib) = (self.cfg.clone(), self.lib.clone());
         std::thread::Builder::new()

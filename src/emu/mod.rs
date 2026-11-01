@@ -17,4 +17,5 @@ pub mod remap;
 pub mod runner;
 pub mod screen;
 pub mod timing;
+pub mod unlocks;
 pub mod wireframe;
