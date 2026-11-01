@@ -262,7 +262,15 @@ fn parse_systems(xml: &str) -> Vec<SystemDef> {
                 })
                 .collect();
             let arcade = text(n, "platform").split(',').any(|p| p.trim() == "arcade");
-            (!id.is_empty()).then(|| SystemDef { name: text(n, "fullname"), id, folder, extensions, commands, arcade, recursive: false })
+            (!id.is_empty()).then(|| SystemDef {
+                name: text(n, "fullname"),
+                id,
+                folder,
+                extensions,
+                commands,
+                arcade,
+                recursive: false,
+            })
         })
         .collect()
 }
