@@ -379,3 +379,31 @@ def test_first_run_without_roms_still_opens(machine):
         assert jsonc(machine.config_path.read_text())["roms_dir"] == "~/ROMs"
     finally:
         romi.close()
+
+
+def test_init_counts_match_what_romi_lists_for_a_messy_tree(machine):
+    """Wrapper folders, names with spaces, saves beside ROMs and games in subfolders."""
+    (machine.home / "cores/mupen64plus_next_libretro.so").touch()
+    roms = machine.home / "Messy"
+    for path in [
+        "by-system/GBA/Golden Sun (USA).gba",
+        "by-system/GBA/Mother 3 (Japan).gba",
+        "by-system/GBA/Hacks/Cool Hack.gba",
+        "by-system/Nintendo 64/Mario Kart 64 (USA).z64",
+        "by-system/Nintendo 64/Mario Kart 64 (USA).sav",
+        "odd/Some Hack.gba",
+        "odd/Some Hack.sav",
+        "odd/Other Hack.gba",
+        "odd/Other Hack.sav",
+    ]:
+        (roms / path).parent.mkdir(parents=True, exist_ok=True)
+        (roms / path).touch()
+    fresh(machine)
+    out = init(machine, "--roms", str(roms), "--yes")
+    assert out.returncode == 0, out.stderr
+    assert "not a system romi knows" not in out.stdout + out.stderr
+    promised = int(re.search(r"Done: (\d+) games?", out.stdout).group(1))
+    games = json.loads(romi(machine, "list", "--json").stdout)
+    assert len(games) == promised == 6
+    assert {g["system"] for g in games} == {"gba", "n64", "odd"}
+    assert "Cool Hack" in {g["name"] for g in games}
