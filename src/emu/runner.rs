@@ -8,6 +8,7 @@ use crate::emu::cheevos::{self, Event as CheevoEvent};
 use crate::emu::libretro::{Core, Dirs, Frame, Players};
 use crate::emu::remap::{Controls, Remap};
 use crate::emu::timing;
+use crate::emucfg::SharedSaves;
 use crate::library::Library;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -24,8 +25,8 @@ use std::time::{Duration, Instant};
 /// screen pixels tall the game will be, 3D cores draw at about that size if `sharp_3d` is on.
 ///
 /// `runs_with` is the command the game runs with outside romi. When that's an emulator that keeps
-/// saves just as the core does (standalone melonDS, see `emucfg::shared_save_dir`), the core gets
-/// its save folder instead, so the game carries on there.
+/// saves just as the core does (standalone melonDS or Dolphin, see `emucfg::shared_saves`), the
+/// core shares them instead, so the game carries on there.
 pub fn load(
     cfg: &Config,
     core: &Path,
@@ -35,8 +36,15 @@ pub fn load(
     shown_height: Option<u32>,
 ) -> Result<Core> {
     let name = crate::emu::libretro::info(core).map(|info| info.name);
-    let shared = name.as_ref().zip(runs_with).and_then(|(name, cmd)| crate::emucfg::shared_save_dir(cmd, name, rom));
-    let saves = shared.or_else(|| name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom)));
+    let shared = name.as_ref().zip(runs_with).and_then(|(name, cmd)| crate::emucfg::shared_saves(cmd, name, rom));
+    let shared = shared.map(|shared| match shared {
+        SharedSaves::Folder(dir) => Ok(dir),
+        SharedSaves::DolphinGc(gc) => dolphin_folder(&crate::config::state_dir().join("dolphin"), &gc),
+    });
+    let saves = match shared {
+        Some(dir) => Some(dir?),
+        None => name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom)),
+    };
     if let Some(dir) = &saves {
         std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;
     }
@@ -45,6 +53,27 @@ pub fn load(
     let remap = remap(name.as_deref(), rom, controls);
     let shown_height = shown_height.filter(|_| cfg.sharp_3d);
     Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file, options, remap, shown_height })
+}
+
+/// A folder for Dolphin's core, `dir`, whose memory cards are standalone Dolphin's `gc`: the core
+/// keeps them in `User/GC` under it, which is made a link to `gc`. The rest of what the core keeps
+/// (its settings, caches, Wii saves) stays in `dir`, out of standalone Dolphin's way.
+fn dolphin_folder(dir: &Path, gc: &Path) -> Result<std::path::PathBuf> {
+    let user = dir.join("User");
+    let link = user.join("GC");
+    std::fs::create_dir_all(&user).with_context(|| format!("can't make {}", user.display()))?;
+    std::fs::create_dir_all(gc).with_context(|| format!("can't make {}", gc.display()))?;
+    match std::fs::read_link(&link) {
+        Ok(to) if to == gc => return Ok(dir.to_path_buf()),
+        Ok(_) => std::fs::remove_file(&link).with_context(|| format!("can't move {}", link.display()))?,
+        // Something that isn't a link is the core's own cards, from before: never thrown away.
+        Err(_) if link.symlink_metadata().is_ok() => {
+            anyhow::bail!("{} is in the way of Dolphin's memory cards ({})", link.display(), gc.display())
+        }
+        Err(_) => {}
+    }
+    std::os::unix::fs::symlink(gc, &link).with_context(|| format!("can't link {}", link.display()))?;
+    Ok(dir.to_path_buf())
 }
 
 /// The remap a game plays with in `core` (by its name): RetroArch's for it, with each of `controls`
@@ -282,6 +311,12 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
             }
             None => period,
         };
+        // A frame that takes no time in the game (one shown between refreshes, see `audio`) isn't
+        // handed over: the next, due at once, ends the refresh, and a screen shows one picture a
+        // refresh. Dolphin's core does that with dual core on, which romi turns off unless it's chosen.
+        if wait.is_zero() {
+            continue;
+        }
         let frame = core.frame();
         hold = hold_for(hold, started.elapsed(), period);
         let slot = started + hold;
@@ -376,6 +411,23 @@ mod tests {
         let eased = hold_for(ms(10), ms(2), period);
         assert!(eased < ms(10) && eased > ms(9), "eases back slowly: {eased:?}");
         assert_eq!(hold_for(ms(2), ms(100), period), ms(12), "never most of a frame");
+    }
+
+    #[test]
+    fn dolphins_core_shares_standalone_dolphins_memory_cards() {
+        let dir = std::env::temp_dir().join(format!("romi-dolphin-folder-test-{}", std::process::id()));
+        let (folder, gc, elsewhere) = (dir.join("romi/dolphin"), dir.join("dolphin-emu/GC"), dir.join("old/GC"));
+        assert_eq!(dolphin_folder(&folder, &gc).unwrap(), folder);
+        assert_eq!(std::fs::read_link(folder.join("User/GC")).unwrap(), gc);
+        assert!(gc.is_dir());
+        assert_eq!(dolphin_folder(&folder, &gc).unwrap(), folder, "again, as it is");
+        assert_eq!(dolphin_folder(&folder, &elsewhere).unwrap(), folder);
+        assert_eq!(std::fs::read_link(folder.join("User/GC")).unwrap(), elsewhere, "moved with Dolphin");
+        // Cards of the core's own, from before, are never thrown away.
+        std::fs::remove_file(folder.join("User/GC")).unwrap();
+        std::fs::create_dir(folder.join("User/GC")).unwrap();
+        assert!(dolphin_folder(&folder, &gc).unwrap_err().to_string().contains("in the way"));
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

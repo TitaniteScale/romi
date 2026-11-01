@@ -8,6 +8,12 @@
 //! fps for Game Boy games, which run at 59.7.) The clock and the sound card's clock still drift
 //! apart a little, so frames are stretched or shortened by up to half a percent to keep the
 //! queue near `TARGET`. Frames stay evenly spaced, as the picture needs, and the pitch is exact.
+//!
+//! Some cores hand over frames without sound between ones with a refresh's sound: Dolphin's with
+//! dual core on, which romi turns off unless it's chosen (see `options::in_romi`), give 800
+//! samples or none, more than half of Melee's frames none. Those frames are no time at all in the game, so they
+//! take none here either, as in RetroArch, which waits on the sound card; a game paced as if each
+//! took a whole frame ran slow, and its sound ran dry.
 
 use anyhow::{Context, Result, bail};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -25,6 +31,9 @@ const TARGET: Duration = Duration::from_millis(40);
 const PERIOD: Duration = Duration::from_millis(10);
 /// The most a frame is stretched or shortened by to keep the queue at `TARGET`.
 const MAX_NUDGE: f64 = 0.005;
+/// Frames in a row without sound, from a core that makes sound, that take no time. After that
+/// many the core has gone quiet (loading, say), and frames keep to its frame rate again.
+const SILENT_FRAMES: u32 = 15;
 
 /// A stream to the default output device.
 pub struct Output {
@@ -36,8 +45,7 @@ pub struct Output {
     core_rate: f64,
     resampler: Resampler,
     scratch: Vec<f32>,
-    /// How long a frame's sound lasts, averaged over recent frames, in seconds.
-    frame_time: f64,
+    pace: Pace,
     /// How much was queued before the last frame's sound.
     ahead: Duration,
     /// Samples (left and right together) the device has played as silence for want of sound.
@@ -76,7 +84,7 @@ impl Output {
             core_rate,
             resampler: Resampler::default(),
             scratch: Vec::new(),
-            frame_time: 1.0 / fps,
+            pace: Pace::new(fps),
             ahead: Duration::ZERO,
             dry,
         };
@@ -111,12 +119,7 @@ impl Output {
             self.pad();
         }
         self.ahead = self.queued();
-        // Cores make about the same amount of sound each frame, but not exactly. One that makes
-        // none keeps to the frame rate it gave.
         let lasts = samples.len() as f64 / 2.0 / self.core_rate;
-        if lasts > 0.0 {
-            self.frame_time += (lasts - self.frame_time) * 0.05;
-        }
         // Far ahead, the nudge would take many seconds to catch up, so this frame's sound is
         // skipped instead. It happens when the device is slow to wake up, at the start, which is
         // mostly silent anyway.
@@ -128,7 +131,7 @@ impl Output {
             let _ = self.queue.push_entire_slice(&self.scratch[..n]);
         }
         let ahead = (self.ahead.as_secs_f64() - TARGET.as_secs_f64()) / TARGET.as_secs_f64();
-        Duration::from_secs_f64(self.frame_time * (1.0 + MAX_NUDGE * ahead.clamp(-1.0, 1.0)))
+        self.pace.frame(lasts, ahead)
     }
 
     /// Fills the queue with silence up to `TARGET`.
@@ -136,6 +139,40 @@ impl Output {
         let frames = (TARGET.as_secs_f64() * f64::from(self.rate)) as usize;
         let n = (frames * 2).min(self.queue.slots());
         let _ = self.queue.push_entire_slice(&vec![0.0; n]);
+    }
+}
+
+/// How long each frame takes, from the sound it made.
+struct Pace {
+    /// How long a frame's sound lasts, averaged over recent frames, in seconds.
+    frame_time: f64,
+    /// The core has made sound, so a frame without any is one between refreshes.
+    made_sound: bool,
+    /// Frames in a row without sound.
+    silent: u32,
+}
+
+impl Pace {
+    /// For a core that says it runs at `fps`, until its sound says otherwise.
+    fn new(fps: f64) -> Pace {
+        Pace { frame_time: 1.0 / fps, made_sound: false, silent: 0 }
+    }
+
+    /// How long a frame whose sound `lasts` (seconds) takes, with the queue `ahead` of where it
+    /// should be (-1 empty, 0 on target, 1 twice the target).
+    fn frame(&mut self, lasts: f64, ahead: f64) -> Duration {
+        // Cores make about the same amount of sound each frame, but not exactly. One that makes
+        // none keeps to the frame rate it gave.
+        if lasts > 0.0 {
+            self.frame_time += (lasts - self.frame_time) * 0.05;
+            (self.made_sound, self.silent) = (true, 0);
+        } else {
+            self.silent = self.silent.saturating_add(1);
+            if self.made_sound && self.silent <= SILENT_FRAMES {
+                return Duration::ZERO;
+            }
+        }
+        Duration::from_secs_f64(self.frame_time * (1.0 + MAX_NUDGE * ahead.clamp(-1.0, 1.0)))
     }
 }
 
@@ -286,6 +323,30 @@ fn wav_header(rate: u32, bytes: u32) -> [u8; 44] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frames_take_as_long_as_their_sound_and_those_without_none() {
+        let ms = |d: Duration| (d.as_secs_f64() * 1000.0 * 10.0).round() / 10.0;
+        let mut pace = Pace::new(60.0);
+        // A core that has made no sound yet keeps to its frame rate.
+        assert_eq!(ms(pace.frame(0.0, 0.0)), 16.7);
+        // Dolphin's: a refresh's sound, or none for a frame shown between refreshes.
+        let refresh = 800.0 / 48000.0;
+        for _ in 0..200 {
+            pace.frame(refresh, 0.0);
+        }
+        assert_eq!(ms(pace.frame(refresh, 0.0)), 16.7);
+        assert_eq!(pace.frame(0.0, 0.0), Duration::ZERO);
+        let took: f64 =
+            [refresh, 0.0, refresh, refresh, 0.0, refresh].iter().map(|&l| pace.frame(l, 0.0).as_secs_f64()).sum();
+        assert!((took - 4.0 * refresh).abs() < 1e-4, "as long as the sound, {took}");
+        // Gone quiet for longer than that, it keeps to the frame rate again.
+        let quiet: Vec<Duration> = (0..SILENT_FRAMES + 2).map(|_| pace.frame(0.0, 0.0)).collect();
+        assert_eq!(quiet[SILENT_FRAMES as usize - 1], Duration::ZERO);
+        assert_eq!(ms(quiet[SILENT_FRAMES as usize]), 16.7);
+        // Behind, a frame is shortened a little to catch up.
+        assert!(pace.frame(refresh, -1.0) < pace.frame(refresh, 0.0));
+    }
 
     #[test]
     fn resampling_keeps_the_rate_and_joins_frames_up() {

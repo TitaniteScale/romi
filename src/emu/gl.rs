@@ -59,6 +59,12 @@ const GL_UNSIGNED_BYTE: u32 = 0x1401;
 const GL_PIXEL_PACK_BUFFER: u32 = 0x88EB;
 const GL_PACK_ALIGNMENT: u32 = 0x0D05;
 const GL_PACK_ROW_LENGTH: u32 = 0x0D02;
+const GL_DRAW_FRAMEBUFFER: u32 = 0x8CA9;
+const GL_READ_FRAMEBUFFER: u32 = 0x8CA8;
+const GL_DRAW_FRAMEBUFFER_BINDING: u32 = 0x8CA6;
+const GL_READ_FRAMEBUFFER_BINDING: u32 = 0x8CAA;
+const GL_RENDERBUFFER_BINDING: u32 = 0x8CA7;
+const GL_PIXEL_PACK_BUFFER_BINDING: u32 = 0x88ED;
 const GL_STREAM_READ: u32 = 0x88E1;
 const GL_MAP_READ_BIT: u32 = 0x0001;
 const GL_SYNC_GPU_COMMANDS_COMPLETE: u32 = 0x9117;
@@ -189,6 +195,7 @@ struct Fns {
     read_pixels: unsafe extern "C" fn(i32, i32, i32, i32, u32, u32, *mut c_void),
     get_string: unsafe extern "C" fn(u32) -> *const c_char,
     get_error: unsafe extern "C" fn() -> u32,
+    get_integerv: unsafe extern "C" fn(u32, *mut i32),
 }
 
 macro_rules! gl {
@@ -215,6 +222,7 @@ impl Fns {
             read_pixels: gl!("glReadPixels"),
             get_string: gl!("glGetString"),
             get_error: gl!("glGetError"),
+            get_integerv: gl!("glGetIntegerv"),
         })
     }
 }
@@ -433,7 +441,14 @@ impl Context {
     }
 
     /// Gives the framebuffer room for `size` pixels. The context must be current.
-    pub fn resize(&mut self, (w, h): (u32, u32)) -> Result<()> {
+    pub fn resize(&mut self, size: (u32, u32)) -> Result<()> {
+        let saved = self.save_state();
+        let resized = self.resize_framebuffer(size);
+        self.restore_state(saved);
+        resized
+    }
+
+    fn resize_framebuffer(&mut self, (w, h): (u32, u32)) -> Result<()> {
         let (w, h) = (w.max(1), h.max(1));
         let f = &self.fns;
         // SAFETY: GL calls with the context current, on objects it made.
@@ -467,6 +482,13 @@ impl Context {
     /// as packed RGB, top row first: the one before this, which the GPU has had a frame to copy,
     /// or this one, where GL can only wait for it. Gives the size of the frame put there, if any.
     pub fn read(&mut self, drawn: Option<((u32, u32), bool)>, rgb: &mut Vec<u8>) -> Option<(u32, u32)> {
+        let saved = self.save_state();
+        let shown = self.read_frame(drawn, rgb);
+        self.restore_state(saved);
+        shown
+    }
+
+    fn read_frame(&mut self, drawn: Option<((u32, u32), bool)>, rgb: &mut Vec<u8>) -> Option<(u32, u32)> {
         let drawn = drawn
             .map(|((w, h), bottom_left)| ((w.min(self.size.0) as usize, h.min(self.size.1) as usize), bottom_left));
         let f = &self.fns;
@@ -519,6 +541,62 @@ impl Context {
             }
             (f.bind_buffer)(GL_PIXEL_PACK_BUFFER, 0);
             shown
+        }
+    }
+}
+
+/// The GL state romi changes as it reads frames back and resizes its framebuffer. It's the core's
+/// context too, and a core may keep track of what it has bound rather than bind it again: Dolphin
+/// drew the start of each frame (Monkey Ball 2's sky, most of its ground) into whatever romi had
+/// left bound, which it never showed. RetroArch gives such a core a context of its own; romi puts
+/// back what it changed.
+struct Saved {
+    draw_framebuffer: u32,
+    read_framebuffer: u32,
+    renderbuffer: u32,
+    pack_buffer: u32,
+    pack_alignment: i32,
+    pack_row_length: i32,
+}
+
+impl Context {
+    /// OpenGL ES 2, which has one framebuffer binding, and no pack buffers or row length.
+    fn es2(&self) -> bool {
+        matches!(self.request.api, Api::Gles(major, _) if major < 3)
+    }
+
+    fn save_state(&self) -> Saved {
+        let get = |name| {
+            let mut value = 0;
+            // SAFETY: a query of one integer, with the context current.
+            unsafe { (self.fns.get_integerv)(name, &mut value) };
+            value
+        };
+        let es2 = self.es2();
+        Saved {
+            draw_framebuffer: get(GL_DRAW_FRAMEBUFFER_BINDING) as u32,
+            read_framebuffer: if es2 { 0 } else { get(GL_READ_FRAMEBUFFER_BINDING) as u32 },
+            renderbuffer: get(GL_RENDERBUFFER_BINDING) as u32,
+            pack_buffer: if es2 { 0 } else { get(GL_PIXEL_PACK_BUFFER_BINDING) as u32 },
+            pack_alignment: get(GL_PACK_ALIGNMENT),
+            pack_row_length: if es2 { 0 } else { get(GL_PACK_ROW_LENGTH) },
+        }
+    }
+
+    fn restore_state(&self, saved: Saved) {
+        let f = &self.fns;
+        // SAFETY: GL calls with the context current, binding back objects that were bound.
+        unsafe {
+            if self.es2() {
+                (f.bind_framebuffer)(GL_FRAMEBUFFER, saved.draw_framebuffer);
+            } else {
+                (f.bind_framebuffer)(GL_DRAW_FRAMEBUFFER, saved.draw_framebuffer);
+                (f.bind_framebuffer)(GL_READ_FRAMEBUFFER, saved.read_framebuffer);
+                (f.bind_buffer)(GL_PIXEL_PACK_BUFFER, saved.pack_buffer);
+                (f.pixel_storei)(GL_PACK_ROW_LENGTH, saved.pack_row_length);
+            }
+            (f.bind_renderbuffer)(GL_RENDERBUFFER, saved.renderbuffer);
+            (f.pixel_storei)(GL_PACK_ALIGNMENT, saved.pack_alignment);
         }
     }
 }

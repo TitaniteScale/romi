@@ -1,7 +1,7 @@
 //! What romi can tell from emulators' own settings files: for `romi check`, whether
 //! RetroAchievements is on and logged in and whether a controller is bound; for games played in
-//! romi, where RetroArch keeps saves (or melonDS, for DS games it runs), and the core options and
-//! remaps RetroArch has. romi only ever reads these files.
+//! romi, where RetroArch keeps saves (or melonDS and Dolphin, for the games they run), and the core
+//! options and remaps RetroArch has. romi only ever reads these files.
 
 use crate::config::{Config, expand_path};
 use crate::emu::remap::Remap;
@@ -234,17 +234,55 @@ pub fn retroarch_save_dir(core: &str, rom: &Path) -> Option<PathBuf> {
     save_dir(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
 }
 
-/// The folder where the emulator `command` runs keeps `rom`'s save, when the libretro core called
-/// `core` (its name without the version) keeps saves just as it does, so a game played in romi
-/// carries on outside it and back. Only for DS games that run in standalone melonDS, played in
-/// romi with RetroArch's melonDS core: both keep the game's save as `<name>.sav`, the same inside.
-pub fn shared_save_dir(command: &str, core: &str, rom: &Path) -> Option<PathBuf> {
+/// Saves a libretro core shares with the emulator a game runs in outside romi.
+#[derive(Debug, PartialEq)]
+pub enum SharedSaves {
+    /// The core keeps the game's save in this folder, as the emulator does.
+    Folder(PathBuf),
+    /// Dolphin's core keeps memory cards in `User/GC` under the folder it's given, as standalone
+    /// Dolphin keeps them under its own: this is standalone Dolphin's `GC` folder, for the core's
+    /// to be.
+    DolphinGc(PathBuf),
+}
+
+/// What the emulator `command` runs keeps of `rom`'s saves, when the libretro core called `core`
+/// (its name without the version) keeps them just as it does, so a game played in romi carries on
+/// outside it and back: DS games that run in standalone melonDS, played with RetroArch's melonDS
+/// core (both keep `<name>.sav`, the same inside), and GameCube games that run in standalone
+/// Dolphin, played with RetroArch's Dolphin core (both keep memory cards as GCI folders).
+pub fn shared_saves(command: &str, core: &str, rom: &Path) -> Option<SharedSaves> {
     match Emulator::of(command)? {
         (Emulator::MelonDs, flatpak) if core == "melonDS" => {
-            melonds_save_dir(&Emulator::MelonDs.config_dir(flatpak), rom)
+            melonds_save_dir(&Emulator::MelonDs.config_dir(flatpak), rom).map(SharedSaves::Folder)
+        }
+        (Emulator::Dolphin, flatpak) if core == "dolphin-emu" => {
+            let data = match flatpak {
+                true => expand_path(&format!("~/.var/app/{}/data/dolphin-emu", Emulator::Dolphin.flatpak_id())),
+                false => dirs::data_dir().unwrap_or_else(|| expand_path("~/.local/share")).join("dolphin-emu"),
+            };
+            dolphin_gc_dir(&Emulator::Dolphin.config_dir(flatpak), &data, &expand_path("~/.dolphin-emu"))
+                .map(SharedSaves::DolphinGc)
         }
         _ => None,
     }
+}
+
+/// Dolphin's `MemoryCardFolder` device, a GCI folder, as Slot A is by default.
+const GCI_FOLDER: &str = "8";
+
+/// Where standalone Dolphin keeps GameCube memory cards (its `GC` folder), with its settings in
+/// `config_dir` and the rest in `data_dir`, or both in `legacy` if that's there, as Dolphin looks
+/// for it first. None unless Slot A is a GCI folder in the usual place, as the core's is: a card
+/// in one file, or a folder of its own, wouldn't be found by the core.
+fn dolphin_gc_dir(config_dir: &Path, data_dir: &Path, legacy: &Path) -> Option<PathBuf> {
+    let (config, data) = match legacy.is_dir() {
+        true => (legacy.join("Config"), legacy.to_path_buf()),
+        false => (config_dir.to_path_buf(), data_dir.to_path_buf()),
+    };
+    let ini = Ini::read(&config.join("Dolphin.ini"));
+    let set = |key| ini.get("Core", key).filter(|v| !v.is_empty());
+    (set("SlotA").is_none_or(|slot| slot == GCI_FOLDER) && set("GCIFolderAPathOverride").is_none())
+        .then(|| data.join("GC"))
 }
 
 /// Where melonDS keeps `rom`'s save: next to it, unless its settings name a folder. A relative
@@ -425,8 +463,27 @@ mod tests {
         assert_eq!(melonds_save_dir(&dir, rom), Some(PathBuf::from("/old")));
         std::fs::remove_dir_all(&dir).unwrap();
         // Only melonDS's own core keeps saves as melonDS does.
-        assert_eq!(shared_save_dir("retroarch -L {cores}/melonds_libretro.so {rom}", "melonDS", rom), None);
-        assert_eq!(shared_save_dir("melonDS -f {rom}", "melonDS DS", rom), None);
+        assert_eq!(shared_saves("retroarch -L {cores}/melonds_libretro.so {rom}", "melonDS", rom), None);
+        assert_eq!(shared_saves("melonDS -f {rom}", "melonDS DS", rom), None);
+    }
+
+    #[test]
+    fn gamecube_memory_cards_are_where_dolphin_keeps_them() {
+        let dir = std::env::temp_dir().join(format!("romi-dolphin-test-{}", std::process::id()));
+        let (config, data, legacy) = (dir.join("config"), dir.join("data"), dir.join("legacy"));
+        std::fs::create_dir_all(&config).unwrap();
+        let at = |ini: &str| {
+            std::fs::write(config.join("Dolphin.ini"), ini).unwrap();
+            dolphin_gc_dir(&config, &data, &legacy)
+        };
+        assert_eq!(at(""), Some(data.join("GC")), "a GCI folder by default");
+        assert_eq!(at("[Core]\nSlotA = 8\nSlotB = 255\n"), Some(data.join("GC")));
+        assert_eq!(at("[Core]\nSlotA = 1\n"), None, "a card in one file");
+        assert_eq!(at("[Core]\nGCIFolderAPathOverride = /cards\n"), None);
+        std::fs::create_dir_all(legacy.join("Config")).unwrap();
+        assert_eq!(dolphin_gc_dir(&config, &data, &legacy), Some(legacy.join("GC")));
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(shared_saves("dolphin-emu -b -e {rom}", "Dolphin", Path::new("/roms/gc/x.rvz")), None);
     }
 
     #[test]

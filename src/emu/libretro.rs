@@ -868,6 +868,7 @@ impl Core {
             options: Some(Options::new(dirs.options.clone(), dirs.shown_height)),
         };
         LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        load_cxx_runtime_first();
         // SAFETY: loading a core runs its initializers; libretro cores are made to be loaded this way.
         let lib = unsafe { libloading::Library::new(core_path) }
             .with_context(|| format!("can't load {}", core_path.display()))?;
@@ -1118,6 +1119,19 @@ impl Drop for Core {
     }
 }
 
+/// Loads the C++ runtime for every library to share, for good, before any core does, even to ask
+/// its name, as it is in RetroArch, which links it. A core that carries its own copy of parts of
+/// it (Dolphin's has `std::call_once`'s helper and the thread-local it reads), loaded first, had
+/// the runtime looking things up in the core's copies, while Mesa's LLVM, loaded later for the
+/// core's OpenGL context, used the runtime's own: one set the thread-local and the other read it,
+/// and Dolphin crashed romi as the context was made. Shared by everything, the runtime's copies
+/// are the ones used throughout, the core's included.
+fn load_cxx_runtime_first() {
+    // SAFETY: loading the system's libstdc++, which runs only its own initializers; a missing
+    // one is left to the core to load.
+    unsafe { libc::dlopen(c"libstdc++.so.6".as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL | libc::RTLD_NODELETE) };
+}
+
 /// Keeps OpenMP loaded for good once a core has loaded it. Its threads outlive the core that
 /// started them, and unloading the library under them, as unloading the core did, crashed romi
 /// when a game played with bsnes-hd stopped.
@@ -1202,6 +1216,7 @@ fn read_info(path: &Path) -> Result<Info> {
     // SAFETY: as in `Core::open`. libretro allows asking for system info before `retro_init`, and
     // the strings are copied out before the library is closed again.
     unsafe {
+        load_cxx_runtime_first();
         let lib = libloading::Library::new(path)?;
         let mut info = std::mem::zeroed::<SystemInfo>();
         lib.get::<unsafe extern "C" fn(*mut SystemInfo)>(b"retro_get_system_info\0")?(&mut info);

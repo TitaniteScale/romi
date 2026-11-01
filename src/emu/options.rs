@@ -5,9 +5,10 @@
 //!
 //! The exception is how big a 3D core draws. Drawn at the console's size (640×480) and scaled
 //! up to the panel, a pixel at a time, 3D games look blocky, so romi asks for the size closest to
-//! the panel's instead, when it's told how tall that is, up to `MAX_DRAWN`. And melonDS's
-//! touchscreen follows the mouse as a pointer in romi, where the mouse says where it is, rather
-//! than moving a cursor of its own (see `in_romi`).
+//! the panel's instead, when it's told how tall that is, up to `MAX_DRAWN`. And a few options have
+//! a value that suits romi better (see `in_romi`): melonDS's touchscreen follows the mouse as a
+//! pointer, and Dolphin's messages stay off the picture and its CPU on one thread, unless RetroArch
+//! has them otherwise.
 
 use std::collections::BTreeMap;
 use std::ffi::{CStr, CString, c_char, c_void};
@@ -151,16 +152,20 @@ fn drawn_height(key: &str, value: &str) -> Option<u32> {
         }
         // "2x", or "1x(native)": the PlayStation's 240 lines, so many times over.
         "beetle_psx_hw_internal_resolution" => Some(value.split('x').next()?.trim().parse::<u32>().ok()? * 240),
+        // "2": the GameCube's 528 lines (its framebuffer's), so many times over.
+        "dolphin_efb_scale" => Some(value.trim().parse::<u32>().ok()? * 528),
         _ => None,
     }
 }
 
-/// The tallest 3D is drawn, four times the consoles' 240 lines. Every frame is read back from the
-/// GPU and scaled on the CPU, so drawing bigger costs time a frame doesn't have: Flycast drawing
+/// The tallest 3D is drawn, about four times the consoles' 240 lines. Every frame is read back from
+/// the GPU and scaled on the CPU, so drawing bigger costs time a frame doesn't have: Flycast drawing
 /// at 2880×2160, for a panel 2000 pixels tall, took 16 ms over a frame, and the game slowed and its
 /// sound broke up. At 960 it's under a millisecond, and the picture at most twice as big again on
-/// screen, which is still sharp.
-const MAX_DRAWN: u32 = 960;
+/// screen, which is still sharp. 1056 lets Dolphin draw at twice its 528 lines (1280×1056, 4 ms a
+/// frame headless for Monkey Ball 2, with the reading back); the other cores' next sizes up are
+/// 1440 and over.
+const MAX_DRAWN: u32 = 1056;
 
 /// The value of a size option that draws at least `height` tall (or `MAX_DRAWN`, if that's less),
 /// as little over as there is, or else the tallest up to `MAX_DRAWN`. None for an option that
@@ -173,12 +178,19 @@ fn fitted(d: &Declared, height: u32) -> Option<&String> {
     tall_enough.or(sizes.iter().max_by_key(|(h, _)| *h)).map(|(_, v)| *v)
 }
 
-/// A value that works better in romi than the one picked, for an option where there's one:
-/// melonDS's "Mouse" touch mode (RetroArch's default) moves a cursor of its own by how far the
-/// mouse moves, which drifts from the mouse in romi, where the mouse says where it is.
-fn in_romi(d: &Declared, value: &str) -> Option<&'static str> {
+/// A value that works better in romi than the one picked, for an option where there's one, or
+/// than the core's default (`chosen` says whether it was set in RetroArch). melonDS's "Mouse" touch
+/// mode (RetroArch's default) moves a cursor of its own by how far the mouse moves, which drifts
+/// from the mouse in romi, where the mouse says where it is. Dolphin's on-screen messages ("Video
+/// Info: …" as each game starts) are written into the game's picture, over the game in the panel.
+/// Dolphin's dual core (its CPU on a thread of its own) makes the sound out of step with the
+/// frames: Kirby Air Ride's came with up to 29 frames in a row without any, and ran dry. On one
+/// thread each frame brings one refresh's sound, as romi paces games by, still at 9× full speed.
+fn in_romi(d: &Declared, value: &str, chosen: bool) -> Option<&'static str> {
     let better = match (d.key.as_str(), value) {
         ("melonds_touch_mode", "Mouse") => "Touch",
+        ("dolphin_osd_enabled", "enabled") if !chosen => "disabled",
+        ("dolphin_main_cpu_thread", "enabled") if !chosen => "disabled",
         _ => return None,
     };
     d.values.iter().any(|v| v == better).then_some(better)
@@ -210,9 +222,13 @@ impl Options {
             if let Some(value) = fitted {
                 super::libretro::note(&format!("romi: {} = {value}, to draw about as tall as it's shown", d.key));
             }
-            let chosen = self.chosen.get(&d.key).filter(|v| d.values.is_empty() || d.values.contains(v));
-            let value = fitted.or(chosen).or(d.default.as_ref()).or(d.values.first()).map(String::as_str);
-            let value = value.map(|v| in_romi(&d, v).unwrap_or(v));
+            let takes = |v: &&String| d.values.is_empty() || d.values.contains(v);
+            let chosen = self.chosen.get(&d.key).filter(takes);
+            // A default the core doesn't list is its first value, as in RetroArch: Dolphin's shader
+            // compilation default is "ShaderCompilationMode::Synchronous", a macro never expanded.
+            let default = d.default.as_ref().filter(takes);
+            let value = fitted.or(chosen).or(default).or(d.values.first()).map(String::as_str);
+            let value = value.map(|v| in_romi(&d, v, chosen.is_some()).unwrap_or(v));
             if let Some(value) = value.and_then(|v| CString::new(v).ok()) {
                 self.values.insert(d.key, value);
             }
@@ -287,9 +303,26 @@ mod tests {
         ]);
         assert_eq!(value(&mut big, "reicast_internal_resolution").as_deref(), Some("1280x960"));
         assert_eq!(value(&mut big, "beetle_psx_hw_internal_resolution").as_deref(), Some("4x"));
+        let mut dolphin = Options::new(BTreeMap::new(), Some(900));
+        dolphin.declare(vec![declare("dolphin_efb_scale", &["1", "2", "3", "4", "6"])]);
+        assert_eq!(value(&mut dolphin, "dolphin_efb_scale").as_deref(), Some("2"), "1056 lines, 2× its 528");
+        let mut small = Options::new(BTreeMap::new(), Some(500));
+        small.declare(vec![declare("dolphin_efb_scale", &["1", "2", "3"])]);
+        assert_eq!(value(&mut small, "dolphin_efb_scale").as_deref(), Some("1"));
         let mut not_sized = Options::new(BTreeMap::new(), None);
         not_sized.declare(vec![declare("mupen64plus-43screensize", &["640x480", "1280x960"])]);
         assert_eq!(value(&mut not_sized, "mupen64plus-43screensize").as_deref(), Some("640x480"));
+    }
+
+    #[test]
+    fn a_default_the_core_doesnt_list_is_its_first_value() {
+        let mut options = Options::new(BTreeMap::new(), None);
+        options.declare(vec![Declared {
+            key: "dolphin_shader_compilation_mode".into(),
+            values: ["0", "3", "1", "2"].map(String::from).to_vec(),
+            default: Some("ShaderCompilationMode::Synchronous".into()),
+        }]);
+        assert_eq!(value(&mut options, "dolphin_shader_compilation_mode").as_deref(), Some("0"));
     }
 
     #[test]
@@ -312,6 +345,38 @@ mod tests {
         let mut no_touch = Options::new(chosen("Mouse"), None);
         no_touch.declare(vec![touch(&["Mouse", "Joystick"])]);
         assert_eq!(value(&mut no_touch, "melonds_touch_mode").as_deref(), Some("Mouse"));
+    }
+
+    #[test]
+    fn dolphins_messages_are_off_unless_retroarch_has_them_on() {
+        let osd = || Declared {
+            key: "dolphin_osd_enabled".into(),
+            values: vec!["disabled".into(), "enabled".into()],
+            default: Some("enabled".into()),
+        };
+        let mut default = Options::new(BTreeMap::new(), None);
+        default.declare(vec![osd()]);
+        assert_eq!(value(&mut default, "dolphin_osd_enabled").as_deref(), Some("disabled"));
+        let chosen = [("dolphin_osd_enabled".to_string(), "enabled".to_string())].into_iter().collect();
+        let mut on = Options::new(chosen, None);
+        on.declare(vec![osd()]);
+        assert_eq!(value(&mut on, "dolphin_osd_enabled").as_deref(), Some("enabled"));
+    }
+
+    #[test]
+    fn dolphins_cpu_is_on_one_thread_unless_retroarch_has_dual_core() {
+        let dual = || Declared {
+            key: "dolphin_main_cpu_thread".into(),
+            values: vec!["disabled".into(), "enabled".into()],
+            default: Some("enabled".into()),
+        };
+        let mut default = Options::new(BTreeMap::new(), None);
+        default.declare(vec![dual()]);
+        assert_eq!(value(&mut default, "dolphin_main_cpu_thread").as_deref(), Some("disabled"));
+        let chosen = [("dolphin_main_cpu_thread".to_string(), "enabled".to_string())].into_iter().collect();
+        let mut on = Options::new(chosen, None);
+        on.declare(vec![dual()]);
+        assert_eq!(value(&mut on, "dolphin_main_cpu_thread").as_deref(), Some("enabled"));
     }
 
     #[test]

@@ -82,15 +82,24 @@ second of the game saving, and again when you stop. What a core keeps itself (Fi
 scores and NVRAM) goes to the same folder. A save that's there but can't be read stops the game
 from starting, rather than being written over. A DS game that runs in standalone melonDS keeps its
 save where melonDS does (next to the ROM, as `<name>.sav`, unless melonDS's settings name a
-folder), since RetroArch's melonDS core keeps saves the same way, so it carries on in either. The first time a core is played, romi starts it in a separate process
+folder), since RetroArch's melonDS core keeps saves the same way, so it carries on in either.
+Likewise a GameCube game that runs in standalone Dolphin uses Dolphin's memory cards, the GCI
+folders in its `GC` folder (`~/.local/share/dolphin-emu/GC/USA/Card A`, say), when Slot A is a GCI
+folder as it is by default: Dolphin's core keeps its cards under the save folder it's given, so
+romi gives it `~/.local/state/romi/dolphin`, with `User/GC` there a link to Dolphin's. The rest of
+what the core keeps, its settings and shader caches, stays there, out of standalone Dolphin's way. The first time a core is played, romi starts it in a separate process
 for a moment, so one that crashes shows an error instead of taking romi down. Sound plays through
 PulseAudio (or PipeWire's stand-in for it), or ALSA without either; `"volume"` in the config sets
 how loud, from 0 to 100.
 
-Cores that draw with the GPU work too: Flycast (Dreamcast, Naomi), Mupen64Plus-Next (N64) and
-Beetle PSX HW draw with OpenGL, through EGL with no window, on the GPU your screen is plugged into
+Cores that draw with the GPU work too: Flycast (Dreamcast, Naomi), Mupen64Plus-Next (N64), Beetle
+PSX HW and Dolphin (GameCube) draw with OpenGL, through EGL with no window, on the GPU your screen is plugged into
 (on a laptop with two, the other one stays asleep), and romi reads each frame back. Vulkan isn't
-there yet, so a core set to draw only with Vulkan won't start. Cores run with the options
+there yet, so a core set to draw only with Vulkan won't start. Dolphin's core needs Dolphin's
+`Sys` folder in RetroArch's system folder, as `dolphin-emu/Sys`; with standalone Dolphin installed,
+`ln -s /usr/share/dolphin-emu/Sys ~/.config/retroarch/system/dolphin-emu/Sys` is enough (for the
+same version of Dolphin). Its on-screen messages and dual core are off in romi, unless RetroArch has them on: with dual
+core, the game's sound comes out of step with its frames, and runs dry. Cores run with the options
 RetroArch has for them (`config/<core>/<core>.opt`, and the ones for the game or its folder), so a
 game plays the same in both, and with RetroArch's remap for the game, its folder or the core
 (`config/remaps/<core>/<name>.rmp`, the first one there): which button each of the pad's buttons
@@ -142,11 +151,11 @@ area it has drawn in covers most of the screen, only that area is shown. It only
 again, if the game draws into an edge. `"crop_borders": false` (or Options → Crop black edges)
 shows the whole picture, edges and all.
 
-Games that draw with the GPU (N64, Dreamcast, PlayStation) draw about as big as they're shown,
-rather than at the console's 640×480 scaled up, so 3D looks sharp: romi picks the core's
-resolution option (Flycast's internal resolution, Mupen64Plus's screen size, Beetle PSX HW's
-internal resolution) closest to the panel's height, at least as tall, up to 960 lines (bigger
-costs more time than a frame has, as each is read back from the GPU). RetroArch's own setting for
+Games that draw with the GPU (N64, Dreamcast, PlayStation, GameCube) draw about as big as they're
+shown, rather than at the console's 640×480 scaled up, so 3D looks sharp: romi picks the core's
+resolution option (Flycast's internal resolution, Mupen64Plus's screen size, Beetle PSX HW's and
+Dolphin's internal resolution) closest to the panel's height, at least as tall, up to 1056 lines
+(bigger costs more time than a frame has, as each is read back from the GPU). RetroArch's own setting for
 it is left as it is. `"sharp_3d": false` (or Options → Sharp 3D) draws at RetroArch's setting.
 
 `"screen_filter"` gives the picture an old screen's look: `"scanlines"`, `"crt"` (scanlines and a

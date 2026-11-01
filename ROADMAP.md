@@ -338,7 +338,7 @@ is tried in a separate process first). In the order worth trying:
      some people pick in RetroArch, and which then won't start); the PlayStation controller type
      from RetroArch's remap files, since Ape Escape needs a DualShock (see 8);
      a core that changes its frame rate with `SET_SYSTEM_AV_INFO` keeps the old one for pacing;
-     Dolphin and PPSSPP aren't installed here, so they're untried; Naomi needs `naomi.zip`.
+     PPSSPP isn't installed here, so it's untried (Dolphin plays, see 9.2); Naomi needs `naomi.zip`.
 2. ✓ **Core options** (`GET_VARIABLE`, which romi answers with "no" now, so every core runs on its
    defaults). On its own this lets romi pick the software renderers some cores still have:
    ParaLLEl/angrylion in Mupen64Plus-Next, and Dolphin's and PPSSPP's. Dolphin's is far too slow
@@ -427,11 +427,49 @@ that have no libretro core. In the order they're worth doing:
      firmware (the core uses FreeBIOS, as standalone melonDS does here); touch in `romi run --live`;
      the microphone (L2 in the core blows into it) and closing the lid (L3); the newer melonDS DS
      core, which keeps saves in a folder of its own.
-2. **GameCube**, through RetroArch's Dolphin core: `libretro-dolphin` is in Arch's repos, not
-   installed here. It draws with OpenGL, so it goes through section 7's GPU drawing, untried with
-   Dolphin. Saves won't line up with standalone Dolphin's on their own: its memory cards are GCI
-   folders or `.raw` files in its own user folder, and the core's are in RetroArch's. Wii is a
-   separate job, for the Wiimote.
+2. ✓ **GameCube**, through RetroArch's Dolphin core (`libretro-dolphin`, based on Dolphin 2609, the
+   same as standalone here), drawing with OpenGL through section 7's GPU drawing.
+   - **The C++ runtime, loaded first and shared**: Dolphin's core carries its own copy of parts
+     of libstdc++ (`std::call_once`'s helper and the thread-local it reads). Loaded first, it had
+     libstdc++ looking things up in the core's copies, while Mesa's LLVM, loaded for the GL
+     context, used libstdc++'s own, and romi crashed in `LLVMInitializeAMDGPUTarget` as the
+     context was made. romi now loads libstdc++ globally before any core, as RetroArch has it by
+     linking it, so everything shares its copies. Loaded privately instead, it crashed inside
+     Dolphin.
+   - **Memory cards shared with standalone Dolphin**: both keep them as GCI folders under a user
+     folder's `GC`, and the core's user folder is `User` in the save folder it's given, so romi
+     gives it `~/.local/state/romi/dolphin` with `User/GC` linked to Dolphin's (only when Slot A is
+     a GCI folder in the usual place). Its settings and caches stay out of Dolphin's way.
+   - **Sharp 3D**: `dolphin_efb_scale` is fitted to the panel like the other cores' sizes, and the
+     cap went from 960 lines to 1056 so Dolphin can draw at 2× (1280×1056, about 4 ms a frame
+     headless); the other cores' next sizes are 1440 and over, so they're unchanged. Dolphin's
+     on-screen messages are off unless RetroArch has them on.
+   - **One CPU thread**: with Dolphin's dual core on (the core's default, and RetroArch's), its
+     emulated CPU, which makes the sound, runs on a thread of its own, out of step with the frames
+     romi asks for. A frame brought a refresh's sound (800 samples) or none, about 60% none for
+     Melee and Kirby Air Ride, up to 29 in a row, so they played at the wrong speed and their sound
+     ran dry. romi turns dual core off (`dolphin_main_cpu_thread`) unless RetroArch has it on:
+     each frame then brings one refresh's sound, still at 9× full speed headless. (Monkey Ball 2's
+     game INI already turned it off, which is why it sounded right.)
+   - **Frames between refreshes**: from before that, a frame without sound, from a core that makes
+     sound, takes no time and isn't handed over (up to 15 in a row; after that the core has gone
+     quiet and keeps to its frame rate). It's what keeps dual core playable if it's chosen.
+   - **Defaults a core doesn't list**: Dolphin's shader compilation default is the unexpanded
+     macro `ShaderCompilationMode::Synchronous`, which romi handed over as it was. A default not
+     among an option's values is now its first value, as in RetroArch (Synchronous).
+   - Needs `dolphin-emu/Sys` in RetroArch's system folder; linked here to standalone Dolphin's.
+   - **The core's GL state left alone**: romi reads frames back in the core's context, and left its
+     own framebuffer bound; Dolphin remembers what it bound, so the start of each frame (Monkey
+     Ball 2's sky and ground, Melee's and Kirby's menus) went where it was never shown. romi now
+     puts back the bindings and pack settings it changes. RetroArch gives such a core a context
+     of its own.
+   - Still to do: Monkey Ball 2 played live after that fix (it played badly in Ghostty but
+     evenly in a pty at 2×); frames that compile shaders (up to 400 ms the first time an effect is seen, where
+     standalone Dolphin has a cache from playing; sharing `~/.cache/dolphin-emu/Shaders` might do,
+     as it's the same version); a game loading a save from the shared card, seen in play (the core makes and
+     reads `GC/USA/Card A` through the link, checked with an empty folder); `romi check` saying
+     when `Sys` is missing; how it runs in a real terminal at 2× with the frame log; rumble; a
+     GameCube wireframe; Wii, a separate job for the Wiimote.
 3. **PS2**, through the Play! core (`libretro-play`, installed): it crashes in its first frames,
    calling a null GL function in `CGSH_OpenGL::SetupFramebuffer`, so it's asking for a GL function
    romi's EGL context doesn't give it, or before the context is current. LRPS2 (PCSX2's core) isn't
