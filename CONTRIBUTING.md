@@ -7,6 +7,7 @@ cargo test                                    # unit tests
 python -m venv .venv && .venv/bin/pip install -r e2e/requirements.txt
 .venv/bin/pytest e2e                          # the real binary, driven in a fake terminal
 .venv/bin/python e2e/drive.py 100 30 keys:j shot   # print what the screen looks like
+python3 e2e/smoke_systems.py                   # boot one game per system in your own library
 cargo test --release frame_cost -- --ignored --nocapture   # how long a frame takes to get ready
 ROMI_FRAME_LOG=frames.csv romi                # time every frame of a game played in romi
 ROMI_CORE_LOG=core.log romi run game --frames 600 --screenshot out.png   # what a core says
