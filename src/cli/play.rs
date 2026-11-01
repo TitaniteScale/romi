@@ -150,25 +150,25 @@ fn wait_for_game(child: &mut Child) -> std::io::Result<ExitStatus> {
 
 // ---- run ----
 
-#[allow(clippy::too_many_arguments)]
-pub(super) fn run_core(
-    cfg: &Config,
-    query: &str,
-    system: Option<&str>,
-    core: Option<PathBuf>,
-    frames: u64,
-    screenshot: Option<&Path>,
-    wav: Option<&Path>,
-    input: Option<&Path>,
-    json: bool,
-    live: bool,
-) -> Result<()> {
+/// What a `romi run` is asked to do.
+pub(super) struct Run<'a> {
+    pub frames: u64,
+    pub screenshot: Option<&'a Path>,
+    pub wav: Option<&'a Path>,
+    pub input: Option<&'a Path>,
+    pub achievements: bool,
+    pub json: bool,
+    pub live: bool,
+}
+
+pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Option<PathBuf>, run: Run) -> Result<()> {
+    let Run { frames, screenshot, wav, input, achievements, json, live } = run;
     // A game in the library plays with the buttons remapped in romi for it, and with the core
     // from another of its emulators if its own isn't one.
-    let (name, rom, launch, controls, other_core) = match Path::new(query).is_file() {
+    let (name, rom, launch, controls, other_core, system_id) = match Path::new(query).is_file() {
         true => {
-            let (name, rom, launch) = rom_file(cfg, Path::new(query), system)?;
-            (name, rom, launch, Vec::new(), None)
+            let (name, rom, launch, system_id) = rom_file(cfg, Path::new(query), system)?;
+            (name, rom, launch, Vec::new(), None, system_id)
         }
         false => {
             let lib = Library::load(cfg);
@@ -181,7 +181,8 @@ pub(super) fn run_core(
             let mut emulators = crate::emulators::Emulators::default();
             emulators.find(cfg, &lib, g);
             let other_core = crate::emulators::core(game, &emulators.options(&lib, g));
-            (game.name.clone(), rom, Some(game.launch.clone()), controls, other_core)
+            let system_id = Some(lib.system_of(g).id.clone());
+            (game.name.clone(), rom, Some(game.launch.clone()), controls, other_core, system_id)
         }
     };
     let controls: Vec<_> = controls.iter().collect();
@@ -241,19 +242,33 @@ pub(super) fn run_core(
         remap: crate::emu::runner::remap(core_name.as_deref(), &rom, &controls),
         shown_height: None,
     };
+    let mut cheevos = achievements.then(|| start_achievements(system_id.as_deref(), &rom)).transpose()?;
     let mut emu = crate::emu::libretro::Core::load(&core, &rom, &dirs)?;
     let mut sound = wav.map(|path| crate::emu::audio::Wav::create(path, emu.sample_rate)).transpose()?;
     let mut samples = Vec::new();
+    let mut earned = Vec::new();
+    let mut waited = Duration::ZERO;
     let started = Instant::now();
     for n in 0..frames {
         emu.run_frame(script.players_at(n));
+        if let Some(client) = &mut cheevos {
+            client.frame(&emu);
+            earned.extend(client.take_events());
+            if n == 0 {
+                waited = wait_for_achievements(client, &mut earned);
+            }
+        }
         if let Some(sound) = &mut sound {
             samples.clear();
             emu.audio(&mut samples);
             sound.write(&samples)?;
         }
     }
-    let elapsed = started.elapsed();
+    let elapsed = started.elapsed().saturating_sub(waited);
+    if let Some(client) = &mut cheevos {
+        client.idle();
+        earned.extend(client.take_events());
+    }
     let sound_len = sound.map(|s| s.finish()).transpose()?;
     emu.finish_frame();
     let frame = emu.frame();
@@ -280,6 +295,7 @@ pub(super) fn run_core(
             "sample_rate": emu.sample_rate,
             "wav": wav,
             "wav_secs": sound_len.map(|d| d.as_secs_f64()),
+            "achievements": cheevos.is_some().then(|| achievements_json(&earned)),
         });
         println!("{outcome}");
     } else {
@@ -296,8 +312,100 @@ pub(super) fn run_core(
             let rate = emu.sample_rate.round();
             println!("Saved {:.1}s of sound ({rate} Hz) to {}", len.as_secs_f64(), path.display());
         }
+        if cheevos.is_some() {
+            for line in achievements_lines(&earned) {
+                println!("{line}");
+            }
+        }
     }
     Ok(())
+}
+
+/// A client with the account's login and the game's achievements asked for, for a run to check
+/// them after each frame.
+fn start_achievements(system: Option<&str>, rom: &Path) -> Result<crate::emu::cheevos::Client> {
+    use crate::emu::cheevos;
+    let Some(login) = cheevos::saved_login() else {
+        return fail(exit::CONFIG, "not logged in to RetroAchievements; run `romi achievements login`");
+    };
+    let console = system.and_then(crate::ra::console);
+    let Some(console) = console else {
+        let what = system.map_or("this game's system".to_string(), |s| format!("the {s} system"));
+        return fail(exit::USAGE, format!("RetroAchievements doesn't cover {what}; pass --system for a ROM file"));
+    };
+    let Some(hash) = crate::ra::hash_file(console, rom) else {
+        return fail(exit::UNAVAILABLE, format!("can't work out {}'s RetroAchievements hash", rom.display()));
+    };
+    cheevos::resend_waiting();
+    let client = cheevos::Client::new(console)?;
+    client.login_with_token(&login)?;
+    client.load_game(&hash)?;
+    Ok(client)
+}
+
+/// How long a run waits for the game's achievements to load before going on without them.
+const LOAD_WAIT: Duration = Duration::from_secs(15);
+
+/// Waits, after the first frame, for the game's achievements to load (or fail to), so the frames
+/// after it are checked; gives back how long it took.
+fn wait_for_achievements(
+    client: &mut crate::emu::cheevos::Client,
+    earned: &mut Vec<crate::emu::cheevos::Event>,
+) -> Duration {
+    use crate::emu::cheevos::Event;
+    let started = Instant::now();
+    let answered = |events: &[Event]| events.iter().any(|e| matches!(e, Event::Loaded { .. } | Event::Problem(_)));
+    while !answered(earned) {
+        if started.elapsed() > LOAD_WAIT {
+            earned.push(Event::Problem("RetroAchievements didn't answer".into()));
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+        client.idle();
+        earned.extend(client.take_events());
+    }
+    started.elapsed()
+}
+
+/// What a run's achievements did, as a person reads it.
+fn achievements_lines(events: &[crate::emu::cheevos::Event]) -> Vec<String> {
+    use crate::emu::cheevos::Event;
+    events
+        .iter()
+        .filter_map(|e| match e {
+            Event::Loaded { title, unlocked, total, points, points_total } => Some(format!(
+                "RetroAchievements: {title}: {unlocked} of {total} unlocked, {points} of {points_total} points"
+            )),
+            Event::Unlocked { title, points, .. } => Some(format!("Unlocked: {title} ({points} points)")),
+            Event::Mastered { title } => Some(format!("Mastered {title}")),
+            Event::Problem(p) => Some(p.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The same as JSON: the game, what was unlocked in the run, and what went wrong.
+fn achievements_json(events: &[crate::emu::cheevos::Event]) -> serde_json::Value {
+    use crate::emu::cheevos::Event;
+    let mut game = serde_json::Value::Null;
+    let (mut unlocked, mut problems) = (Vec::new(), Vec::new());
+    let mut mastered = false;
+    for e in events {
+        match e {
+            Event::Loaded { title, unlocked: had, total, points, points_total } => {
+                game = serde_json::json!({
+                    "title": title, "unlocked": had, "total": total, "points": points, "points_total": points_total,
+                });
+            }
+            Event::Unlocked { title, description, points, .. } => {
+                unlocked.push(serde_json::json!({"title": title, "description": description, "points": points}));
+            }
+            Event::Mastered { .. } => mastered = true,
+            Event::Problem(p) => problems.push(p.clone()),
+            _ => {}
+        }
+    }
+    serde_json::json!({ "game": game, "unlocked": unlocked, "mastered": mastered, "problems": problems })
 }
 
 /// A ROM given by path runs with the command of the first system that lists its extension.
@@ -305,7 +413,7 @@ fn rom_file(
     cfg: &Config,
     rom: &Path,
     system: Option<&str>,
-) -> Result<(String, PathBuf, Option<crate::launch::Launch>)> {
+) -> Result<(String, PathBuf, Option<crate::launch::Launch>, Option<String>)> {
     let ext = rom.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     let sys = match system {
         Some(want) => cfg
@@ -324,5 +432,5 @@ fn rom_file(
         vars.insert("dir".into(), rom.parent().unwrap_or(Path::new(".")).to_string_lossy().into_owned());
         crate::launch::Launch { command: s.command.clone(), mode: s.mode, cwd: None, env: s.env.clone(), vars }
     });
-    Ok((name, rom.to_path_buf(), launch))
+    Ok((name, rom.to_path_buf(), launch, sys.map(|s| s.id.clone())))
 }

@@ -562,6 +562,26 @@ impl Hashes {
     }
 }
 
+/// What RetroAchievements knows a game file by on `console`, read from the file; None if the
+/// console isn't hashed from files, or the file can't be read.
+pub fn hash_file(console: u32, path: &Path) -> Option<String> {
+    if disc_hashed(console) {
+        return crate::emu::cheevos::hash_disc(console, path);
+    }
+    match hashing(console)? {
+        Hashing::SetName => Some(set_name_hash(path)),
+        how => {
+            let rom = rom_bytes(path)?;
+            let bytes = match how {
+                Hashing::N64 => n64_native(rom),
+                Hashing::Rom(header) => hashed_bytes(rom, header),
+                Hashing::SetName => unreachable!("set names are hashed above"),
+            };
+            Some(format!("{:x}", md5::compute(&bytes)))
+        }
+    }
+}
+
 /// A game's ROM file and how its system hashes it, when it does.
 fn hashable(lib: &Library, g: usize) -> Option<(PathBuf, Hashing)> {
     let game = &lib.games[g];

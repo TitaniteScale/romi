@@ -58,6 +58,13 @@ romi run "pokemon pinball" --frames 3600 --wav title-music.wav
 romi run "metal slug" --frames 1800 --screenshot attract.png
 ```
 
+`--achievements` earns RetroAchievements during the run, as playing in romi does, after
+`romi achievements login`: it waits for the game's achievements to load, then checks them after
+every frame, and says what it unlocked (`"achievements"` in `--json`: the game, what was unlocked,
+and anything that went wrong). Unlocks are sent to your account, or to `ROMI_RA_HOST`, so a run
+that scripts the buttons to earn one makes a regression test for a ROM hack. Without the flag a
+run never touches the account.
+
 ## Playing in the terminal
 
 `romi run <game> --live` plays it in the terminal instead, drawn with the Kitty graphics protocol.

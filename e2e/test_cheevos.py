@@ -296,6 +296,35 @@ def test_a_game_without_rich_presence_shows_only_how_to_stop(start, sandbox, ser
     assert " · Esc, or hold" not in romi.text()
 
 
+def test_a_headless_run_earns_achievements_with_the_flag(sandbox, server):
+    set_up_an_nes_game(sandbox, server)
+    log_in(sandbox)
+    rom = sandbox.home / "ROMs/nes/Pocket Lantern (USA).nes"
+    out = run_cli(sandbox, "run", str(rom), "--system", "nes", "--frames", "300", "--achievements", "--json")
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)["achievements"]
+    assert [a["title"] for a in got["unlocked"]] == ["Count to 200"]
+    assert got["game"]["title"] == "Pocket Lantern" and got["game"]["total"] == 1 and not got["problems"]
+    assert [(a["a"], a["h"]) for a in server.calls("awardachievement")] == [("5501", "0")]
+    # Without the flag a run never touches the account.
+    before = len(server.requests)
+    out = run_cli(sandbox, "run", str(rom), "--system", "nes", "--frames", "300", "--json")
+    assert "achievements" in json.loads(out.stdout) and json.loads(out.stdout)["achievements"] is None
+    assert len(server.requests) == before
+
+
+def test_a_headless_run_says_so_when_it_cant_earn_anything(sandbox, server):
+    set_up_an_nes_game(sandbox, server)
+    rom = sandbox.home / "ROMs/nes/Pocket Lantern (USA).nes"
+    out = run_cli(sandbox, "run", str(rom), "--system", "nes", "--frames", "5", "--achievements")
+    assert out.returncode == 78 and "romi achievements login" in out.stderr
+    log_in(sandbox)
+    out = run_cli(sandbox, "run", str(rom), "--system", "nes", "--frames", "300", "--achievements")
+    assert out.returncode == 0, out.stderr
+    assert "Unlocked: Count to 200 (5 points)" in out.stdout
+    assert "Pocket Lantern: 0 of 1 unlocked, 0 of 5 points" in out.stdout
+
+
 PENDING = ".local/state/romi/retroachievements-pending.json"
 
 

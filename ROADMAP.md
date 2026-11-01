@@ -246,8 +246,12 @@ It's built in steps, and the first one pays off without any of the TUI work:
      API) would work now; not built.
    - ✓ **Rich presence** is read once a second and shown in the line under the game, before how
      to stop, when both fit (not in `romi status`).
-   - Still to do: `romi run --live` and headless `romi run` (where a scripted run earning an
-     achievement would make a good regression test for ROM hacks).
+   - ✓ **Headless `romi run --achievements`**: logs in, loads the game's achievements after the
+     first frame and checks them after each, then reports what it unlocked (`--json` has an
+     `achievements` object). It sends the unlocks, to the account or `ROMI_RA_HOST`, so a scripted
+     run earning one is a regression test for a ROM hack. Hashes the file itself (`ra::hash_file`),
+     so it works for ROMs outside the library.
+   - Still to do: `--live` with achievements (it has no notices to show them in).
 8. **Launch animation**: a wireframe of the system (a console and a CRT, or a cabinet) builds itself
    out of lines, then the camera dives into its screen and lands on the cells the game is drawn in.
    Each game's file name seeds how the lines enter (pen trace, reverse explode, scan flash, fly in,

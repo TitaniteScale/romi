@@ -184,6 +184,10 @@ pub enum Command {
         /// the frame's pixel X, Y)
         #[arg(long, value_name = "PATH")]
         input: Option<PathBuf>,
+        /// Earn RetroAchievements while it runs, as playing it in romi does (log in first with
+        /// `romi achievements login`). Unlocks go to your account, or to ROMI_RA_HOST
+        #[arg(long, conflicts_with = "live")]
+        achievements: bool,
         /// Print the outcome as JSON
         #[arg(long)]
         json: bool,
@@ -431,9 +435,10 @@ pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
         Command::Play { game, system, mode, dry_run, json } => {
             play::play(cfg, cfg_path, &game, system.as_deref(), mode, dry_run, json)
         }
-        Command::Run { game, system, core, frames, screenshot, wav, input, json, live } => {
+        Command::Run { game, system, core, frames, screenshot, wav, input, achievements, json, live } => {
             let (screenshot, wav) = (screenshot.as_deref(), wav.as_deref());
-            play::run_core(cfg, &game, system.as_deref(), core, frames, screenshot, wav, input.as_deref(), json, live)
+            let run = play::Run { frames, screenshot, wav, input: input.as_deref(), achievements, json, live };
+            play::run_core(cfg, &game, system.as_deref(), core, run)
         }
         Command::Stats { json } => reports::stats(cfg, json),
         Command::Achievements { action: None, json } => reports::achievements(cfg, json),
