@@ -48,6 +48,10 @@ Challenges (stay alive, don't get hit) are listed under a Challenge heading at t
 they're under way, each with its badge when there's room, and go when the achievement is earned
 or the challenge fails. `"retroachievements": { "badges": false }` leaves the badges out of these too.
 
+Games that have a rich presence (what you're doing, like "Level 3, 4 lives", which RetroAchievements
+shows on your profile) show it in the line under the game, before how to stop, when both fit. It's
+read once a second.
+
 romi uses RetroAchievements' own library, rcheevos, so achievements are checked the same way as in
 RetroArch. Unlocks are softcore: the server only accepts hardcore unlocks from emulators it has
 approved, and treats others' as softcore. Systems are the ones romi plays in the middle panel

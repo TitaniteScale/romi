@@ -814,7 +814,12 @@ fn draw_embedded(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
             draw_toast(f, theme, &layout);
         }
     }
-    let text = "Esc, or hold Select+Start, to stop";
+    let stop = "Esc, or hold Select+Start, to stop";
+    // What the game says the player is doing goes before it, when both fit.
+    let presence = embedded.presence();
+    let both = format!("{presence} · {stop}");
+    let text =
+        if !presence.is_empty() && both.chars().count() <= hint.width as usize { both } else { stop.to_string() };
     f.render_widget(Paragraph::new(Span::styled(text, Style::new().dim())).alignment(Alignment::Center), hint);
 }
 

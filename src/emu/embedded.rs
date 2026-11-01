@@ -128,6 +128,8 @@ pub struct Embedded {
     toasts: VecDeque<Toast>,
     /// Progress towards an achievement that's counting up, while it changes.
     tracker: Option<notice::Tracker>,
+    /// What the game says the player is doing, if it has a rich presence.
+    presence: String,
     /// Achievements whose challenges are under way, oldest first.
     challenges: Vec<notice::Challenge>,
     /// The cells each badge image (`notice::SLOT_*`) was last sent for, so it's sent once.
@@ -194,6 +196,7 @@ impl Embedded {
             toasts: VecDeque::new(),
             tracker: None,
             challenges: Vec::new(),
+            presence: String::new(),
             badge_cells: [None; notice::SLOTS],
             timing: Recorder::start(about),
             pixels: Vec::new(),
@@ -286,6 +289,10 @@ impl Embedded {
                     }
                     continue;
                 }
+                cheevos::Event::Presence(message) => {
+                    self.presence = message;
+                    continue;
+                }
                 cheevos::Event::ProgressHidden => {
                     self.tracker = None;
                     continue;
@@ -309,6 +316,12 @@ impl Embedded {
             }
         }
         status
+    }
+
+    /// What the game says the player is doing, for the line under its picture; empty if it
+    /// doesn't say.
+    pub fn presence(&self) -> &str {
+        &self.presence
     }
 
     /// Where to show progress towards an achievement over the game's `picture` now, if there is

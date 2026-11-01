@@ -244,9 +244,10 @@ It's built in steps, and the first one pays off without any of the TUI work:
      need RetroAchievements to approve romi and games played in romi to lose save states, rewind and
      the like. A read-only screen (a game's leaderboards, your rank and the top scores, from the web
      API) would work now; not built.
-   - Still to do: rich presence is sent but not shown; `romi run --live` and headless `romi run`
-     (where a scripted run earning an achievement would make a good regression test for ROM
-     hacks).
+   - ✓ **Rich presence** is read once a second and shown in the line under the game, before how
+     to stop, when both fit (not in `romi status`).
+   - Still to do: `romi run --live` and headless `romi run` (where a scripted run earning an
+     achievement would make a good regression test for ROM hacks).
 8. **Launch animation**: a wireframe of the system (a console and a CRT, or a cabinet) builds itself
    out of lines, then the camera dives into its screen and lands on the cells the game is drawn in.
    Each game's file name seeds how the lines enter (pen trace, reverse explode, scan flash, fly in,

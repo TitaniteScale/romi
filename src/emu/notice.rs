@@ -115,7 +115,8 @@ impl Toast {
             Event::Progress { .. }
             | Event::ProgressHidden
             | Event::ChallengeShown { .. }
-            | Event::ChallengeHidden { .. } => Err(None),
+            | Event::ChallengeHidden { .. }
+            | Event::Presence(_) => Err(None),
             Event::Offline => Err(Some("Can't reach RetroAchievements; unlocks will be sent when it's back".into())),
             Event::Online => Err(Some("RetroAchievements is back; unlocks sent".into())),
             Event::Problem(p) => Err(Some(p)),

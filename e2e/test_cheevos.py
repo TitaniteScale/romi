@@ -268,6 +268,34 @@ def test_a_challenge_shows_while_it_is_under_way_and_goes_when_it_ends(start, sa
         fake.close()
 
 
+def test_what_the_game_says_the_player_is_doing_shows_under_it(start, sandbox):
+    fake = FakeRetroAchievements(
+        [(5501, "Count to 200", 5, "0xH0000=200")], rich_presence="Display:\nCounting, now at @Number(0xH0000)\n"
+    )
+    try:
+        set_up_an_nes_game(sandbox, fake)
+        log_in(sandbox)
+        romi = start()
+        romi.keys("o")
+        romi.wait_for("Play in romi")
+        romi.keys("\r")
+        romi.wait_for(lambda: "Counting, now at" in romi.text(), timeout=10)
+        assert "to stop" in romi.text(), "the stop hint stays"
+    finally:
+        fake.close()
+
+
+def test_a_game_without_rich_presence_shows_only_how_to_stop(start, sandbox, server):
+    set_up_an_nes_game(sandbox, server)
+    log_in(sandbox)
+    romi = start()
+    romi.keys("o")
+    romi.wait_for("Play in romi")
+    romi.keys("\r")
+    wait_for_unlock(romi, server)
+    assert " · Esc, or hold" not in romi.text()
+
+
 PENDING = ".local/state/romi/retroachievements-pending.json"
 
 

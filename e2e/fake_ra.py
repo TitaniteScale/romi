@@ -22,12 +22,14 @@ def png(width, height, rgb):
 
 
 class FakeRetroAchievements:
-    def __init__(self, achievements, game_id=1234, title="Pocket Lantern", console=7, known_hashes=None):
+    def __init__(self, achievements, game_id=1234, title="Pocket Lantern", console=7, known_hashes=None, rich_presence=""):
         # Achievements as (id, title, points, condition), conditions in RetroAchievements' syntax.
         self.achievements = achievements
         self.game_id, self.title, self.console = game_id, title, console
         # Hashes that are this game; None means any.
         self.known_hashes = known_hashes
+        # The game's rich presence script, in RetroAchievements' syntax.
+        self.rich_presence = rich_presence
         self.requests = []
         # Badges asked for, by path.
         self.badges = []
@@ -94,7 +96,7 @@ class FakeRetroAchievements:
             ]
             return 200, {"Success": True, "GameId": self.game_id, "Title": self.title, "ConsoleId": self.console,
                          "ImageIconUrl": f"{self.url}/Images/000001.png", "RichPresenceGameId": self.game_id,
-                         "RichPresencePatch": "", "Sets": [{
+                         "RichPresencePatch": self.rich_presence, "Sets": [{
                              "AchievementSetId": 1, "GameId": self.game_id, "Title": None, "Type": "core",
                              "ImageIconUrl": f"{self.url}/Images/000001.png",
                              "Achievements": achievements, "Leaderboards": []}]}

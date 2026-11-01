@@ -80,6 +80,8 @@ unsafe extern "C" {
     fn romi_rc_user_agent_clause(client: *mut RcClient, buffer: *mut c_char, size: usize) -> usize;
     fn rc_client_do_frame(client: *mut RcClient);
     fn rc_client_idle(client: *mut RcClient);
+    fn rc_client_has_rich_presence(client: *mut RcClient) -> c_int;
+    fn rc_client_get_rich_presence_message(client: *mut RcClient, buffer: *mut c_char, size: usize) -> usize;
 }
 
 const DONE_LOGIN: c_int = 1;
@@ -139,6 +141,9 @@ pub enum Event {
     ChallengeHidden {
         id: u32,
     },
+    /// What the game says the player is doing (its rich presence: "Level 3, 4 lives"), when it
+    /// changes.
+    Presence(String),
     /// Every achievement in the game is unlocked.
     Mastered {
         title: String,
@@ -347,7 +352,13 @@ pub struct Client {
     /// Which of the core's memory maps the memory was last laid out from (see
     /// `Core::memory_map_given`), and whether any of it could be found.
     laid_out: Option<(u64, bool)>,
+    /// When the game's rich presence was last read, and what it said.
+    presence_read: Instant,
+    presence: String,
 }
+
+/// How often the game's rich presence is read.
+const PRESENCE_EVERY: Duration = Duration::from_secs(1);
 
 // SAFETY: rcheevos' client guards itself with a lock, and `Inner` is all locks and atomics.
 unsafe impl Send for Client {}
@@ -379,7 +390,8 @@ impl Client {
             drop(unsafe { Arc::from_raw(inner) });
             bail!("couldn't start rcheevos");
         }
-        let client = Client { raw, inner, console, laid_out: None };
+        let client =
+            Client { raw, inner, console, laid_out: None, presence_read: Instant::now(), presence: String::new() };
         let mut clause = [0 as c_char; 128];
         // SAFETY: the buffer is as big as it's said to be.
         unsafe { romi_rc_user_agent_clause(raw, clause.as_mut_ptr(), clause.len()) };
@@ -441,6 +453,28 @@ impl Client {
         // SAFETY: the client is alive, and this is the thread running the core.
         unsafe { rc_client_do_frame(self.raw) };
         self.after();
+        self.read_presence();
+    }
+
+    /// Tells what the game's rich presence says, when it has changed since last time.
+    fn read_presence(&mut self) {
+        if self.presence_read.elapsed() < PRESENCE_EVERY {
+            return;
+        }
+        self.presence_read = Instant::now();
+        let mut buffer = [0 as c_char; 256];
+        // SAFETY: as in `frame`; rcheevos writes at most the buffer's size, with a NUL.
+        let said = unsafe {
+            if rc_client_has_rich_presence(self.raw) == 0 {
+                return;
+            }
+            rc_client_get_rich_presence_message(self.raw, buffer.as_mut_ptr(), buffer.len())
+        };
+        let message = if said == 0 { String::new() } else { text(buffer.as_ptr()).unwrap_or_default() };
+        if message != self.presence {
+            self.presence.clone_from(&message);
+            self.inner().events.lock().unwrap_or_else(|e| e.into_inner()).push(Event::Presence(message));
+        }
     }
 
     /// Keeps things moving (retries, pings) while the game is paused. Only once it has run a
