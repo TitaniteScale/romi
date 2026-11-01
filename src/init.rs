@@ -45,7 +45,20 @@ const FOLDER_ALIASES: &[(&str, &str)] = &[
     ("pce", "pcengine"),
     ("sfc", "snes"),
     ("supernintendo", "snes"),
+    ("nintendo64", "n64"),
+    ("gameboyadvance", "gba"),
+    ("gameboycolor", "gbc"),
+    ("gameboy", "gb"),
+    ("nintendods", "nds"),
+    ("playstationportable", "psp"),
+    ("segagenesis", "megadrive"),
+    ("genesis", "megadrive"),
 ];
+
+/// A folder name for comparing: lowercase letters and digits only, so "Playstation 2" is "playstation2".
+fn squash(name: &str) -> String {
+    name.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect()
+}
 
 /// Extensions too generic to say which system a folder is for.
 const GENERIC_EXTS: &[&str] =
@@ -64,6 +77,8 @@ pub struct SystemDef {
     /// (label, command), best first. ES-DE syntax or romi's, depending on `esde`.
     pub commands: Vec<(String, String)>,
     pub arcade: bool,
+    /// Set by the scan: the games are in subfolders, so the system needs `recursive`.
+    pub recursive: bool,
 }
 
 impl SystemDef {
@@ -148,12 +163,13 @@ impl Catalog {
 
     /// The system a ROM folder is for, by its name or a common alternate name.
     fn lookup(&self, folder: &str) -> Option<&SystemDef> {
-        let lower = folder.to_lowercase();
-        let alias = FOLDER_ALIASES.iter().find(|(a, _)| *a == lower).map_or(lower.as_str(), |(_, to)| to);
+        let key = squash(folder);
+        let alias = FOLDER_ALIASES.iter().find(|(a, _)| *a == key).map_or(key.as_str(), |(_, to)| to);
         self.systems
             .iter()
-            .find(|s| s.folder.eq_ignore_ascii_case(folder))
+            .find(|s| squash(&s.folder) == key)
             .or_else(|| self.systems.iter().find(|s| s.folder == alias))
+            .or_else(|| self.systems.iter().find(|s| squash(&s.name) == key))
     }
 
     /// The definition for a configured system: by its folder's name, or else its id.
@@ -210,6 +226,7 @@ impl Catalog {
                 id: s.id,
                 extensions: s.extensions,
                 arcade: s.arcade,
+                recursive: false,
             })
             .collect();
         let rules = FindRules { core_dirs: CORE_DIRS.iter().map(|d| d.to_string()).collect(), ..FindRules::default() };
@@ -245,7 +262,7 @@ fn parse_systems(xml: &str) -> Vec<SystemDef> {
                 })
                 .collect();
             let arcade = text(n, "platform").split(',').any(|p| p.trim() == "arcade");
-            (!id.is_empty()).then(|| SystemDef { name: text(n, "fullname"), id, folder, extensions, commands, arcade })
+            (!id.is_empty()).then(|| SystemDef { name: text(n, "fullname"), id, folder, extensions, commands, arcade, recursive: false })
         })
         .collect()
 }
@@ -474,15 +491,7 @@ fn esde_roms_dir() -> Option<PathBuf> {
 
 pub fn scan(catalog: &Catalog, roms_dir: &Path, existing: Option<&Config>) -> Report {
     let mut finder = Finder::new(&catalog.rules);
-    let mut folders: Vec<String> = std::fs::read_dir(roms_dir)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|e| e.path().is_dir())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|name| !name.starts_with('.'))
-        .collect();
-    folders.sort();
+    let folders = system_folders(catalog, roms_dir, existing);
     // Ids already taken, by the config or by an earlier folder. A second folder for the same
     // system (`scd` and `segacd`, or one recognized by file type) goes by its folder name.
     let mut taken: Vec<String> = existing.map(|c| c.systems.iter().map(|s| s.id.clone()).collect()).unwrap_or_default();
@@ -501,19 +510,22 @@ pub fn scan(catalog: &Catalog, roms_dir: &Path, existing: Option<&Config>) -> Re
                     None => return Finding::Unknown { folder },
                 },
             };
-            let games = count_games(&path, &def.extensions);
+            let top = count_games(&path, &def.extensions, 0);
+            let games = count_games(&path, &def.extensions, 2);
             if games == 0 {
                 return Finding::Empty { def };
             }
+            // The library only looks inside subfolders of a system that says `recursive`.
+            let mut def = def;
+            def.recursive = games > top;
             let (mut runnable, tried) = catalog.try_commands(&mut finder, &def, roms_dir);
             if runnable.is_empty() {
                 return Finding::NoEmulator { def, games, tried };
             }
             let run = runnable.remove(0);
             let others = runnable.into_iter().map(|t| t.label).filter(|l| !l.is_empty()).collect();
-            let mut def = def;
             if taken.contains(&def.id) {
-                def.id = folder.to_lowercase();
+                def.id = squash(folder.rsplit('/').next().unwrap_or(&folder));
             }
             taken.push(def.id.clone());
             Finding::New { def, games, run, others, guessed }
@@ -533,26 +545,60 @@ fn configured_for(existing: Option<&Config>, roms_dir: &Path, path: &Path) -> Op
     })
 }
 
-/// A system for a folder with an unfamiliar name, from the extension most of its files have,
-/// as long as only one system uses that extension.
+/// The folders to look at, relative to `roms_dir`: the top-level ones, except that a folder that
+/// isn't a system but holds folders that are (a `by-system` wrapper) is replaced by those.
+fn system_folders(catalog: &Catalog, roms_dir: &Path, existing: Option<&Config>) -> Vec<String> {
+    let subdirs = |dir: &Path| -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| !name.starts_with('.'))
+            .collect();
+        names.sort();
+        names
+    };
+    let mut out = Vec::new();
+    for folder in subdirs(roms_dir) {
+        let path = roms_dir.join(&folder);
+        let inner = subdirs(&path);
+        let wrapper = configured_for(existing, roms_dir, &path).is_none()
+            && catalog.lookup(&folder).is_none()
+            && inner.iter().any(|sub| catalog.lookup(sub).is_some());
+        if wrapper {
+            out.extend(inner.into_iter().map(|sub| format!("{folder}/{sub}")));
+        } else {
+            out.push(folder);
+        }
+    }
+    out
+}
+
+/// A system for a folder with an unfamiliar name, from the extension most of its games have. Only
+/// extensions some system claims count (not `.sav`), only one system may use it, and it has to be
+/// most of them, so a folder of several systems' games isn't taken for one.
 fn guess_by_extension<'a>(catalog: &'a Catalog, dir: &Path) -> Option<&'a SystemDef> {
     let mut counts: BTreeMap<String, usize> = BTreeMap::new();
     for file in files(dir, 2) {
-        if let Some(ext) = file.extension() {
-            let ext = ext.to_string_lossy().to_lowercase();
-            if !GENERIC_EXTS.contains(&ext.as_str()) {
-                *counts.entry(ext).or_default() += 1;
-            }
+        let Some(ext) = file.extension().map(|e| e.to_string_lossy().to_lowercase()) else { continue };
+        if !GENERIC_EXTS.contains(&ext.as_str()) && catalog.systems.iter().any(|s| s.extensions.contains(&ext)) {
+            *counts.entry(ext).or_default() += 1;
         }
     }
-    let (ext, _) = counts.into_iter().max_by_key(|(_, n)| *n)?;
+    let total: usize = counts.values().sum();
+    let (ext, n) = counts.into_iter().max_by_key(|(_, n)| *n)?;
+    if n * 2 <= total {
+        return None;
+    }
     let mut matches = catalog.systems.iter().filter(|s| s.extensions.contains(&ext));
     let only = matches.next()?;
     matches.next().is_none().then_some(only)
 }
 
-fn count_games(dir: &Path, extensions: &[String]) -> usize {
-    files(dir, 2)
+fn count_games(dir: &Path, extensions: &[String], depth: usize) -> usize {
+    files(dir, depth)
         .iter()
         .filter(|f| f.extension().is_some_and(|e| extensions.contains(&e.to_string_lossy().to_lowercase())))
         .count()
@@ -680,6 +726,9 @@ pub fn render(report: &Report) -> String {
         }
         if def.arcade {
             out.push_str(", \"arcade\": true");
+        }
+        if def.recursive {
+            out.push_str(", \"recursive\": true");
         }
         out.push_str(",\n");
         let exts: Vec<String> = def.extensions.iter().map(|e| q(e)).collect();
@@ -944,6 +993,7 @@ mod tests {
             extensions: vec!["iso".into()],
             commands,
             arcade: false,
+            recursive: false,
         };
         let pcsx2 = ("PCSX2 (Standalone)".to_string(), "%EMULATOR_PCSX2% -batch %ROM%".to_string());
         let mut c = Catalog { systems: vec![ps2(vec![pcsx2.clone()])], rules: FindRules::default(), esde: true };
@@ -965,5 +1015,54 @@ mod tests {
             commands[commands.len() - 2..],
             ["retroarch -L {cores}/pcsx2_libretro.so {rom}", "retroarch -L {cores}/play_libretro.so {rom}"]
         );
+    }
+
+    fn touch(root: &Path, files: &[&str]) {
+        for f in files {
+            let p = root.join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"x").unwrap();
+        }
+    }
+
+    #[test]
+    fn folder_names_ignore_case_spaces_and_punctuation() {
+        let catalog = Catalog::builtin();
+        for name in ["Playstation 2", "PlayStation-2", "ps2"] {
+            assert_eq!(catalog.lookup(name).map(|s| s.id.as_str()), Some("ps2"), "{name}");
+        }
+        assert_eq!(catalog.lookup("Nintendo 64").map(|s| s.id.as_str()), Some("n64"));
+    }
+
+    #[test]
+    fn wrapper_folders_are_looked_inside() {
+        let dir = std::env::temp_dir().join(format!("romi-wrapper-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        touch(&dir, &["by-system/GBA/a.gba", "by-system/GBA/b.gba", "by-system/Nintendo 64/c.z64"]);
+        let catalog = Catalog::builtin();
+        assert_eq!(system_folders(&catalog, &dir, None), ["by-system/GBA", "by-system/Nintendo 64"]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn guessing_ignores_saves_and_mixed_folders() {
+        let dir = std::env::temp_dir().join(format!("romi-guess-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        touch(&dir, &["hacks/a.gba", "hacks/b.gba", "hacks/a.sav", "hacks/b.sav", "mixed/a.gba", "mixed/b.z64"]);
+        let catalog = Catalog::builtin();
+        assert_eq!(guess_by_extension(&catalog, &dir.join("hacks")).map(|s| s.id.as_str()), Some("gba"));
+        assert!(guess_by_extension(&catalog, &dir.join("mixed")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn games_in_subfolders_turn_recursive_on() {
+        let dir = std::env::temp_dir().join(format!("romi-recursive-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        touch(&dir, &["gba/Hack/a.gba"]);
+        let report = scan(&Catalog::builtin(), &dir, None);
+        let recursive = report.findings.iter().any(|f| matches!(f, Finding::New { def, .. } if def.recursive));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(recursive || report.findings.iter().all(|f| !matches!(f, Finding::New { .. })));
     }
 }
