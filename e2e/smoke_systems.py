@@ -39,8 +39,11 @@ BLANK_PIXELS = 16
 BLANK_SHARE = 0.0001
 # Less than this share of sound samples louder than a whisper, and it's silent.
 SILENT_BELOW = 0.002
-# A game that's blank or silent is run again for this many times as long, in case it was slow to start.
+# A game that's blank or silent is run again for this many times as long, with buttons pressed now
+# and then, in case it was slow to start or waiting at a prompt (a memory card alert, "Press Start").
 RETRY_TIMES = 3
+# Frames between presses, and how long each is held; they go round b, start and a.
+PRESS_EVERY, PRESS_FOR = 180, 30
 
 
 def romi(args, binary, timeout):
@@ -142,16 +145,25 @@ def pick(games, per_system, wanted, only):
     return chosen
 
 
-def run_once(game, binary, frames, limit, tmp):
+def presses(frames, tmp):
+    """A script that presses b, start and a in turn every few seconds, for `romi run --input`."""
+    lines = []
+    for n, at in enumerate(range(PRESS_EVERY * 2, frames, PRESS_EVERY)):
+        lines += [f"{at} {('b', 'start', 'a')[n % 3]}", f"{at + PRESS_FOR} "]
+    path = Path(tmp) / "presses.txt"
+    path.write_text("\n".join(lines) + "\n")
+    return str(path)
+
+
+def run_once(game, binary, frames, limit, tmp, press=False):
     """One `romi run`: the process's outcome, or (None, what went wrong) if it didn't finish."""
     shot, wav = Path(tmp) / "last.png", Path(tmp) / "sound.wav"
     started = time.monotonic()
+    args = ["run", game["key"], "--frames", str(frames), "--json", "--screenshot", str(shot), "--wav", str(wav)]
+    if press:
+        args += ["--input", presses(frames, tmp)]
     try:
-        out = romi(
-            ["run", game["key"], "--frames", str(frames), "--json", "--screenshot", str(shot), "--wav", str(wav)],
-            binary,
-            limit,
-        )
+        out = romi(args, binary, limit)
     except subprocess.TimeoutExpired:
         return None, {"status": "timed out", "note": f"no answer in {limit}s (a hang, or too slow for the limit)"}
     wall = round(time.monotonic() - started, 1)
@@ -179,10 +191,10 @@ def smoke(game, binary, frames, limit):
             return result | failed
         notes, at = [], frames
         if ran["blank"] or ran["silent"]:
-            # Slow to start, or broken? Run it longer.
-            again, failed = run_once(game, binary, frames * RETRY_TIMES, limit * RETRY_TIMES, tmp)
+            # Slow to start, waiting at a prompt, or broken? Run it longer, pressing buttons.
+            again, failed = run_once(game, binary, frames * RETRY_TIMES, limit * RETRY_TIMES, tmp, press=True)
             if again and not (again["blank"] or again["silent"]):
-                notes.append(f"blank or silent at {frames} frames, fine at {frames * RETRY_TIMES}")
+                notes.append(f"blank or silent at {frames} frames, fine at {frames * RETRY_TIMES} with buttons pressed")
             if again:
                 ran, at = again, frames * RETRY_TIMES
             elif failed:
