@@ -5,16 +5,20 @@ ones build on what the earlier ones put in place.
 
 ## Where things stand
 
-_As of 2026-10-22._ romi runs my whole library: 462 games across 22 systems, covering ROMs, shell
+_As of 2026-11-01._ romi runs my whole library: 458 games across 22 systems, covering ROMs, shell
 scripts, pinball tables, native PC ports and Steam. Everything passes `romi check`, BIOS files
 included.
 
 - **Works with just a controller:** a menu, search with an on-screen keyboard, jumping by letter,
   scrolling that speeds up when you hold the d-pad, favorites, recently played and play time.
-- **Box art:** 434 of the 462 games have covers, scraped online or found on disk. They're drawn with
+- **Box art:** 432 of the 458 games have covers, scraped online or found on disk. They're drawn with
   Kitty graphics, Sixel or iTerm2 images, or colored half-blocks.
-- **Game info:** genre for 358 games, year for 310, player count for 320 and a description for 203.
+- **Game info:** genre for 365 games, year for 319, player count for 328 and a description for 212.
   You can filter by genre, players, decade and whether you've played it.
+- **Plays in romi:** Game Boy to SNES, Genesis, arcade and the DS draw in the middle of the
+  launcher, and so do N64, PlayStation, Dreamcast and GameCube (drawn with the GPU), with PS2 as an
+  experiment. RetroAchievements unlock as you play, with badges, progress, challenges and rich
+  presence.
 
 ## 0. Groundwork ✓
 

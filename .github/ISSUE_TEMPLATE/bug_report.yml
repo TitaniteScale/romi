@@ -1,0 +1,50 @@
+name: Bug report
+description: Something doesn't work, or romi didn't find your games or emulators
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead. A screenshot helps if it's about how something looks.
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: "`romi check` output"
+      description: Paste it here. It says what romi found and what's missing or broken, which usually saves a round of questions.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: romi version
+      description: "`romi --version`, or the release or commit you built."
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal and its version
+      description: "Kitty, Ghostty, WezTerm, foot and so on. Games only play in a terminal that has Kitty graphics."
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: Distro, desktop and GPU
+      description: "For example: Fedora 42, Hyprland, Radeon 890M."
+    validations:
+      required: true
+  - type: input
+    id: emulators
+    attributes:
+      label: How RetroArch or the emulator is installed
+      description: "Package, Flatpak, AppImage, or built by hand. Say if it isn't RetroArch."
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: "Your config (without anything private), or the output of the command that failed. For a game that plays unevenly, `ROMI_FRAME_LOG=frames.csv romi` records timings."
