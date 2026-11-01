@@ -407,3 +407,14 @@ def test_init_counts_match_what_romi_lists_for_a_messy_tree(machine):
     assert len(games) == promised == 6
     assert {g["system"] for g in games} == {"gba", "n64", "odd"}
     assert "Cool Hack" in {g["name"] for g in games}
+
+
+def test_check_has_nothing_to_add_after_init_on_a_messy_tree(machine):
+    roms = machine.home / "Messy"
+    for path in ["by-system/GBA/Golden Sun (USA).gba", "by-system/GBA/Hacks/Cool Hack.gba", "odd/A.gba", "odd/A.sav"]:
+        (roms / path).parent.mkdir(parents=True, exist_ok=True)
+        (roms / path).touch()
+    fresh(machine)
+    assert init(machine, "--roms", str(roms), "--yes").returncode == 0
+    out = romi(machine, "check")
+    assert "romi init" not in out.stdout + out.stderr, out.stdout + out.stderr
