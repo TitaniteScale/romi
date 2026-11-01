@@ -108,9 +108,10 @@ void retro_deinit(void) {}
 void retro_run(void) {
     unsigned held = 0;
     for (unsigned id = 0; id < 16; id++) held |= (state(0, 1, 0, id) != 0) << id;
-    FILE *f = fopen("SEEN", "w");
+    FILE *f = fopen("SEEN" ".tmp", "w");
     fprintf(f, "%u %u\n", device, held);
     fclose(f);
+    rename("SEEN" ".tmp", "SEEN");
 }
 void retro_unload_game(void) {}
 void *retro_get_memory_data(unsigned id) { return 0; }

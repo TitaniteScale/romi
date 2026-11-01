@@ -16,9 +16,10 @@ typedef short (*state_fn)(unsigned, unsigned, unsigned, unsigned);
 static state_fn state;
 void retro_set_input_state(state_fn f) { state = f; }
 static void record(void) {
-    FILE *f = fopen("SEEN", "w");
+    FILE *f = fopen("SEEN" ".tmp", "w");
     fprintf(f, "%d %d %d", state(0, 6, 0, 0), state(0, 6, 0, 1), state(0, 6, 0, 2));
     fclose(f);
+    rename("SEEN" ".tmp", "SEEN");
 }""",
 ).replace("void retro_run(void) {", "void retro_run(void) { record();")
 

@@ -19,13 +19,14 @@ typedef short (*state_fn)(unsigned, unsigned, unsigned, unsigned);
 static state_fn state;
 void retro_set_input_state(state_fn f) { state = f; }
 static void record(void) {
-    FILE *f = fopen("SEEN", "w");
+    FILE *f = fopen("SEEN" ".tmp", "w");
     for (unsigned port = 0; port < 4; port++) {
         unsigned held = 0;
         for (unsigned id = 0; id < 16; id++) held |= (state(port, 1, 0, id) != 0) << id;
         fprintf(f, "%u ", held);
     }
     fclose(f);
+    rename("SEEN" ".tmp", "SEEN");
 }""",
 ).replace("void retro_run(void) {", "void retro_run(void) { record();")
 
