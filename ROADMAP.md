@@ -470,8 +470,8 @@ that have no libretro core. In the order they're worth doing:
      reads `GC/USA/Card A` through the link, checked with an empty folder); `romi check` saying
      when `Sys` is missing; how it runs in a real terminal at 2× with the frame log; rumble; a
      GameCube wireframe; Wii, a separate job for the Wiimote.
-3. ✓ **PS2**, through RetroArch's Play! core (`libretro-play`); LRPS2 (PCSX2's core) isn't
-   packaged for Arch. NeoGeo Battle Coliseum and Guilty Gear XX Accent Core play headless, to
+3. ✓ **PS2**, through LRPS2 (PCSX2's core, which Arch doesn't package) or else RetroArch's Play!
+   core (`libretro-play`). NeoGeo Battle Coliseum and Guilty Gear XX Accent Core play headless, to
    their intro and menus, at 3–5× full speed, with sound.
    - **GLEW without GLX**: Play! loads GL's functions with GLEW, whose `glewInit` loads them, then
      GLX's, and fails with no GLX display, as there isn't with romi's EGL context. Play! gave up
@@ -506,10 +506,51 @@ that have no libretro core. In the order they're worth doing:
    - **A game that stops responding, and quitting**: once a stuck core has been left running,
      romi ends with `_exit`, as exiting normally tore down libraries under its thread and crashed
      romi on the way out (once in two, seen live).
-   - Still to do: Guilty Gear played on a real screen, for a while;
-     NeoGeo Battle Coliseum in RetroArch's Play!, to be sure the hang is Play!'s (RetroArch on
-     Wayland crashes on Play!'s GLEW first, as romi did; with X11, `env -u WAYLAND_DISPLAY`, it may
-     not); LRPS2, PCSX2's core, which isn't packaged for Arch but plays far more; Super Metroid in
+   - **LRPS2, ahead of Play! (2026-11-01)**: libretro's nightly
+     (`buildbot.libretro.com/nightly/linux/x86_64/latest/pcsx2_libretro.so.zip`, BIOS in
+     `<system>/pcsx2/bios`) runs through romi's OpenGL path as it is, and is used wherever it's
+     installed: first in ES-DE's list, and in `MORE_CORES` for the built-in one. Same Sly Cooper
+     script, 2×, frames read back, AMD GPU, two alternating rounds, no terminal: LRPS2 2.3–2.4× full
+     speed (1.9× at worst, 1.5% of frames over 16.7 ms), Play! 1.1–1.2× (0.9× at worst, up to 50%
+     over), and LRPS2's sound is even, 800 or 801 samples every frame. Live, with nothing reading
+     the frames: Guilty Gear and NeoGeo Battle Coliseum's openings at 59.95 fps, sd 0.4 ms, the sound
+     never dry. All seven of Jake's games boot and reach menus, a cutscene or a match in it (a
+     one-minute script, not real play; only Sly Cooper ran longer), where Play! aborts at boot on
+     three (FFX, Burnout 3, Ratchet: an exception opening a file, the same in RetroArch under X11) and
+     hangs in NeoGeo Battle Coliseum. An RTX 4060 doesn't help Play! (1.0× against the AMD's 1.4×, at
+     35% use; reading back costs more). Play! crashes in RetroArch on Wayland, not X11:
+     `env -u WAYLAND_DISPLAY` got Sly Cooper through 30 s.
+   - **The context before the game**: romi called `retro_unload_game` before `context_destroy`, and
+     LRPS2's `context_destroy` then waited for its stopped CPU thread for good, so romi hung as it
+     quit. Now the context goes first, as in RetroArch. Dolphin, Flycast, Beetle PSX HW,
+     Mupen64Plus-Next and Play! exit as before.
+   - **Burnout 3's white races**: LRPS2's bloom hack (`GSC_BurnoutGames`) keeps a thin column's width
+     on its second draw, so the bloom buffer becomes 128×2240, and the bloom comes out all
+     white below the sky, in RetroArch too, and no option changes it. One line fixes it; Jake's core
+     is built from `083de59` with it, and the nightly has the bug until a pull request written up in
+     `notes/lrps2-burnout-pr.md` is sent and merged. Both Software renderers crash as that race
+     loads, in LRPS2's generated code (not looked into).
+   - **ATV Offroad Fury 2 upscaled**: noise for its tracks and the font sheet for its minimap, at 2×
+     and 4×. It keeps packed colour in its depth buffer, and LRPS2 uploads to an upscaled depth target
+     through a bilinear shader even when the game asks for nearest. A few lines fix it (in Jake's core,
+     and `notes/lrps2-burnout-pr.md`).
+   - **Readbacks cost ATV its sound**: it reads the GPU back three times a frame, waiting each time:
+     live at 2× on the Radeon 890M, in Ghostty, 52 fps and dry 56 times in 19 s; with
+     `pcsx2_hw_download_mode` at "Disable Readbacks", 59.8 fps and never. Jake has that in per-game
+     `.opt` files in RetroArch's `config/ParaLLEl PS2`, which romi reads. Everyone else would need the
+     same: romi could set it itself for games known to need it, by name. Whether that data matters to
+     anything in the game isn't known; nothing looked wrong from a cold boot to a race.
+   - Still to do for LRPS2: played on a real screen with a controller, past the menus; Burnout 3's
+     sound when it's busy, which Jake hears stutter a little and scripted crashes didn't reproduce (live
+     at 2×, 59.9 fps and never dry, a warm or empty LRPS2 shader cache alike, with Mesa's own cache
+     still there; needs a frame log from real play); romi getting
+     the core and linking the BIOS itself, as Arch has no package (by hand for now, in `docs/ps2.md`; a
+     missing BIOS gets LRPS2's own message in the status line); sharing PCSX2's memory cards (the
+     same format; LRPS2 keeps its own in `<system>/pcsx2/memcards`), as Dolphin's are; whether
+     achievements work (its info file says no memory descriptors); whether Play!'s sound workaround,
+     lump pacing and `glewInit` can go, if Play! stops mattering. Also seen: `romi run <path>` without
+     `--system` chose the wrong core (Genesis Plus GX for a Dreamcast `.chd`).
+   - Still to do: Guilty Gear played on a real screen, for a while; Super Metroid in
      bsnes-hd runs at 50 fps (PAL), by the core's own rate and sound, likely its region option;
      saves (Play!'s memory cards, in RetroArch's save folder, not
      PCSX2's); whether PAL games (512 lines) want a different step; more games, as Play!'s
@@ -535,6 +576,15 @@ Smaller items that fit between phases.
 - **More descriptions**: Wikipedia's summary API needs no key, but matching titles to articles is
   hit-or-miss. ScreenScraper and TheGamesDB need keys.
 - **SteamGridDB** (free key) for covers on PC ports and pinball tables.
+- **Drop an image on romi to make it the selected game's cover** (Jake's idea, 2026-11-01): a
+  terminal can't say where in its window a file was dropped, but Ghostty and kitty paste a dropped
+  file's path as text. With bracketed paste on (crossterm's `EnableBracketedPaste`, then
+  `Event::Paste` in `on_term_event`; romi doesn't turn it on yet, so a dropped path today arrives
+  as keystrokes), a pasted path that's an image becomes the selected game's cover: copied into
+  romi's art cache, or set as the game's `"art"` override, which every lookup already puts first
+  (`ArtRef::manual`). So it's select, then drop anywhere. First check by hand: drag an image from
+  Thunar onto a shell prompt in Ghostty, and see whether its path appears, and how it's quoted
+  (`'...'`, backslashes, or a `file://` URI).
 - **Tests that play leave frames behind**: `e2e/drive.py` ends romi with SIGKILL, and pyte never
   reads the frames, so each test that plays in romi leaves up to 30 in `/dev/shm` (about 150 MB
   for a whole run, until they're deleted or the machine restarts). Stopping romi with Esc, or a

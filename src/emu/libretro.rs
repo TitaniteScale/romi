@@ -1141,10 +1141,12 @@ impl Drop for Core {
         }
         // SAFETY: the game was loaded and the core initialized in `load`.
         unsafe {
-            (self.api.unload_game)();
+            // The context goes first, as in RetroArch: LRPS2 (PS2) pauses its CPU thread to let go
+            // of it, and waits for that thread for good if unloading has already ended it.
             if let Some(destroy) = self.hw.and_then(|hw| hw.destroy) {
                 destroy();
             }
+            (self.api.unload_game)();
             (self.api.deinit)();
         }
         self.gl = None;

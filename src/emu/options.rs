@@ -156,6 +156,8 @@ fn drawn_height(key: &str, value: &str) -> Option<u32> {
         "dolphin_efb_scale" => Some(value.trim().parse::<u32>().ok()? * 528),
         // "2x": the PS2's 448 lines (NTSC's, as its games mostly draw), so many times over.
         "play_res_multi" => Some(value.trim().strip_suffix('x')?.parse::<u32>().ok()? * 448),
+        // The same, for LRPS2: "1x (Native)", "2x".
+        "pcsx2_upscale_multiplier" => Some(value.split('x').next()?.trim().parse::<u32>().ok()? * 448),
         _ => None,
     }
 }
@@ -311,6 +313,12 @@ mod tests {
         let mut play = Options::new(BTreeMap::new(), Some(900));
         play.declare(vec![declare("play_res_multi", &["1x", "2x", "4x", "8x"])]);
         assert_eq!(value(&mut play, "play_res_multi").as_deref(), Some("2x"), "the tallest up to 1056, 896");
+        let mut lrps2 = Options::new(BTreeMap::new(), Some(400));
+        lrps2.declare(vec![declare("pcsx2_upscale_multiplier", &["1x (Native)", "2x", "4x", "8x"])]);
+        assert_eq!(value(&mut lrps2, "pcsx2_upscale_multiplier").as_deref(), Some("1x (Native)"));
+        let mut lrps2 = Options::new(BTreeMap::new(), Some(900));
+        lrps2.declare(vec![declare("pcsx2_upscale_multiplier", &["1x (Native)", "2x", "4x", "8x"])]);
+        assert_eq!(value(&mut lrps2, "pcsx2_upscale_multiplier").as_deref(), Some("2x"));
         let mut small = Options::new(BTreeMap::new(), Some(500));
         small.declare(vec![declare("dolphin_efb_scale", &["1", "2", "3"])]);
         assert_eq!(value(&mut small, "dolphin_efb_scale").as_deref(), Some("1"));

@@ -40,11 +40,10 @@ romi doesn't come with any games: bring your own ROMs, and the emulators to run 
   tested, or kitty. It runs libretro cores, the 2D systems' and the 3D ones that draw with
   OpenGL (Flycast, Mupen64Plus-Next, Beetle PSX HW, Dolphin), which need libEGL. 3D is new, and
   so far tested on AMD with Mesa. Any other game launches in its emulator as usual.
-- **PS2 in the terminal is experimental.** It plays through RetroArch's Play! core
-  (`libretro-play`), which runs far fewer games than PCSX2, and slowly in places even on a fast
-  laptop: Sly Cooper runs at 0.8 to 1.8 times full speed on a Ryzen AI 9 HX 370, before romi
-  draws anything. Some games hang: romi lets go of them and says so, and plays games inside it
-  again once restarted. Saves stay in Play!'s own memory cards, not PCSX2's. PCSX2 still runs every PS2 game as usual.
+- **PS2 in the terminal is experimental.** It plays best through LRPS2, PCSX2's RetroArch core,
+  which Arch doesn't package, so you add it yourself. Without it, romi uses Play! (`libretro-play`),
+  which runs fewer games, and slower. PCSX2 still runs every PS2 game as usual. [PS2 in
+  romi](docs/ps2.md) covers setting it up, and which games work.
 
 ## Install
 
@@ -152,6 +151,7 @@ and `romi guide` to bring it up from the controller. See [couch mode](docs/couch
 - [Config](docs/config.md): systems, commands, launch modes, overrides, hooks, BIOS checks,
   multi-disc games. [`default-config.jsonc`](default-config.jsonc) lists every option.
 - [Achievements](docs/achievements.md): RetroAchievements and Steam
+- [PS2 in romi](docs/ps2.md): LRPS2, Play! and PCSX2, setting it up, speed, saves, and which games work
 - [Game info and box art](docs/game-info.md): where descriptions, genres and covers come from
 - [Roadmap](ROADMAP.md): what's done and what's next
 - [Working on romi](CONTRIBUTING.md): tests, releasing, and a map of the code
