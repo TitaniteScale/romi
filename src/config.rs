@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_CONFIG: &str = include_str!("../default-config.jsonc");
@@ -37,6 +37,9 @@ pub struct Config {
     /// Buttons remapped for each system's games played in romi, by system id. romi's controls
     /// screen writes these.
     pub controls: HashMap<String, crate::emu::remap::Controls>,
+    /// Core options for each system's games played in romi, by system id, over the ones RetroArch
+    /// has for them: `{ "ps2": { "pcsx2_hw_download_mode": "Disable Readbacks" } }`.
+    pub core_options: HashMap<String, BTreeMap<String, String>>,
     /// A (or Enter) plays a game inside romi, when it can play there, and its emulator is in the
     /// game's menu. Off, A starts its emulator, and Play in romi is in the menu.
     pub play_in_romi: bool,
@@ -220,6 +223,7 @@ impl Default for Config {
             theme: Theme::default(),
             controller: ControllerConfig::default(),
             controls: HashMap::new(),
+            core_options: HashMap::new(),
             volume: 100,
             corner_radius: 0,
             screen_filter: crate::emu::screen::Filter::None,
@@ -422,6 +426,9 @@ pub struct Override {
     /// Buttons remapped for the game when it's played in romi, over its system's.
     #[serde(default, skip_serializing_if = "crate::emu::remap::Controls::is_empty")]
     pub controls: crate::emu::remap::Controls,
+    /// Core options for the game when it's played in romi, over its system's.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub core_options: BTreeMap<String, String>,
 }
 
 impl Override {
@@ -450,6 +457,9 @@ impl Override {
         pick(&mut self.year, other.year);
         for (from, to) in other.controls.0 {
             self.controls.0.entry(from).or_insert(to);
+        }
+        for (key, value) in other.core_options {
+            self.core_options.entry(key).or_insert(value);
         }
     }
 }

@@ -165,10 +165,11 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
     let Run { frames, screenshot, wav, input, achievements, json, live } = run;
     // A game in the library plays with the buttons remapped in romi for it, and with the core
     // from another of its emulators if its own isn't one.
-    let (name, rom, launch, controls, other_core, system_id) = match Path::new(query).is_file() {
+    let (name, rom, launch, controls, core_options, other_core, system_id) = match Path::new(query).is_file() {
         true => {
             let (name, rom, launch, system_id) = rom_file(cfg, Path::new(query), system)?;
-            (name, rom, launch, Vec::new(), None, system_id)
+            let core_options = system_id.iter().filter_map(|id| cfg.core_options.get(id)).cloned().collect();
+            (name, rom, launch, Vec::new(), core_options, None, system_id)
         }
         false => {
             let lib = Library::load(cfg);
@@ -178,14 +179,17 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
                 return fail(exit::USAGE, format!("{} isn't a ROM", game.name));
             };
             let controls = crate::emu::runner::controls_for(cfg, &lib, g).into_iter().cloned().collect();
+            let core_options: Vec<_> =
+                crate::emu::runner::core_options_for(cfg, &lib, g).into_iter().cloned().collect();
             let mut emulators = crate::emulators::Emulators::default();
             emulators.find(cfg, &lib, g);
             let other_core = crate::emulators::core(game, &emulators.options(&lib, g));
             let system_id = Some(lib.system_of(g).id.clone());
-            (game.name.clone(), rom, Some(game.launch.clone()), controls, other_core, system_id)
+            (game.name.clone(), rom, Some(game.launch.clone()), controls, core_options, other_core, system_id)
         }
     };
     let controls: Vec<_> = controls.iter().collect();
+    let core_options: Vec<_> = core_options.iter().collect();
     let core = match core {
         Some(c) => c,
         None => {
@@ -225,7 +229,7 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
             u32::from(s.rows.saturating_sub(1)) * cell_h
         });
         let runs_with = launch.as_ref().map(|l| l.command.as_str());
-        let emu = crate::emu::runner::load(cfg, &core, &rom, runs_with, &controls, shown)?;
+        let emu = crate::emu::runner::load(cfg, &core, &rom, runs_with, &controls, &core_options, shown)?;
         return crate::emu::live::play(emu, &name, cfg.volume_gain());
     }
     // Runs start with nothing saved, so they repeat exactly, and leave nothing behind. Declared
@@ -238,7 +242,7 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
         system: cfg.system_dir(),
         saves: Some(saves.path().to_path_buf()),
         save_file: None,
-        options: core_name.as_ref().map(|name| crate::emucfg::retroarch_core_options(name, &rom)).unwrap_or_default(),
+        options: crate::emu::runner::options(core_name.as_deref(), &rom, &core_options),
         remap: crate::emu::runner::remap(core_name.as_deref(), &rom, &controls),
         shown_height: None,
     };

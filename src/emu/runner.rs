@@ -11,6 +11,7 @@ use crate::emu::timing;
 use crate::emucfg::SharedSaves;
 use crate::library::Library;
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -21,7 +22,8 @@ use std::time::{Duration, Instant};
 /// for that core, so what it writes, like FinalBurn Neo's high scores, carries over both ways. The
 /// game's own save goes where RetroArch keeps it too, so a game saved in romi carries on in
 /// RetroArch and back, and the core runs with the options and remap RetroArch has for it and the
-/// game, with `controls` remapped in romi over that (see `remap`). With `shown_height`, how many
+/// game, with `core_options` set in romi over those and `controls` remapped in romi over that
+/// (see `remap`). With `shown_height`, how many
 /// screen pixels tall the game will be, 3D cores draw at about that size if `sharp_3d` is on.
 ///
 /// `runs_with` is the command the game runs with outside romi. When that's an emulator that keeps
@@ -33,6 +35,7 @@ pub fn load(
     rom: &Path,
     runs_with: Option<&str>,
     controls: &[&Controls],
+    core_options: &[&BTreeMap<String, String>],
     shown_height: Option<u32>,
 ) -> Result<Core> {
     let name = crate::emu::libretro::info(core).map(|info| info.name);
@@ -49,7 +52,7 @@ pub fn load(
         std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;
     }
     let save_file = save_file(saves.as_deref(), rom);
-    let options = name.as_ref().map(|name| crate::emucfg::retroarch_core_options(name, rom)).unwrap_or_default();
+    let options = options(name.as_deref(), rom, core_options);
     let remap = remap(name.as_deref(), rom, controls);
     let shown_height = shown_height.filter(|_| cfg.sharp_3d);
     Core::load(core, rom, &Dirs { system: cfg.system_dir(), saves, save_file, options, remap, shown_height })
@@ -76,6 +79,16 @@ fn dolphin_folder(dir: &Path, gc: &Path) -> Result<std::path::PathBuf> {
     Ok(dir.to_path_buf())
 }
 
+/// The core options a game plays with in `core` (by its name): what RetroArch has for it, with each
+/// of `sets` over that in turn.
+pub fn options(core: Option<&str>, rom: &Path, sets: &[&BTreeMap<String, String>]) -> BTreeMap<String, String> {
+    let mut options = core.map(|name| crate::emucfg::retroarch_core_options(name, rom)).unwrap_or_default();
+    for set in sets {
+        options.extend(set.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+    options
+}
+
 /// The remap a game plays with in `core` (by its name): RetroArch's for it, with each of `controls`
 /// over it in turn.
 pub fn remap(core: Option<&str>, rom: &Path, controls: &[&Controls]) -> Remap {
@@ -87,6 +100,12 @@ pub fn remap(core: Option<&str>, rom: &Path, controls: &[&Controls]) -> Remap {
 /// remap: its system's, then its own.
 pub fn controls_for<'a>(cfg: &'a Config, lib: &'a Library, g: usize) -> Vec<&'a Controls> {
     cfg.controls.get(&lib.system_of(g).id).into_iter().chain([&lib.games[g].controls]).collect()
+}
+
+/// The core options set in romi for a game in the library, in the order they go over RetroArch's:
+/// its system's, then its own.
+pub fn core_options_for<'a>(cfg: &'a Config, lib: &'a Library, g: usize) -> Vec<&'a BTreeMap<String, String>> {
+    cfg.core_options.get(&lib.system_of(g).id).into_iter().chain([&lib.games[g].core_options]).collect()
 }
 
 /// Where RetroArch keeps a game's save: the ROM's name with `.srm`, in the save folder, or next to

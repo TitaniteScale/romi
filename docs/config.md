@@ -110,6 +110,27 @@ RetroArch's remap for the game.
 }
 ```
 
+## Core options
+
+Options for the libretro core a game plays with in romi (the ones RetroArch calls core options),
+set in romi instead of in RetroArch's option files: for a whole system in the top-level
+`"core_options"`, by system id, and for one game in its override's `"core_options"`. Keys and
+values are the core's own, as in a RetroArch `.opt` file. They go over what RetroArch has for the
+core, the game and its folder, and a game's go over its system's. They only apply to games played
+in romi; an emulator started outside it has its own settings.
+
+```jsonc
+"core_options": {
+  "ps2": { "pcsx2_upscale_multiplier": "2x Native" }
+},
+"overrides": {
+  "ps2:Some Game (USA).iso": { "core_options": { "pcsx2_hw_download_mode": "Disable Readbacks" } }
+}
+```
+
+A core ignores an option it doesn't have, or a value it doesn't allow, and uses its default. Where
+the core says what it supports in its own settings screen, those are the keys and values to use.
+
 ## Hooks
 
 Hooks run commands when a game starts and stops: pause music, switch power profiles, move to a

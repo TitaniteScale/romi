@@ -43,6 +43,8 @@ pub struct Game {
     pub emulator: Option<String>,
     /// Buttons remapped for it when it's played in romi, from its overrides.
     pub controls: crate::emu::remap::Controls,
+    /// Core options set for it when it's played in romi, from its overrides.
+    pub core_options: std::collections::BTreeMap<String, String>,
 }
 
 impl Game {
@@ -71,6 +73,7 @@ impl Game {
         self.meta = meta;
         self.hidden = ov.hidden;
         self.controls.0.extend(ov.controls.0.clone());
+        self.core_options.extend(ov.core_options.clone());
     }
 }
 
@@ -408,6 +411,7 @@ impl Library {
         };
         let game = self.push_game(idx, format!("{}:{key_rel}", sys.id), name, Some(path), meta, launch, art);
         game.controls = ov.controls;
+        game.core_options = ov.core_options;
         if playlist.is_some() {
             game.discs = discs.iter().map(|d| dir.join(d)).collect();
             game.disc_keys = discs.iter().map(|d| format!("{}:{}", sys.id, d.to_string_lossy())).collect();
@@ -447,6 +451,7 @@ impl Library {
             default_run,
             emulator: None,
             controls: Default::default(),
+            core_options: Default::default(),
         });
         self.systems[system].games.push(self.games.len() - 1);
         self.games.last_mut().expect("just pushed")

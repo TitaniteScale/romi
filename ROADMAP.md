@@ -562,6 +562,9 @@ that have no libretro core. In the order they're worth doing:
      (`disc.rs` reads it from an `.iso`; `emucfg::LRPS2_GAMES`, under everything RetroArch has, so
      any option file wins): only ATV Offroad Fury 2 (USA, `SCUS_972.11`) so far. Whether that data
      matters to anything in the game isn't known; nothing looked wrong from a cold boot to a race.
+   - ✓ **`"core_options"` in romi's config** (2026-11-01): a system's (top-level, by system id) and
+     a game's (in its override) go over RetroArch's option files, the game's over the system's
+     (`runner::options`), for games played in romi. The built-in table (`LRPS2_GAMES`) is the lowest layer.
    - ✓ **Achievements for LRPS2 (2026-11-01)**: it gives no memory map, but its system RAM is 0x2004000
      bytes, the size of rcheevos' PS2 table, so the flat fallback lines up; Sly Cooper unlocked live.
      PS2 discs are hashed by rcheevos (`rc_hash_generate`; `.iso`/`.cue`), and an unknown dump's

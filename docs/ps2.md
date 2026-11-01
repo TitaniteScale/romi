@@ -67,12 +67,13 @@ GPU, more than once a frame in the worst case. ATV Offroad Fury 2 does it three 
 at 59.8 fps and the sound never ran dry.
 
 romi turns readbacks off by itself for ATV Offroad Fury 2 (USA), recognised by the serial on its
-disc (`SCUS_972.11`, read from an `.iso`), when it plays through LRPS2. Any option file of yours
-beats that, so setting `pcsx2_hw_download_mode` yourself, for the game or the core, turns it back
-on. For other games, or other regions' discs, you can do it yourself: romi reads RetroArch's
-per-game options, so you can turn them off for one game. Make a file named
-after the ROM in RetroArch's folder for the core, here
-`~/.config/retroarch/config/ParaLLEl PS2/ATV Offroad Fury 2 (USA) (v2.00).opt`:
+disc (`SCUS_972.11`, read from an `.iso`), when it plays through LRPS2. Anything you set yourself for
+`pcsx2_hw_download_mode`, for the game or the core, wins over that.
+
+For other games, or other regions' discs, set it yourself: in romi's
+[`"core_options"`](config.md#core-options), for the game or the whole system, or in RetroArch's
+per-game options. For those, make a file named after the ROM in RetroArch's folder for the core,
+here `~/.config/retroarch/config/ParaLLEl PS2/ATV Offroad Fury 2 (USA) (v2.00).opt`:
 
 ```
 pcsx2_hw_download_mode = "Disable Readbacks"

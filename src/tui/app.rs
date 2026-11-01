@@ -1753,11 +1753,13 @@ impl App {
             badges: self.cfg.retroachievements.badges,
         };
         let controls = crate::emu::runner::controls_for(&self.cfg, &self.lib, g);
+        let core_options = crate::emu::runner::core_options_for(&self.cfg, &self.lib, g);
         let runs_with = Some(self.lib.games[g].launch.command.as_str());
-        let started = crate::emu::runner::load(&self.cfg, &core, &rom, runs_with, &controls, self.shown_height())
-            .and_then(|core| {
-                crate::emu::embedded::Embedded::start(g, core, volume, launch, look, cheevos, self.pixel_mouse)
-            });
+        let started =
+            crate::emu::runner::load(&self.cfg, &core, &rom, runs_with, &controls, &core_options, self.shown_height())
+                .and_then(|core| {
+                    crate::emu::embedded::Embedded::start(g, core, volume, launch, look, cheevos, self.pixel_mouse)
+                });
         match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),
