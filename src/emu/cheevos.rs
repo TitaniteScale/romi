@@ -66,6 +66,7 @@ unsafe extern "C" {
     ) -> c_int;
     fn romi_rc_login_with_password(client: *mut RcClient, username: *const c_char, password: *const c_char);
     fn romi_rc_login_with_token(client: *mut RcClient, username: *const c_char, token: *const c_char);
+    fn romi_rc_hash_disc(console: u32, path: *const c_char, hash: *mut c_char) -> c_int;
     fn romi_rc_load_game(client: *mut RcClient, hash: *const c_char);
     fn romi_rc_user(client: *const RcClient, username: *mut *const c_char, token: *mut *const c_char);
     fn romi_rc_game(
@@ -136,6 +137,8 @@ struct Inner {
     in_flight: AtomicUsize,
     agent: ureq::Agent,
     user_agent: OnceLock<String>,
+    /// The hash the game was loaded by, to say what RetroAchievements didn't know.
+    hash: OnceLock<String>,
 }
 
 fn text(p: *const c_char) -> Option<String> {
@@ -302,6 +305,7 @@ impl Client {
             in_flight: AtomicUsize::new(0),
             agent,
             user_agent: OnceLock::new(),
+            hash: OnceLock::new(),
         }));
         let host = std::env::var(HOST_VAR).ok().map(|h| c_string(&h)).transpose()?;
         // SAFETY: the callbacks are 'static and `inner` outlives the client (see Drop).
@@ -359,6 +363,7 @@ impl Client {
 
     /// Loads the game with this RetroAchievements hash; rcheevos waits for the login first.
     pub fn load_game(&self, hash: &str) -> Result<()> {
+        let _ = self.inner().hash.set(hash.to_string());
         let hash = c_string(hash)?;
         // SAFETY: rcheevos copies the string.
         unsafe { romi_rc_load_game(self.raw, hash.as_ptr()) };
@@ -402,6 +407,12 @@ impl Client {
                 }
                 // A load that waited on a failed login says so again; once is enough.
                 (DONE_LOAD, Some(_)) if login_failed => {}
+                (DONE_LOAD, Some(e)) if e == "Unknown game" => {
+                    let hash = self.inner().hash.get().map(String::as_str).unwrap_or_default();
+                    events.push(Event::Problem(format!(
+                        "RetroAchievements doesn't know this dump ({hash}); it may not be a version with achievements"
+                    )));
+                }
                 (DONE_LOAD, Some(e)) => events.push(Event::Problem(format!("RetroAchievements: {e}"))),
                 _ => {}
             }
@@ -514,6 +525,16 @@ pub fn forget_login() -> Result<bool> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(e) => Err(e.into()),
     }
+}
+
+/// The RetroAchievements hash of a disc image, as rcheevos reads it (.iso, or .cue and its .bin
+/// files; not .chd, which rcheevos can't open by itself). None if it can't be read.
+pub fn hash_disc(console: u32, path: &std::path::Path) -> Option<String> {
+    let path = c_string(path.to_str()?).ok()?;
+    let mut hash = [0 as c_char; 33];
+    // SAFETY: rcheevos writes 32 characters and a NUL into the buffer.
+    let ok = unsafe { romi_rc_hash_disc(console, path.as_ptr(), hash.as_mut_ptr()) };
+    if ok == 0 { None } else { text(hash.as_ptr()) }
 }
 
 /// What a game needs for achievements while it's played in romi.

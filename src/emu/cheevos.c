@@ -6,6 +6,7 @@
  * and a pointer that comes back with each one. */
 
 #include "rc_client.h"
+#include "rc_hash.h"
 #include "rc_libretro.h"
 
 #include <stdlib.h>
@@ -220,4 +221,17 @@ const char* romi_rc_game(rc_client_t* client, uint32_t* unlocked, uint32_t* tota
 
 size_t romi_rc_user_agent_clause(rc_client_t* client, char* buffer, size_t size) {
   return rc_client_get_user_agent_clause(client, buffer, size);
+}
+
+/* The RetroAchievements hash of a disc image (.iso, or a .cue with its .bin files) for a disc
+ * console, as rcheevos reads it. Writes 32 characters and a NUL to `hash`; returns non-zero if
+ * the disc could be hashed. */
+int romi_rc_hash_disc(uint32_t console_id, const char* path, char* hash) {
+  rc_hash_iterator_t iterator;
+  int ok;
+  rc_hash_initialize_iterator(&iterator, path, NULL, 0);
+  rc_hash_init_default_cdreader();
+  ok = rc_hash_generate(hash, console_id, &iterator);
+  rc_hash_destroy_iterator(&iterator);
+  return ok;
 }

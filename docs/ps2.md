@@ -120,8 +120,16 @@ tried, so back up first if you try it.
 
 ## Achievements
 
-Achievements haven't been tested for PS2 in romi, and LRPS2's core info lists no memory map, so they
-may not work. PCSX2's own achievements aren't affected.
+Games played in LRPS2 earn RetroAchievements in romi (see [Earning them in
+romi](achievements.md#earning-them-in-romi)); Sly Cooper's was tried. LRPS2 gives no memory map,
+but its system RAM is the 32 MB of the console's main memory plus the 16 KB scratchpad, which is
+what RetroAchievements numbers addresses by. Play! hasn't been tried. PCSX2's own achievements
+aren't affected.
+
+A game is found by the hash of its disc's main program, read by rcheevos, so it has to be a dump
+RetroAchievements has registered. `.iso` and `.cue` work; `.chd` doesn't yet. When a dump isn't
+known, the notice at the start says so and gives its hash, to look up on the game's page under
+Supported Game Hashes. Final Fantasy X, for one, only has its International (Japan) disc.
 
 ## When a game stops responding
 

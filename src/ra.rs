@@ -534,9 +534,32 @@ impl Hashes {
 pub fn game_hash(lib: &Library, g: usize) -> Option<(u32, String)> {
     let console = console(&lib.system_of(g).id)?;
     let mut hashes = Hashes::load();
-    let hash = hashes.get(lib, g)?;
+    let hash = match disc_hashed(console) {
+        true => hashes.get_disc(lib, g, console)?,
+        false => hashes.get(lib, g)?,
+    };
     hashes.save();
     Some((console, hash))
+}
+
+/// Whether rcheevos hashes this console's games from the disc's files, not the whole file. Only
+/// the consoles played in romi are here; the rest go by title.
+fn disc_hashed(console: u32) -> bool {
+    console == 21
+}
+
+impl Hashes {
+    /// A disc game's hash, read by rcheevos (see `cheevos::hash_disc`), remembered.
+    fn get_disc(&mut self, lib: &Library, g: usize, console: u32) -> Option<String> {
+        let game = &lib.games[g];
+        let path = game.path.clone().filter(|_| game.discs.is_empty())?;
+        if let Some(hash) = self.0.get(&path) {
+            return Some(hash);
+        }
+        let hash = crate::emu::cheevos::hash_disc(console, &path)?;
+        self.0.insert(&path, hash.clone());
+        Some(hash)
+    }
 }
 
 /// A game's ROM file and how its system hashes it, when it does.

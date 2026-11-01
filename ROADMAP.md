@@ -540,6 +540,10 @@ that have no libretro core. In the order they're worth doing:
      `.opt` files in RetroArch's `config/ParaLLEl PS2`, which romi reads. Everyone else would need the
      same: romi could set it itself for games known to need it, by name. Whether that data matters to
      anything in the game isn't known; nothing looked wrong from a cold boot to a race.
+   - ✓ **Achievements for LRPS2 (2026-11-01)**: it gives no memory map, but its system RAM is 0x2004000
+     bytes, the size of rcheevos' PS2 table, so the flat fallback lines up; Sly Cooper unlocked live.
+     PS2 discs are hashed by rcheevos (`rc_hash_generate`; `.iso`/`.cue`), and an unknown dump's
+     notice gives its hash.
    - Still to do for LRPS2: played on a real screen with a controller, past the menus; Burnout 3's
      sound when it's busy, which Jake hears stutter a little and scripted crashes didn't reproduce (live
      at 2×, 59.9 fps and never dry, a warm or empty LRPS2 shader cache alike, with Mesa's own cache
@@ -547,7 +551,7 @@ that have no libretro core. In the order they're worth doing:
      the core and linking the BIOS itself, as Arch has no package (by hand for now, in `docs/ps2.md`; a
      missing BIOS gets LRPS2's own message in the status line); sharing PCSX2's memory cards (the
      same format; LRPS2 keeps its own in `<system>/pcsx2/memcards`), as Dolphin's are; whether
-     achievements work (its info file says no memory descriptors); whether Play!'s sound workaround,
+     `.chd` PS2 discs for achievements (rcheevos can't open them by itself); whether Play!'s sound workaround,
      lump pacing and `glewInit` can go, if Play! stops mattering. Also seen: `romi run <path>` without
      `--system` chose the wrong core (Genesis Plus GX for a Dreamcast `.chd`).
    - Still to do: Guilty Gear played on a real screen, for a while; Super Metroid in
