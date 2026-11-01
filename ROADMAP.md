@@ -470,10 +470,50 @@ that have no libretro core. In the order they're worth doing:
      reads `GC/USA/Card A` through the link, checked with an empty folder); `romi check` saying
      when `Sys` is missing; how it runs in a real terminal at 2× with the frame log; rumble; a
      GameCube wireframe; Wii, a separate job for the Wiimote.
-3. **PS2**, through the Play! core (`libretro-play`, installed): it crashes in its first frames,
-   calling a null GL function in `CGSH_OpenGL::SetupFramebuffer`, so it's asking for a GL function
-   romi's EGL context doesn't give it, or before the context is current. LRPS2 (PCSX2's core) isn't
-   packaged for Arch. Saves would be memory cards in RetroArch's folder, not PCSX2's.
+3. ✓ **PS2**, through RetroArch's Play! core (`libretro-play`); LRPS2 (PCSX2's core) isn't
+   packaged for Arch. NeoGeo Battle Coliseum and Guilty Gear XX Accent Core play headless, to
+   their intro and menus, at 3–5× full speed, with sound.
+   - **GLEW without GLX**: Play! loads GL's functions with GLEW, whose `glewInit` loads them, then
+     GLX's, and fails with no GLX display, as there isn't with romi's EGL context. Play! gave up
+     setting up its drawing and crashed on the first frame, calling a function it never loaded.
+     romi exports a `glewInit` of its own, which cores find before GLEW's: it calls the core's
+     GLEW's `glewContextInit`, GL's part only. (glvnd's GL functions work with EGL as with GLX.)
+     RetroArch on X11 makes GLX contexts, so it never meets this; on Wayland it may.
+   - **Found as an emulator**: ES-DE doesn't list Play!'s core for PS2, so romi adds it after
+     the system's own (`init::MORE_CORES`), and PS2 games that run in PCSX2 play in romi with it.
+   - **Sharp 3D**: `play_res_multi` is fitted like the others, at 448 lines a step: 2× is
+     1280×896, 4.5× full speed headless.
+   - **A game that stops responding**: NeoGeo Battle Coliseum hangs in Play! after Start at the
+     title (its emulated CPU spins in the game's code, and `retro_run` waits for a frame that never
+     comes; it isn't on Play!'s compatibility tracker, so likely Play!'s). romi waited for the
+     core's thread for good, and had to be killed. Now it waits 3 s, then leaves it running, says
+     so, and plays no other game in romi until it restarts. Applies to every core.
+   - **Sound Play! lost**: Play!'s libretro frontend kept only the newest block of sound
+     (`CSH_LibreAudio::Write` replaced the buffer) when its emulator thread made two between
+     frames: Guilty Gear XX Accent Core lost a fifth (49.8 s of sound in 60 s of frames), and in
+     romi, which times frames by their sound, played fast with its sound cut. romi exports
+     replacements for `Write` and `ProcessBuffer`, as for `glewInit`, that queue every block:
+     60.1 s. A pull request to Play! with the fix is written up in `notes/play-audio-pr.md`, to
+     send; once Arch's `libretro-play` has it, the replacements can go.
+   - **Frames timed by the average sound**: even with every block kept, Play!'s sound comes in
+     lumps, 0 to 3 blocks (22 ms each) a frame. Each frame took as long as its own sound, and one
+     with none took no time and wasn't shown: Guilty Gear showed 30 frames a second, ±13.7 ms, the
+     queue swung past 60 ms and romi threw sound away (2.1 s in 50, in a simulation of its
+     frames), and it ran dry 12 times in 44 s. Now each frame takes the average over recent frames,
+     those without sound counted while they're gaps between lumps (up to 15 in a row): 59.3 a
+     second, ±3 ms, and dry only while Play! starts and once at a 150 ms stall of its own. Steady
+     cores are unchanged (Monkey Ball 2 61.0 fps either way).
+   - **A game that stops responding, and quitting**: once a stuck core has been left running,
+     romi ends with `_exit`, as exiting normally tore down libraries under its thread and crashed
+     romi on the way out (once in two, seen live).
+   - Still to do: Guilty Gear played on a real screen, for a while;
+     NeoGeo Battle Coliseum in RetroArch's Play!, to be sure the hang is Play!'s (RetroArch on
+     Wayland crashes on Play!'s GLEW first, as romi did; with X11, `env -u WAYLAND_DISPLAY`, it may
+     not); LRPS2, PCSX2's core, which isn't packaged for Arch but plays far more; Super Metroid in
+     bsnes-hd runs at 50 fps (PAL), by the core's own rate and sound, likely its region option;
+     saves (Play!'s memory cards, in RetroArch's save folder, not
+     PCSX2's); whether PAL games (512 lines) want a different step; more games, as Play!'s
+     compatibility is well below PCSX2's.
 4. **Steam, and systems with no core** (Switch, PS3, Wii U): 7.3, an emulator or game in a
    compositor with no screen, its frames drawn in the panel. Last, and starting with an experiment
    to see whether `gamescope`'s headless backend works here at all.

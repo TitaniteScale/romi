@@ -123,6 +123,21 @@ pub struct Shared {
 
 const NO_SOUND: u32 = u32::MAX;
 
+/// How long a game has to stop in, saving a last time and unloading, before it's taken as stuck.
+const STOP_WAIT: Duration = Duration::from_secs(3);
+
+/// Whether a game that didn't stop has been left running (see `Shared::stop_and_wait`).
+static LEFT_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Whether a game that stopped responding is still running, for romi to end without the cleanup
+/// that would unload what it's running in.
+pub fn left_running() -> bool {
+    LEFT_RUNNING.load(Ordering::SeqCst)
+}
+
+/// What's said of a game that didn't stop (see `Shared::stop_and_wait`).
+pub const STUCK: &str = "the game stopped responding, and is left running until romi quits";
+
 /// A lock that a panic on the other thread can't spoil: nothing it guards is left half-changed.
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
@@ -161,6 +176,24 @@ impl Shared {
 
     pub fn stop(&self) {
         self.quit.store(true, Ordering::SeqCst);
+    }
+
+    /// Stops the core's `thread` and waits for it, for up to `STOP_WAIT`. False if it's still
+    /// running then: the core is stuck in a frame, and there's no stopping a thread from outside,
+    /// so it's left running, with the core loaded, until romi quits. Play!, after Start in
+    /// NeoGeo Battle Coliseum, never came back from its frame, and romi waited for it for good.
+    pub fn stop_and_wait(&self, thread: JoinHandle<()>) -> bool {
+        self.stop();
+        let deadline = Instant::now() + STOP_WAIT;
+        while !thread.is_finished() {
+            if Instant::now() >= deadline {
+                LEFT_RUNNING.store(true, Ordering::SeqCst);
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let _ = thread.join();
+        true
     }
 
     pub fn resume(&self) {
@@ -311,12 +344,6 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
             }
             None => period,
         };
-        // A frame that takes no time in the game (one shown between refreshes, see `audio`) isn't
-        // handed over: the next, due at once, ends the refresh, and a screen shows one picture a
-        // refresh. Dolphin's core does that with dual core on, which romi turns off unless it's chosen.
-        if wait.is_zero() {
-            continue;
-        }
         let frame = core.frame();
         hold = hold_for(hold, started.elapsed(), period);
         let slot = started + hold;

@@ -88,7 +88,28 @@ pub struct Catalog {
     pub esde: bool,
 }
 
+/// libretro cores that play a system's games in romi but that ES-DE doesn't list for it, as (system,
+/// label, core): Play!, the PS2 core Arch packages (ES-DE has LRPS2 and PCEE2, which it doesn't).
+/// Listed after the system's own, so they're offered in a game's menu, and used to play it in romi
+/// when its own emulator isn't RetroArch, without coming first.
+const MORE_CORES: &[(&str, &str, &str)] = &[("ps2", "Play!", "play_libretro.so")];
+
 impl Catalog {
+    /// Adds `MORE_CORES` to the systems they're for, in ES-DE's syntax or romi's.
+    fn add_more_cores(&mut self) {
+        for (id, label, core) in MORE_CORES {
+            let Some(sys) = self.systems.iter_mut().find(|s| s.id == *id) else { continue };
+            if sys.commands.iter().any(|(_, raw)| raw.contains(core)) {
+                continue;
+            }
+            let command = match self.esde {
+                true => format!("%EMULATOR_RETROARCH% -L %CORE_RETROARCH%/{core} %ROM%"),
+                false => format!("retroarch -L {{cores}}/{core} {{rom}}"),
+            };
+            sys.commands.push((label.to_string(), command));
+        }
+    }
+
     /// ES-DE's definitions from `dir`, or wherever ES-DE is installed.
     pub fn esde(dir: Option<&Path>) -> Option<Catalog> {
         let dir = match dir {
@@ -113,7 +134,9 @@ impl Catalog {
                 rules.core_dirs = more.core_dirs.into_iter().chain(rules.core_dirs).collect();
             }
         }
-        Some(Catalog { systems, rules, esde: true })
+        let mut catalog = Catalog { systems, rules, esde: true };
+        catalog.add_more_cores();
+        Some(catalog)
     }
 
     /// ES-DE's definitions if it's installed (or where the config says), else romi's.
@@ -188,7 +211,9 @@ impl Catalog {
             })
             .collect();
         let rules = FindRules { core_dirs: CORE_DIRS.iter().map(|d| d.to_string()).collect(), ..FindRules::default() };
-        Catalog { systems, rules, esde: false }
+        let mut catalog = Catalog { systems, rules, esde: false };
+        catalog.add_more_cores();
+        catalog
     }
 }
 
@@ -906,5 +931,30 @@ mod tests {
     fn builtin_catalog_parses() {
         let c = Catalog::builtin();
         assert!(c.systems.iter().any(|s| s.id == "psx" && !s.commands.is_empty()));
+    }
+
+    #[test]
+    fn cores_esde_doesnt_list_come_after_the_systems_own() {
+        let ps2 = |commands: Vec<(String, String)>| SystemDef {
+            id: "ps2".into(),
+            name: "PlayStation 2".into(),
+            folder: "ps2".into(),
+            extensions: vec!["iso".into()],
+            commands,
+            arcade: false,
+        };
+        let pcsx2 = ("PCSX2 (Standalone)".to_string(), "%EMULATOR_PCSX2% -batch %ROM%".to_string());
+        let mut c = Catalog { systems: vec![ps2(vec![pcsx2.clone()])], rules: FindRules::default(), esde: true };
+        c.add_more_cores();
+        c.add_more_cores();
+        let play = ("Play!".to_string(), "%EMULATOR_RETROARCH% -L %CORE_RETROARCH%/play_libretro.so %ROM%".to_string());
+        assert_eq!(c.systems[0].commands, [pcsx2, play.clone()], "once, last");
+        // Already listed (in a custom es_systems.xml, say), it isn't again.
+        let mut listed = Catalog { systems: vec![ps2(vec![play.clone()])], rules: FindRules::default(), esde: true };
+        listed.add_more_cores();
+        assert_eq!(listed.systems[0].commands, [play]);
+        let builtin = Catalog::builtin();
+        let ps2 = builtin.systems.iter().find(|s| s.id == "ps2").unwrap();
+        assert_eq!(ps2.commands.last().unwrap().1, "retroarch -L {cores}/play_libretro.so {rom}");
     }
 }

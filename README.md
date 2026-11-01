@@ -2,7 +2,8 @@
 
 A game launcher for the terminal. ROMs, scripts, native ports and Steam games in one list, driven
 by a keyboard or a controller. Games can also play right inside it, with sound, saves and
-RetroAchievements: Game Boy to SNES, Genesis and arcade, and in 3D, N64, PlayStation and Dreamcast.
+RetroAchievements: Game Boy to SNES, Genesis, arcade and the DS, and in 3D, N64, PlayStation,
+Dreamcast and GameCube. PS2 plays too, as an experiment.
 
 <img width="720" height="450" alt="Picking Crazy Taxi from the Dreamcast covers in romi: a wireframe arcade cabinet builds itself, and the game plays in the middle of the launcher" src="https://github.com/user-attachments/assets/226ba686-b2f8-4c54-805b-b708a5a86dc3" />
 
@@ -37,8 +38,13 @@ romi doesn't come with any games: bring your own ROMs, and the emulators to run 
   or colored half-blocks where there are none.
 - **Playing in the terminal** needs Kitty graphics with Unicode placeholders: Ghostty, where it's
   tested, or kitty. It runs libretro cores, the 2D systems' and the 3D ones that draw with
-  OpenGL (Flycast, Mupen64Plus-Next, Beetle PSX HW), which need libEGL. 3D is new, and so far
-  tested on AMD with Mesa. Any other game launches in its emulator as usual.
+  OpenGL (Flycast, Mupen64Plus-Next, Beetle PSX HW, Dolphin), which need libEGL. 3D is new, and
+  so far tested on AMD with Mesa. Any other game launches in its emulator as usual.
+- **PS2 in the terminal is experimental.** It plays through RetroArch's Play! core
+  (`libretro-play`), which runs far fewer games than PCSX2, and slowly in places even on a fast
+  laptop: Sly Cooper runs at 0.8 to 1.8 times full speed on a Ryzen AI 9 HX 370, before romi
+  draws anything. Some games hang: romi lets go of them and says so, and plays games inside it
+  again once restarted. Saves stay in Play!'s own memory cards, not PCSX2's. PCSX2 still runs every PS2 game as usual.
 
 ## Install
 

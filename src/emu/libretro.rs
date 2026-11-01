@@ -724,6 +724,38 @@ extern "C" fn audio_batch(data: *const i16, frames: usize) -> usize {
     frames
 }
 
+/// Play!'s sound (PS2), each block as its emulator made it, until its next frame takes them.
+static PLAY_SOUND: Mutex<Vec<i16>> = Mutex::new(Vec::new());
+
+/// Play!'s `CSH_LibreAudio::Write`, which romi has in place of Play!'s own: a core's calls find
+/// romi's first, as the program's (see `gl::glewInit`). Play!'s emulator runs on a thread of its
+/// own and hands each block of sound (990 samples) to it, and Play!'s kept it for its next frame
+/// to give the frontend, in place of whatever was kept already: when two blocks came between
+/// frames, the first was lost. Guilty Gear XX Accent Core lost a fifth of its sound, and in romi,
+/// which times frames by their sound, played fast, its sound cut. This keeps every block.
+/// `samples` counts left and right separately; `this`, Play!'s object, isn't needed.
+#[unsafe(export_name = "_ZN14CSH_LibreAudio5WriteEPsjj")]
+pub extern "C" fn play_sound_write(_this: *mut c_void, buffer: *const i16, samples: c_uint, _rate: c_uint) {
+    if buffer.is_null() {
+        return;
+    }
+    // SAFETY: Play! hands over `samples` samples, valid for this call.
+    let block = unsafe { std::slice::from_raw_parts(buffer, samples as usize) };
+    PLAY_SOUND.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(block);
+}
+
+/// Play!'s `CSH_LibreAudio::ProcessBuffer`, which it calls as each frame starts, in place of its
+/// own (see `play_sound_write`): all the sound made since the last frame, for this one.
+#[unsafe(export_name = "_ZN14CSH_LibreAudio13ProcessBufferEv")]
+pub extern "C" fn play_sound_take(_this: *mut c_void) {
+    let mut queued = PLAY_SOUND.lock().unwrap_or_else(|e| e.into_inner());
+    // Whole pairs of left and right; an odd one out waits for its other half.
+    let pairs = queued.len() & !1;
+    let block: Vec<i16> = queued.drain(..pairs).collect();
+    drop(queued);
+    shared().audio.extend_from_slice(&block);
+}
+
 extern "C" fn input_poll() {}
 
 extern "C" fn input_state(port: c_uint, device: c_uint, index: c_uint, id: c_uint) -> i16 {
@@ -839,7 +871,7 @@ impl Core {
     /// Loads the core at `core_path` and starts `rom` in it, with `dirs` as its folders.
     pub fn load(core_path: &Path, rom: &Path, dirs: &Dirs) -> Result<Core> {
         if LOADED.swap(true, Ordering::SeqCst) {
-            bail!("a core is already loaded");
+            bail!("a game is still loaded in romi (one that stopped responding stays until romi quits)");
         }
         Core::open(core_path, rom, dirs).inspect_err(|_| LOADED.store(false, Ordering::SeqCst))
     }
@@ -868,6 +900,7 @@ impl Core {
             options: Some(Options::new(dirs.options.clone(), dirs.shown_height)),
         };
         LAST_ERROR.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        PLAY_SOUND.lock().unwrap_or_else(|e| e.into_inner()).clear();
         load_cxx_runtime_first();
         // SAFETY: loading a core runs its initializers; libretro cores are made to be loaded this way.
         let lib = unsafe { libloading::Library::new(core_path) }

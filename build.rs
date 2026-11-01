@@ -37,6 +37,11 @@ fn main() {
         .warnings(false)
         .compile("rcheevos");
     cc::Build::new().file("src/emu/core_log.c").include(vendor.join("libretro")).compile("romi_core_log");
+    // Found by cores before their own: GLEW's (see `emu::gl::glewInit`), and Play!'s sound
+    // (see `emu::libretro::play_sound_write`).
+    for symbol in ["glewInit", "_ZN14CSH_LibreAudio5WriteEPsjj", "_ZN14CSH_LibreAudio13ProcessBufferEv"] {
+        println!("cargo:rustc-link-arg-bins=-Wl,--export-dynamic-symbol={symbol}");
+    }
     println!("cargo:rerun-if-changed=src/emu/cheevos.c");
     println!("cargo:rerun-if-changed=src/emu/core_log.c");
     println!("cargo:rerun-if-changed=vendor");

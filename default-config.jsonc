@@ -81,7 +81,7 @@
   // border a CRT hid), once it's clear where its picture ends.
   "crop_borders": true,
 
-  // Games that draw with the GPU (N64, Dreamcast, PlayStation, GameCube) draw about as big as they're shown
+  // Games that draw with the GPU (N64, Dreamcast, PlayStation, GameCube, PS2) draw about as big as they're shown
   // in romi, rather than at the console's 640×480 scaled up, so 3D looks sharp. RetroArch's own
   // setting for it is left as it is.
   "sharp_3d": true,

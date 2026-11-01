@@ -54,15 +54,30 @@ fn main() {
     if let Err(e) = result {
         // Output piped into something that stopped reading (`romi list | head`) isn't a problem.
         if e.downcast_ref::<std::io::Error>().is_some_and(|io| io.kind() == std::io::ErrorKind::BrokenPipe) {
-            std::process::exit(0);
+            exit(0);
         }
         let code = match e.downcast_ref::<cli::Exit>() {
             Some(exit) => exit.code,
             None => 1,
         };
         eprintln!("romi: {e:#}");
-        std::process::exit(code);
+        exit(code);
     }
+    exit(0);
+}
+
+/// Ends romi with `code`. With a game left running because it stopped responding (see
+/// `Shared::stop_and_wait`), it ends at once, without the cleanup a program does as it exits:
+/// that unloads what the core is still running in, and romi crashed on its way out.
+fn exit(code: i32) -> ! {
+    if emu::runner::left_running() {
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+        let _ = std::io::stderr().flush();
+        // SAFETY: _exit ends the process at once; everything romi keeps was written before this.
+        unsafe { libc::_exit(code) }
+    }
+    std::process::exit(code)
 }
 
 fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {

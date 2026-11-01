@@ -78,14 +78,14 @@ pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     let (shared, emu) = Shared::start(core, volume, false, None)?;
     let mut view = View::new(name, &core_name, fps);
     let result = Screen::enter().and_then(|_screen| view.run(&shared));
-    shared.stop();
-    let _ = emu.join();
+    let stopped = shared.stop_and_wait(emu);
     if let Some(timing) = view.timing.take() {
         let path = timing.finish(&shared.take_made())?;
         let summary = std::fs::read_to_string(timing::summary_path(&path)).unwrap_or_default();
         eprintln!("{summary}\nFrame timings in {}", path.display());
     }
     result?;
+    anyhow::ensure!(stopped, "{}", crate::emu::runner::STUCK);
     match shared.take_save_error() {
         Some(e) => anyhow::bail!("the game wasn't saved: {e}"),
         None => Ok(()),

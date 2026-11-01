@@ -309,9 +309,10 @@ impl Embedded {
 
     /// Stops the game, which saves it a last time, and says why that save failed if it did.
     pub fn stop(mut self) -> Option<String> {
-        self.shared.stop();
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+        if let Some(thread) = self.thread.take()
+            && !self.shared.stop_and_wait(thread)
+        {
+            return Some(crate::emu::runner::STUCK.to_string());
         }
         self.shared.take_save_error()
     }
@@ -535,9 +536,8 @@ fn console_size(frame: &Frame) -> (usize, usize) {
 impl Drop for Embedded {
     fn drop(&mut self) {
         let _ = self.write_timings();
-        self.shared.stop();
         if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
+            self.shared.stop_and_wait(thread);
         }
         let mut out = std::io::stdout();
         let _ = write!(out, "{}{}{}", kitty::delete(IMAGE), kitty::delete(INTRO_IMAGE), kitty::delete(BADGE_IMAGE));

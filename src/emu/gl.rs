@@ -12,6 +12,8 @@
 //! the GPU with a screen plugged in, which on a laptop with two is the one the desktop is on, so
 //! the other can stay asleep; failing that, any GPU EGL lists, or Mesa's surfaceless display. GL's
 //! own functions come from `eglGetProcAddress`, as the core's do.
+//!
+//! Cores that load GL's functions with GLEW get romi's `glewInit` in place of GLEW's (see there).
 
 use anyhow::{Context as _, Result, bail};
 use std::ffi::{CStr, c_char, c_void};
@@ -290,6 +292,60 @@ unsafe fn function<F: Copy>(name: &CStr) -> Result<F> {
     assert_eq!(size_of::<F>(), size_of::<*const c_void>(), "not a function pointer");
     // SAFETY: a non-null pointer to the function, read as the pointer type the caller vouches for.
     Ok(unsafe { std::mem::transmute_copy::<*const c_void, F>(&f) })
+}
+
+/// GLEW's `glewInit`, which romi has in place of GLEW's for the cores it loads: a core's call to it
+/// finds romi's first, as the program's own. GLEW's loads GL's functions, then GLX's, and fails if
+/// there's no GLX display, which there isn't with romi's EGL context, though GL's functions work
+/// with it (glvnd's GLX and EGL share them). Play! (PS2) gave up setting up what it draws with when
+/// it failed, and crashed on its first frame. This loads GL's functions only, with the core's own
+/// GLEW, which it loaded as its own and romi finds among what's loaded.
+#[unsafe(no_mangle)]
+pub extern "C" fn glewInit() -> u32 {
+    /// GLEW's `GLEW_ERROR_NO_GL_VERSION`, for when there's no GLEW to load them with.
+    const NO_GL_VERSION: u32 = 1;
+    match glew_context_init() {
+        // SAFETY: GLEW's `glewContextInit`, by its signature, called as `glewInit` would.
+        Some(init) => unsafe { init() },
+        None => NO_GL_VERSION,
+    }
+}
+
+/// `glewContextInit` from the GLEW that's loaded, if one is.
+fn glew_context_init() -> Option<unsafe extern "C" fn() -> u32> {
+    unsafe extern "C" fn each(info: *mut libc::dl_phdr_info, _: usize, found: *mut c_void) -> i32 {
+        // SAFETY: dl_iterate_phdr gives each loaded object's info, its name NUL-terminated, and
+        // passes through the pointer to `found` given below.
+        unsafe {
+            let name = (*info).dlpi_name;
+            let is_glew = !name.is_null()
+                && CStr::from_ptr(name)
+                    .to_bytes()
+                    .rsplit(|&b| b == b'/')
+                    .next()
+                    .is_some_and(|f| f.starts_with(b"libGLEW"));
+            if is_glew {
+                (*found.cast::<Vec<std::ffi::CString>>()).push(CStr::from_ptr(name).to_owned());
+            }
+        }
+        0
+    }
+    let mut found: Vec<std::ffi::CString> = Vec::new();
+    // SAFETY: `each` only reads what it's given and adds to `found`, which outlives the call.
+    unsafe { libc::dl_iterate_phdr(Some(each), (&raw mut found).cast()) };
+    found.iter().find_map(|path| {
+        // SAFETY: RTLD_NOLOAD only finds a library that's loaded already, running nothing; closing
+        // it again leaves it loaded for the core that loaded it. The symbol is GLEW's function.
+        unsafe {
+            let lib = libc::dlopen(path.as_ptr(), libc::RTLD_NOW | libc::RTLD_NOLOAD);
+            if lib.is_null() {
+                return None;
+            }
+            let f = libc::dlsym(lib, c"glewContextInit".as_ptr());
+            libc::dlclose(lib);
+            (!f.is_null()).then(|| std::mem::transmute::<*mut c_void, unsafe extern "C" fn() -> u32>(f))
+        }
+    })
 }
 
 /// A context with a framebuffer for the core to draw into.

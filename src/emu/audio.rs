@@ -9,11 +9,13 @@
 //! apart a little, so frames are stretched or shortened by up to half a percent to keep the
 //! queue near `TARGET`. Frames stay evenly spaced, as the picture needs, and the pitch is exact.
 //!
-//! Some cores hand over frames without sound between ones with a refresh's sound: Dolphin's with
-//! dual core on, which romi turns off unless it's chosen (see `options::in_romi`), give 800
-//! samples or none, more than half of Melee's frames none. Those frames are no time at all in the game, so they
-//! take none here either, as in RetroArch, which waits on the sound card; a game paced as if each
-//! took a whole frame ran slow, and its sound ran dry.
+//! Some cores make their sound in lumps: Play!'s comes a block of 22 ms at a time, so a frame has
+//! none, one, two or three. Each frame takes the average, over recent frames, of how long their
+//! sound lasts, those without any included, so frames come evenly and every one is shown. Timed
+//! by its own sound, a frame with none took no time and wasn't shown, Guilty Gear XX Accent Core
+//! showed 30 frames a second, unevenly, and the queue swung far enough to run dry and to throw
+//! sound away. A core that goes quiet for longer than a lump's gap (`SILENT_FRAMES`), loading,
+//! say, keeps the pace it had.
 
 use anyhow::{Context, Result, bail};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -31,9 +33,11 @@ const TARGET: Duration = Duration::from_millis(40);
 const PERIOD: Duration = Duration::from_millis(10);
 /// The most a frame is stretched or shortened by to keep the queue at `TARGET`.
 const MAX_NUDGE: f64 = 0.005;
-/// Frames in a row without sound, from a core that makes sound, that take no time. After that
-/// many the core has gone quiet (loading, say), and frames keep to its frame rate again.
+/// The most frames in a row without sound that are taken as gaps between lumps of it, and count
+/// toward the average. More, and the core has gone quiet (loading, say), and they don't.
 const SILENT_FRAMES: u32 = 15;
+/// How much each frame moves the average of how long frames' sound lasts.
+const SMOOTHING: f64 = 0.02;
 
 /// A stream to the default output device.
 pub struct Output {
@@ -142,11 +146,11 @@ impl Output {
     }
 }
 
-/// How long each frame takes, from the sound it made.
+/// How long each frame takes, from the sound frames make.
 struct Pace {
     /// How long a frame's sound lasts, averaged over recent frames, in seconds.
     frame_time: f64,
-    /// The core has made sound, so a frame without any is one between refreshes.
+    /// The core has made sound, so frames without any may be gaps between lumps of it.
     made_sound: bool,
     /// Frames in a row without sound.
     silent: u32,
@@ -161,18 +165,27 @@ impl Pace {
     /// How long a frame whose sound `lasts` (seconds) takes, with the queue `ahead` of where it
     /// should be (-1 empty, 0 on target, 1 twice the target).
     fn frame(&mut self, lasts: f64, ahead: f64) -> Duration {
-        // Cores make about the same amount of sound each frame, but not exactly. One that makes
-        // none keeps to the frame rate it gave.
-        if lasts > 0.0 {
-            self.frame_time += (lasts - self.frame_time) * 0.05;
+        // A core that has made no sound keeps to the frame rate it gave, and one gone quiet to the
+        // pace it had. Frames without sound, up to `SILENT_FRAMES` of them, count as frames of
+        // none, gaps between lumps of sound; they're kept in the average once there's sound again
+        // to show they were. Each takes the average with it counted, as the frames with sound do,
+        // or frames would come out a little longer than the sound, more than the nudge makes up.
+        let gap = |silent: u32| (1.0 - SMOOTHING).powi(silent as i32);
+        let frame_time = if lasts > 0.0 {
+            if self.made_sound && self.silent <= SILENT_FRAMES {
+                self.frame_time *= gap(self.silent);
+            }
+            self.frame_time += (lasts - self.frame_time) * SMOOTHING;
             (self.made_sound, self.silent) = (true, 0);
+            self.frame_time
         } else {
             self.silent = self.silent.saturating_add(1);
-            if self.made_sound && self.silent <= SILENT_FRAMES {
-                return Duration::ZERO;
+            match self.made_sound && self.silent <= SILENT_FRAMES {
+                true => self.frame_time * gap(self.silent),
+                false => self.frame_time,
             }
-        }
-        Duration::from_secs_f64(self.frame_time * (1.0 + MAX_NUDGE * ahead.clamp(-1.0, 1.0)))
+        };
+        Duration::from_secs_f64(frame_time * (1.0 + MAX_NUDGE * ahead.clamp(-1.0, 1.0)))
     }
 }
 
@@ -325,27 +338,42 @@ mod tests {
     use super::*;
 
     #[test]
-    fn frames_take_as_long_as_their_sound_and_those_without_none() {
-        let ms = |d: Duration| (d.as_secs_f64() * 1000.0 * 10.0).round() / 10.0;
+    fn frames_take_the_average_of_their_sound_evenly() {
+        let ms = |d: Duration| d.as_secs_f64() * 1000.0;
         let mut pace = Pace::new(60.0);
         // A core that has made no sound yet keeps to its frame rate.
-        assert_eq!(ms(pace.frame(0.0, 0.0)), 16.7);
-        // Dolphin's: a refresh's sound, or none for a frame shown between refreshes.
+        assert!((ms(pace.frame(0.0, 0.0)) - 16.67).abs() < 0.01);
+        // A refresh's sound every frame (Dolphin's): as long as that.
         let refresh = 800.0 / 48000.0;
-        for _ in 0..200 {
+        for _ in 0..500 {
             pace.frame(refresh, 0.0);
         }
-        assert_eq!(ms(pace.frame(refresh, 0.0)), 16.7);
-        assert_eq!(pace.frame(0.0, 0.0), Duration::ZERO);
-        let took: f64 =
-            [refresh, 0.0, refresh, refresh, 0.0, refresh].iter().map(|&l| pace.frame(l, 0.0).as_secs_f64()).sum();
-        assert!((took - 4.0 * refresh).abs() < 1e-4, "as long as the sound, {took}");
-        // Gone quiet for longer than that, it keeps to the frame rate again.
-        let quiet: Vec<Duration> = (0..SILENT_FRAMES + 2).map(|_| pace.frame(0.0, 0.0)).collect();
-        assert_eq!(quiet[SILENT_FRAMES as usize - 1], Duration::ZERO);
-        assert_eq!(ms(quiet[SILENT_FRAMES as usize]), 16.7);
+        assert!((ms(pace.frame(refresh, 0.0)) - 16.67).abs() < 0.01);
+        // Play!'s, in blocks of 990 samples, two on a frame, then none, then one, then none: the
+        // average, 16.8 ms, every frame, none of them taking no time.
+        let block = 990.0 / 44100.0;
+        let lumps = [2.0 * block, 0.0, block, 0.0];
+        for _ in 0..500 {
+            for &l in &lumps {
+                pace.frame(l, 0.0);
+            }
+        }
+        let took: Vec<f64> = (0..400).map(|i| ms(pace.frame(lumps[i % 4], 0.0))).collect();
+        let average = 3.0 * block / 4.0 * 1000.0;
+        assert!(took.iter().all(|&t| (t - average).abs() < average * 0.05), "evenly, {:?}", &took[..8]);
+        let total: f64 = took.iter().sum();
+        assert!((total - 100.0 * 3.0 * block * 1000.0).abs() < 30.0, "as long as the sound, {total}");
+        // Gone quiet (loading, say), frames go back to the pace they had once there have been too
+        // many without sound for gaps between lumps of it, and keep to it.
+        let quiet: Vec<f64> = (0..100).map(|_| ms(pace.frame(0.0, 0.0))).collect();
+        let (gaps, after) = quiet.split_at(SILENT_FRAMES as usize);
+        assert!(gaps.iter().all(|&t| t > average * 0.7), "{gaps:?}");
+        assert!(
+            after.iter().all(|&t| (t - after[0]).abs() < 1e-9 && (t - average).abs() < average * 0.05),
+            "{after:?}"
+        );
         // Behind, a frame is shortened a little to catch up.
-        assert!(pace.frame(refresh, -1.0) < pace.frame(refresh, 0.0));
+        assert!(pace.frame(block, -1.0) < pace.frame(block, 0.0));
     }
 
     #[test]
