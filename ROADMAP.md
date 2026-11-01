@@ -237,10 +237,16 @@ It's built in steps, and the first one pays off without any of the TUI work:
      the rest, each with its badge when every one is here and the picture is tall enough (titles
      only otherwise). It yields to the progress box if they'd overlap on a narrow picture. Badge
      images are one Kitty image per slot (`notice::SLOT_*`), the unlock notice's first.
-   - Still to do: leaderboards (rcheevos sends the events, romi ignores them); rich presence
-     is sent but not shown; `romi run --live` and headless `romi run` (where a scripted run
-     earning an achievement would make a good regression test for ROM hacks); hardcore, which
-     would need RetroAchievements to approve romi.
+   - **Leaderboards are blocked on hardcore** (found 2026-11-01): rcheevos 12.5.0 only evaluates
+     them when hardcore is on (`rc_client.c`, `client->state.hardcore ||
+     allow_leaderboards_in_softcore`, and that field is internal, with no setter), so a softcore
+     client never gets a started, tracker or scoreboard event. They come with hardcore, which would
+     need RetroAchievements to approve romi and games played in romi to lose save states, rewind and
+     the like. A read-only screen (a game's leaderboards, your rank and the top scores, from the web
+     API) would work now; not built.
+   - Still to do: rich presence is sent but not shown; `romi run --live` and headless `romi run`
+     (where a scripted run earning an achievement would make a good regression test for ROM
+     hacks).
 8. **Launch animation**: a wireframe of the system (a console and a CRT, or a cabinet) builds itself
    out of lines, then the camera dives into its screen and lands on the cells the game is drawn in.
    Each game's file name seeds how the lines enter (pen trace, reverse explode, scan flash, fly in,
