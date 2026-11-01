@@ -4,6 +4,7 @@ mod art;
 mod cli;
 mod config;
 mod config_edit;
+mod disc;
 mod emu;
 mod emucfg;
 mod emulators;

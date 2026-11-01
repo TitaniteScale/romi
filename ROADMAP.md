@@ -558,8 +558,10 @@ that have no libretro core. In the order they're worth doing:
      live at 2× on the Radeon 890M, in Ghostty, 52 fps and dry 56 times in 19 s; with
      `pcsx2_hw_download_mode` at "Disable Readbacks", 59.8 fps and never. Jake has that in per-game
      `.opt` files in RetroArch's `config/ParaLLEl PS2`, which romi reads. Everyone else would need the
-     same: romi could set it itself for games known to need it, by name. Whether that data matters to
-     anything in the game isn't known; nothing looked wrong from a cold boot to a race.
+     same. ✓ romi now sets it itself for games known to need it, recognised by the disc's serial
+     (`disc.rs` reads it from an `.iso`; `emucfg::LRPS2_GAMES`, under everything RetroArch has, so
+     any option file wins): only ATV Offroad Fury 2 (USA, `SCUS_972.11`) so far. Whether that data
+     matters to anything in the game isn't known; nothing looked wrong from a cold boot to a race.
    - ✓ **Achievements for LRPS2 (2026-11-01)**: it gives no memory map, but its system RAM is 0x2004000
      bytes, the size of rcheevos' PS2 table, so the flat fallback lines up; Sly Cooper unlocked live.
      PS2 discs are hashed by rcheevos (`rc_hash_generate`; `.iso`/`.cue`), and an unknown dump's

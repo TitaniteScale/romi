@@ -300,9 +300,38 @@ fn melonds_save_dir(config_dir: &Path, rom: &Path) -> Option<PathBuf> {
     }
 }
 
+/// What games are known to need from a core, by the core's name and the game's serial, with what
+/// was seen. These go under everything RetroArch has, so any option file of yours beats them.
+struct KnownGame {
+    /// The serial on the disc (`SYSTEM.CNF`'s boot file, like `SCUS_972.11`).
+    serial: &'static str,
+    options: &'static [(&'static str, &'static str)],
+}
+
+/// LRPS2's names: the current one, and the one it had.
+const LRPS2: [&str; 2] = ["ParaLLEl PS2", "LRPS2"];
+
+const LRPS2_GAMES: &[KnownGame] = &[
+    // ATV Offroad Fury 2 (USA) reads the GPU back three times a frame, each time waiting for it:
+    // at 2× on a Radeon 890M, 52 fps and the sound dry 56 times in 19 s. With readbacks off, 59.8
+    // fps and never. Only tried from a cold boot into one race, on one machine, and not known to
+    // matter to anything in the game. Other regions' serials aren't here because none were tried.
+    KnownGame { serial: "SCUS_972.11", options: &[("pcsx2_hw_download_mode", "Disable Readbacks")] },
+];
+
+/// The options `core` is known to want for `rom`, if it's one of the games above.
+fn known_options(core: &str, rom: &Path) -> BTreeMap<String, String> {
+    if !LRPS2.iter().any(|name| name.eq_ignore_ascii_case(core)) {
+        return BTreeMap::new();
+    }
+    let Some(serial) = crate::disc::ps2_serial(rom) else { return BTreeMap::new() };
+    let known = LRPS2_GAMES.iter().find(|g| g.serial == serial);
+    known.into_iter().flat_map(|g| g.options).map(|(k, v)| (k.to_string(), v.to_string())).collect()
+}
+
 /// The core options RetroArch has for the core called `core` (its name without the version), by
-/// key: the core's, then the ones for `rom`'s folder, then for `rom` itself, each over the last, as
-/// RetroArch takes them. With global core options on, there's one file for every core instead.
+/// key: what the game is known to need, then the core's, then the ones for `rom`'s folder, then
+/// for `rom` itself, each over the last, as RetroArch takes them. With global core options on, there's one file for every core instead.
 pub fn retroarch_core_options(core: &str, rom: &Path) -> BTreeMap<String, String> {
     let dir = Emulator::RetroArch.config_dir(false);
     core_options(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
@@ -327,7 +356,7 @@ fn core_options(ini: &Ini, config_dir: &Path, core: &str, rom: &Path) -> BTreeMa
     {
         files.push(opt(name));
     }
-    let mut options = BTreeMap::new();
+    let mut options = known_options(core, rom);
     for file in files {
         options.extend(Ini::read(&file).section("").map(|(k, v)| (k.to_string(), v.to_string())));
     }
@@ -504,6 +533,27 @@ mod tests {
         assert_eq!(all["aspect"], "4:3");
         assert_eq!(no_games["cpu"], "interpreter");
         assert_eq!(no_games["res"], "960x720");
+    }
+
+    #[test]
+    fn a_game_known_to_need_an_option_gets_it_unless_an_option_file_says_otherwise() {
+        let dir = std::env::temp_dir().join(format!("romi-known-options-test-{}", std::process::id()));
+        let core = dir.join("config/ParaLLEl PS2");
+        std::fs::create_dir_all(&core).unwrap();
+        let rom = dir.join("ATV.iso");
+        std::fs::write(&rom, crate::disc::tests::image("BOOT2 = cdrom0:\\SCUS_972.11;1\r\n")).unwrap();
+        let other = dir.join("Other.iso");
+        std::fs::write(&other, crate::disc::tests::image("BOOT2 = cdrom0:\\SLUS_000.01;1\r\n")).unwrap();
+        let options = |core_name: &str, rom: &Path| core_options(&Ini::parse(""), &dir, core_name, rom);
+        let got = options("ParaLLEl PS2", &rom);
+        assert_eq!(got["pcsx2_hw_download_mode"], "Disable Readbacks");
+        assert_eq!(options("LRPS2", &rom)["pcsx2_hw_download_mode"], "Disable Readbacks", "its old name too");
+        assert!(options("ParaLLEl PS2", &other).is_empty(), "another game");
+        assert!(options("Play!", &rom).is_empty(), "another core, whose options aren't these");
+        // The core's own file, or the game's, beats it.
+        std::fs::write(core.join("ParaLLEl PS2.opt"), "pcsx2_hw_download_mode = \"Hardware\"\n").unwrap();
+        assert_eq!(options("ParaLLEl PS2", &rom)["pcsx2_hw_download_mode"], "Hardware");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
