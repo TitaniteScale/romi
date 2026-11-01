@@ -3,6 +3,10 @@
 romi's own code is under the MIT license (see [LICENSE](LICENSE)). The files listed here are other
 people's work, used under their own licenses.
 
+## Logo
+
+romi's logo, [`Images/romi_logo.png`](Images/romi_logo.png), was made by Andrea Reyes.
+
 ## Code
 
 | What                                                          | Where                       | License |

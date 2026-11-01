@@ -157,5 +157,5 @@ and `romi guide` to bring it up from the controller. See [couch mode](docs/couch
 - [Game info and box art](docs/game-info.md): where descriptions, genres and covers come from
 - [Roadmap](ROADMAP.md): what's done and what's next
 - [Working on romi](CONTRIBUTING.md): tests, releasing, and a map of the code
-- [Credits](CREDITS.md): other people's work in this repository, like the 3D models the launch
-  animation is made from
+- [Credits](CREDITS.md): other people's work in this repository: the logo, by Andrea Reyes, and the
+  3D models the launch animation is made from
