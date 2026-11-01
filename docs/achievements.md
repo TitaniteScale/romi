@@ -40,6 +40,10 @@ when it's back. One still waiting when the game stops, or romi is closed or cras
 login token) and sent the next time you start a game or open romi, with the time you earned it.
 Unlocks are dropped after 30 days.
 
+Some achievements count up, like 12 of 50 coins. While one changes, a small box at the top left of
+the game shows how far along it is and which achievement it is, and goes a couple of seconds after
+it stops changing.
+
 romi uses RetroAchievements' own library, rcheevos, so achievements are checked the same way as in
 RetroArch. Unlocks are softcore: the server only accepts hardcore unlocks from emulators it has
 approved, and treats others' as softcore. Systems are the ones romi plays in the middle panel

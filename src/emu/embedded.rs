@@ -120,6 +120,8 @@ pub struct Embedded {
     look: Appearance,
     /// Achievement notices still to show, the one showing first.
     toasts: VecDeque<Toast>,
+    /// Progress towards an achievement that's counting up, while it changes.
+    tracker: Option<notice::Tracker>,
     /// Frame timings, if `ROMI_FRAME_LOG` asks for them.
     timing: Option<Recorder>,
     /// The last frame sent, kept to scale the next one into.
@@ -180,6 +182,7 @@ impl Embedded {
             intro,
             look,
             toasts: VecDeque::new(),
+            tracker: None,
             timing: Recorder::start(about),
             pixels: Vec::new(),
             crop: look.crop.then(Crop::default),
@@ -262,12 +265,34 @@ impl Embedded {
     pub fn cheevo_status(&mut self) -> Option<String> {
         let mut status = None;
         for event in self.shared.take_cheevo_events() {
+            match event {
+                cheevos::Event::Progress { title, progress } => {
+                    self.tracker = Some(notice::Tracker::new(title, progress));
+                    continue;
+                }
+                cheevos::Event::ProgressHidden => {
+                    self.tracker = None;
+                    continue;
+                }
+                _ => {}
+            }
             match Toast::for_event(event, self.look.badges) {
                 Ok(toast) => self.toasts.push_back(toast),
                 Err(say) => status = say.or(status),
             }
         }
         status
+    }
+
+    /// Where to show progress towards an achievement over the game's `picture` now, if there is any.
+    pub fn place_tracker(&mut self, picture: Rect) -> Option<notice::Layout> {
+        if self.tracker.as_ref().is_some_and(notice::Tracker::stale) {
+            self.tracker = None;
+        }
+        if self.intro.is_some() {
+            return None;
+        }
+        self.tracker.as_ref()?.layout(picture)
     }
 
     /// The notice to show over the game's `picture` now, if there's one, with its badge sent

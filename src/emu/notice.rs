@@ -1,5 +1,5 @@
 //! Notices over a game played in romi: an achievement unlocking (with its badge), the game's
-//! achievements loading, every one of them unlocked.
+//! achievements loading, every one of them unlocked, and progress towards one that counts up.
 //!
 //! A badge is fetched when its notice is queued, from romi's cache if it's been shown before, and
 //! the notice waits for it for up to `BADGE_WAIT`, then goes up without it. The badge is drawn the
@@ -104,6 +104,7 @@ impl Toast {
             Event::Mastered { title } => {
                 Ok(Toast::new("Mastered".into(), vec![title, "Every achievement unlocked".into()], 6))
             }
+            Event::Progress { .. } | Event::ProgressHidden => Err(None),
             Event::Offline => Err(Some("Can't reach RetroAchievements; unlocks will be sent when it's back".into())),
             Event::Online => Err(Some("RetroAchievements is back; unlocks sent".into())),
             Event::Problem(p) => Err(Some(p)),
@@ -176,6 +177,49 @@ fn layout(heading: &str, body: &[String], badge: bool, picture: Rect, (cw, ch): 
     let badge = badge.then_some(Rect { x: area.x + 2, y: area.y + 1, width: badge_cols, height: badge_rows });
     let text = Rect { x: area.x + 2 + beside, y: area.y + 1, width: text_w, height: lines.len() as u16 };
     Some(Layout { area, badge, text, centered: badge.is_none(), lines })
+}
+
+/// Progress towards an achievement that counts up, in a small box at the top left of the game's
+/// picture while it changes. The game ends it (`Event::ProgressHidden`) a couple of seconds after
+/// the last change; `STALE` is for when that never comes.
+pub struct Tracker {
+    title: String,
+    progress: String,
+    updated: Instant,
+}
+
+/// How long progress stays up with no news, whatever the game says.
+const STALE: Duration = Duration::from_secs(6);
+/// The widest a progress box gets, in cells, border included.
+const TRACKER_MAX_WIDTH: u16 = 32;
+
+impl Tracker {
+    pub fn new(title: String, progress: String) -> Tracker {
+        Tracker { title, progress, updated: Instant::now() }
+    }
+
+    pub fn stale(&self) -> bool {
+        self.updated.elapsed() >= STALE
+    }
+
+    /// Where it goes in `picture`'s cells: two lines, the progress and then the achievement.
+    /// None if the picture is too small.
+    pub fn layout(&self, picture: Rect) -> Option<Layout> {
+        let room = picture.width.checked_sub(2).filter(|&w| w >= 8)?;
+        if picture.height < 4 {
+            return None;
+        }
+        let inner = (TRACKER_MAX_WIDTH - 4).min(room - 4);
+        let longest = self.progress.chars().count().max(self.title.chars().count()) as u16;
+        let text_w = longest.min(inner).max(1);
+        let lines = vec![
+            (crate::text::truncate(&self.progress, text_w as usize), Weight::Heading),
+            (crate::text::truncate(&self.title, text_w as usize), Weight::Plain),
+        ];
+        let area = Rect { x: picture.x + 1, y: picture.y, width: text_w + 4, height: 4 };
+        let text = Rect { x: area.x + 2, y: area.y + 1, width: text_w, height: 2 };
+        Some(Layout { area, badge: None, text, centered: false, lines })
+    }
 }
 
 /// A badge, `w`×`h` pixels of RGBA: square, as big as fits, in the middle, clear around it.
@@ -315,6 +359,19 @@ mod tests {
         assert_eq!(toast.lines(), ["Achievement unlocked · 1 point", "First Light", "Light the lantern"]);
         assert!(toast.ready(), "with no badge to wait for");
         assert_eq!(Toast::for_event(Event::Problem("nope".into()), true).err(), Some(Some("nope".into())));
+    }
+
+    #[test]
+    fn progress_sits_at_the_top_left_and_long_titles_are_cut() {
+        let picture = Rect { x: 10, y: 5, width: 60, height: 20 };
+        let tracker = Tracker::new("Collect every single coin in the whole wide world".into(), "12/50".into());
+        let l = tracker.layout(picture).unwrap();
+        assert_eq!((l.area.x, l.area.y, l.area.height), (11, 5, 4));
+        assert!(l.area.width <= TRACKER_MAX_WIDTH);
+        assert_eq!(l.lines[0], ("12/50".to_string(), Weight::Heading));
+        assert!(l.lines[1].0.chars().count() <= l.text.width as usize);
+        assert!(tracker.layout(Rect { x: 0, y: 0, width: 6, height: 20 }).is_none());
+        assert!(!tracker.stale());
     }
 
     #[test]

@@ -222,6 +222,26 @@ def test_a_game_retroachievements_doesnt_know_says_so(start, sandbox):
         fake.close()
 
 
+def test_progress_towards_an_achievement_shows_while_it_counts_and_goes(start, sandbox):
+    # The counter's first byte counts frames, so "Count to 250" is measured as it goes.
+    fake = FakeRetroAchievements([(5502, "Count to 250", 5, "M:0xH0000>=250")])
+    try:
+        set_up_an_nes_game(sandbox, fake)
+        log_in(sandbox)
+        romi = start()
+        romi.keys("o")
+        romi.wait_for("Play in romi")
+        romi.keys("\r")
+        romi.wait_for(lambda: "/250" in romi.text(), timeout=10)
+        assert "Count to 250" in romi.text()
+        # It's a box of its own, not a notice, and the unlock that ends it still gets one.
+        wait_for_unlock(romi, fake)
+        # Two seconds after the count stops changing it goes.
+        romi.wait_for(lambda: "/250" not in romi.text(), timeout=10)
+    finally:
+        fake.close()
+
+
 PENDING = ".local/state/romi/retroachievements-pending.json"
 
 

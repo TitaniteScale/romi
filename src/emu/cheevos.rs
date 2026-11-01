@@ -89,6 +89,9 @@ const RC_OK: c_int = 0;
 const RETRYABLE_CLIENT_ERROR: c_int = -2;
 
 const EVENT_ACHIEVEMENT_TRIGGERED: u32 = 1;
+const EVENT_PROGRESS_SHOW: u32 = 7;
+const EVENT_PROGRESS_HIDE: u32 = 8;
+const EVENT_PROGRESS_UPDATE: u32 = 9;
 const EVENT_GAME_COMPLETED: u32 = 15;
 const EVENT_SERVER_ERROR: u32 = 16;
 const EVENT_DISCONNECTED: u32 = 17;
@@ -116,6 +119,13 @@ pub enum Event {
         points: u32,
         badge_url: Option<String>,
     },
+    /// Progress towards an achievement that counts up ("12/50"), which changes as the game plays.
+    Progress {
+        title: String,
+        progress: String,
+    },
+    /// The progress stopped changing, and is to go.
+    ProgressHidden,
     /// Every achievement in the game is unlocked.
     Mastered {
         title: String,
@@ -232,6 +242,19 @@ extern "C" fn on_event(rust: *mut c_void, raw: *const RawEvent) {
             points: raw.points,
             badge_url: text(raw.badge_url),
         },
+        EVENT_PROGRESS_SHOW | EVENT_PROGRESS_UPDATE => {
+            // It changes with nearly every frame while it counts, so only the last matters.
+            let mut events = inner(rust).events.lock().unwrap_or_else(|e| e.into_inner());
+            if matches!(events.last(), Some(Event::Progress { .. })) {
+                events.pop();
+            }
+            events.push(Event::Progress {
+                title: text(raw.title).unwrap_or_default(),
+                progress: text(raw.progress).unwrap_or_default(),
+            });
+            return;
+        }
+        EVENT_PROGRESS_HIDE => Event::ProgressHidden,
         EVENT_GAME_COMPLETED => Event::Mastered { title: text(raw.title).unwrap_or_default() },
         EVENT_SERVER_ERROR => Event::Problem(format!(
             "RetroAchievements: {}",

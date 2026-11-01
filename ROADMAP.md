@@ -229,8 +229,11 @@ It's built in steps, and the first one pays off without any of the TUI work:
    - ✓ **Unlocks the server missed** are written down as they're sent and crossed out when it
      answers (`emu/unlocks.rs`), so ones still waiting when a game stops are sent, re-signed with
      when they were earned, the next time a game starts or romi opens.
-   - Still to do: progress and challenge
-     indicators, and leaderboards (rcheevos sends the events, romi ignores them); rich presence
+   - ✓ **Progress indicators**: an achievement that counts up (rcheevos' measured progress) shows
+     `12/50` and its title in a box at the top left of the game while it changes, ended by
+     rcheevos' own hide event; text only, with no badge yet.
+   - Still to do: challenge indicators (a mark while an achievement's challenge is under way),
+     a badge in the progress box, and leaderboards (rcheevos sends the events, romi ignores them); rich presence
      is sent but not shown; `romi run --live` and headless `romi run` (where a scripted run
      earning an achievement would make a good regression test for ROM hacks); hardcore, which
      would need RetroAchievements to approve romi.

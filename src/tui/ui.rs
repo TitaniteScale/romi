@@ -804,6 +804,9 @@ fn draw_embedded(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
     let [screen, hint] = Layout::vertical([Constraint::Min(1), Constraint::Length(1)]).areas(inner);
     if let Some((cells, image)) = embedded.place(screen) {
         crate::emu::kitty::placeholders(f.buffer_mut(), cells, image);
+        if let Some(layout) = embedded.place_tracker(cells) {
+            draw_toast(f, theme, &layout);
+        }
         if let Some(layout) = embedded.place_toast(cells) {
             draw_toast(f, theme, &layout);
         }
