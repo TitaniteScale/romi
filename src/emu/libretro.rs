@@ -920,12 +920,14 @@ impl Core {
                 bail!("{} speaks libretro API {}, not {API_VERSION}", core_path.display(), api_version());
             }
             sym!("retro_set_environment", unsafe extern "C" fn(EnvironmentFn))(environment);
+            // RetroArch's order: some cores (Mesen) only have somewhere to keep the other callbacks
+            // once `retro_init` has made it, and crash if they're set first.
+            sym!("retro_init", unsafe extern "C" fn())();
             sym!("retro_set_video_refresh", unsafe extern "C" fn(VideoFn))(video);
             sym!("retro_set_audio_sample", unsafe extern "C" fn(AudioSampleFn))(audio_sample);
             sym!("retro_set_audio_sample_batch", unsafe extern "C" fn(AudioBatchFn))(audio_batch);
             sym!("retro_set_input_poll", unsafe extern "C" fn(InputPollFn))(input_poll);
             sym!("retro_set_input_state", unsafe extern "C" fn(InputStateFn))(input_state);
-            sym!("retro_init", unsafe extern "C" fn())();
 
             let api = Api {
                 deinit: sym!("retro_deinit", unsafe extern "C" fn()),
