@@ -903,8 +903,7 @@ impl Core {
         PLAY_SOUND.lock().unwrap_or_else(|e| e.into_inner()).clear();
         load_cxx_runtime_first();
         // SAFETY: loading a core runs its initializers; libretro cores are made to be loaded this way.
-        let lib = unsafe { libloading::Library::new(core_path) }
-            .with_context(|| format!("can't load {}", core_path.display()))?;
+        let lib = unsafe { open_core(core_path) }.with_context(|| format!("can't load {}", core_path.display()))?;
         keep_thread_pools_loaded();
         quiet_c_streams();
         // SAFETY: the signatures below are libretro.h's, which every core exports.
@@ -1169,6 +1168,26 @@ fn load_cxx_runtime_first() {
     unsafe { libc::dlopen(c"libstdc++.so.6".as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL | libc::RTLD_NODELETE) };
 }
 
+/// Cores that stay loaded for good once they have been, so the next game played with one finds it as
+/// it was left. bsnes-hd allocates 230 MB as it loads and never frees it as it unloads, so each
+/// game played after another leaked that much (measured by loading and dropping one repeatedly).
+/// Not every core can: Mupen64Plus-Next fails to load a second game in a library it never left,
+/// and the rest (all the others tried) don't leak enough to matter.
+const STAYS_LOADED: &[&str] = &["bsnes_hd"];
+
+/// Opens a core's library, to stay loaded if it's one of `STAYS_LOADED`.
+///
+/// # Safety
+/// As `libloading::Library::new`: the library's initializers run.
+unsafe fn open_core(path: &Path) -> Result<libloading::Library, libloading::Error> {
+    let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    let stays = if STAYS_LOADED.iter().any(|core| name.starts_with(core)) { libc::RTLD_NODELETE } else { 0 };
+    // SAFETY: the caller's.
+    unsafe {
+        libloading::os::unix::Library::open(Some(path), libc::RTLD_NOW | libc::RTLD_LOCAL | stays).map(Into::into)
+    }
+}
+
 /// Keeps OpenMP loaded for good once a core has loaded it. Its threads outlive the core that
 /// started them, and unloading the library under them, as unloading the core did, crashed romi
 /// when a game played with bsnes-hd stopped.
@@ -1254,7 +1273,7 @@ fn read_info(path: &Path) -> Result<Info> {
     // the strings are copied out before the library is closed again.
     unsafe {
         load_cxx_runtime_first();
-        let lib = libloading::Library::new(path)?;
+        let lib = open_core(path)?;
         let mut info = std::mem::zeroed::<SystemInfo>();
         lib.get::<unsafe extern "C" fn(*mut SystemInfo)>(b"retro_get_system_info\0")?(&mut info);
         let text = |p: *const c_char| {

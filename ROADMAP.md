@@ -578,6 +578,11 @@ that have no libretro core. In the order they're worth doing:
      played live to prove the memory reads right (the core gives MEM1 as plain system RAM, big-endian
      as RetroAchievements' Dolphin sets expect); Wii games whose achievements are in MEM2
      (0x90000000 and up) can't earn them, as Dolphin's core gives no memory map for it.
+   - Memory when games are played one after another in one romi (measured by loading and dropping a
+     core repeatedly): bsnes-hd leaked 230 MB a game, fixed by keeping it loaded (`STAYS_LOADED`).
+     Mupen64Plus-Next still leaks about 55 MB a game and can't be kept loaded (its second game
+     fails to load), PPSSPP about 10 MB, Dolphin, Flycast and Beetle PSX a few. A core that leaks
+     like that would need its own process to give it all back.
    - Launch animation models: the other handhelds borrow the Game Boy, and every other console is the
      TV alone. Still to do: a landscape handheld for the Game Gear, Lynx, PSP and the like (the
      credited "Handheld videogame console" model is credited in CREDITS.md, not imported yet);
