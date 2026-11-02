@@ -646,4 +646,7 @@ Code to tidy, when it gets in the way:
 - **One controller reader**: the TUI's thread (`gamepad.rs`) and each game played in romi
   (`emu/controls.rs`) open their own `Gilrs`, so starting a game reopens the controllers. It works;
   sharing one would mean handing the devices between the two.
-- **Splitting `tui/app.rs`** (about 1,600 lines): menus, search and launching could each be a file.
+- **One place for which screen is open**: `on_key`, `on_pad` and `draw` each check about 10 `Option`
+  fields in their own order, so a new screen means changing all of them. An enum for the full-screen
+  panels would help, but some overlays stack (the keyboard over the menu) and it changes behaviour.
+  Do it separately, when next adding a screen.
