@@ -416,7 +416,9 @@ fn draw_systems(f: &mut Frame, app: &mut App, theme: &Theme, area: Rect) {
                 ViewKind::System(i) => ("  ", app.lib.systems[*i].problem.is_some()),
             };
             let count = format!("{:>3} ", v.games.len());
-            let mut spans = vec![Span::raw(icon), Span::raw(v.name.clone())];
+            // The name gives way to the marker and the count, so a long one doesn't push them off.
+            let room = inner_width.saturating_sub(icon.chars().count() + count.len() + 3);
+            let mut spans = vec![Span::raw(icon), Span::raw(text::truncate(&v.name, room))];
             let used = Line::from(spans.clone()).width() + count.len() + 2;
             spans.push(Span::raw(" ".repeat(inner_width.saturating_sub(used))));
             spans.push(Span::styled(if problem { "! " } else { "  " }, Style::new().fg(Color::Yellow)));
