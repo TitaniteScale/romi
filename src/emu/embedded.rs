@@ -180,6 +180,7 @@ impl Embedded {
             area: None,
             game: None,
         });
+        kitty::sweep_stale_shm();
         Ok(Embedded {
             game,
             shared,

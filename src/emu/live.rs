@@ -73,6 +73,7 @@ enum Scale {
 }
 
 pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
+    crate::emu::kitty::sweep_stale_shm();
     let fps = core.fps;
     let core_name = core.name.clone();
     let (shared, emu) = Shared::start(core, volume, false, None)?;

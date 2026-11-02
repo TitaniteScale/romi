@@ -382,6 +382,31 @@ pub fn write_shm(name: &str, data: &[u8]) -> std::io::Result<()> {
     }
 }
 
+/// Unlinks the shared memory objects (`romi-<pid>-<n>`) that romi runs left when they died without
+/// cleaning up: killed, or their terminal closed, with frames the terminal hadn't read yet. Each is
+/// a frame's worth of memory, and they stay until reboot. Once per run is enough.
+pub fn sweep_stale_shm() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let Ok(dir) = std::fs::read_dir("/dev/shm") else { return };
+        for entry in dir.flatten() {
+            let name = entry.file_name();
+            let Some(pid) = stale_pid(&name.to_string_lossy()) else { continue };
+            // SAFETY: signal 0 only asks whether the process is there.
+            let alive = unsafe { libc::kill(pid, 0) == 0 || *libc::__errno_location() != libc::ESRCH };
+            if !alive {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    });
+}
+
+/// The process a `romi-<pid>-<anything>` shared memory object's name says made it.
+fn stale_pid(name: &str) -> Option<libc::pid_t> {
+    let pid: libc::pid_t = name.strip_prefix("romi-")?.split('-').next()?.parse().ok()?;
+    (pid > 0 && pid != std::process::id() as libc::pid_t).then_some(pid)
+}
+
 /// Unlinks a shared memory object; true if it was still there.
 pub fn remove_shm(name: &str) -> bool {
     let cname = std::ffi::CString::new(name).expect("shm names have no NUL");
@@ -392,6 +417,16 @@ pub fn remove_shm(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shared_memory_names_say_which_run_made_them() {
+        assert_eq!(stale_pid("romi-12345-7"), Some(12345));
+        assert_eq!(stale_pid("romi-12345-bench-3"), Some(12345));
+        assert_eq!(stale_pid("romi-12345-timing-stop"), Some(12345));
+        assert_eq!(stale_pid(&format!("romi-{}-7", std::process::id())), None, "this run's own");
+        assert_eq!(stale_pid("pulse-shm-123"), None);
+        assert_eq!(stale_pid("romi-x-1"), None);
+    }
 
     #[test]
     fn placeholders_say_where_every_cell_is() {
