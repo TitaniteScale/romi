@@ -319,6 +319,29 @@ const LRPS2_GAMES: &[KnownGame] = &[
     KnownGame { serial: "SCUS_972.11", options: &[("pcsx2_hw_download_mode", "Disable Readbacks")] },
 ];
 
+/// Beetle PSX's DualShock (`RETRO_DEVICE_SUBCLASS(RETRO_DEVICE_ANALOG, 1)`, which the core lists
+/// as "DualShock" with `SET_CONTROLLER_INFO`).
+const BEETLE_DUALSHOCK: u32 = 517;
+
+/// PlayStation games that can't be played with the plain pad Beetle PSX plugs in, by the start of
+/// their file names. (A DualShock isn't plugged in for every game: with the sticks listed, romi
+/// no longer makes the left stick a d-pad.) Matched by name since most discs are `.chd`, whose
+/// serial can't be read.
+const DUALSHOCK_GAMES: &[&str] = &[
+    // Its levels are played with both sticks.
+    "ape escape",
+];
+
+/// The controller `core` is known to want plugged into port 1 for `rom`: what RetroArch's remaps
+/// would say, which go over this.
+pub fn known_device(core: &str, rom: &Path) -> Option<u32> {
+    if !core.to_ascii_lowercase().starts_with("beetle psx") {
+        return None;
+    }
+    let name = rom.file_stem()?.to_string_lossy().to_ascii_lowercase();
+    DUALSHOCK_GAMES.iter().any(|game| name.starts_with(game)).then_some(BEETLE_DUALSHOCK)
+}
+
 /// The options `core` is known to want for `rom`, if it's one of the games above.
 fn known_options(core: &str, rom: &Path) -> BTreeMap<String, String> {
     if !LRPS2.iter().any(|name| name.eq_ignore_ascii_case(core)) {
@@ -554,6 +577,15 @@ mod tests {
         std::fs::write(core.join("ParaLLEl PS2.opt"), "pcsx2_hw_download_mode = \"Hardware\"\n").unwrap();
         assert_eq!(options("ParaLLEl PS2", &rom)["pcsx2_hw_download_mode"], "Hardware");
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ape_escape_is_given_a_dualshock() {
+        let device = |core: &str, rom: &str| known_device(core, Path::new(rom));
+        assert_eq!(device("Beetle PSX HW", "/roms/psx/Ape Escape (USA).chd"), Some(517));
+        assert_eq!(device("Beetle PSX", "/roms/psx/Ape Escape (Europe).cue"), Some(517));
+        assert_eq!(device("Beetle PSX HW", "/roms/psx/Crash Bandicoot (USA).chd"), None);
+        assert_eq!(device("PCSX-ReARMed", "/roms/psx/Ape Escape (USA).chd"), None, "its ids aren't Beetle's");
     }
 
     #[test]

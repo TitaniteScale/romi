@@ -108,7 +108,7 @@ core, the game's sound comes out of step with its frames, and runs dry. Cores ru
 RetroArch has for them (`config/<core>/<core>.opt`, and the ones for the game or its folder), so a
 game plays the same in both, and with RetroArch's remap for the game, its folder or the core
 (`config/remaps/<core>/<name>.rmp`, the first one there): which button each of the pad's buttons
-and stick directions sends, and the type of controller plugged in (a DualShock for Ape Escape, say).
+and stick directions sends, and the type of controller plugged in (a DualShock for Ape Escape, say: romi plugs that one in by itself).
 Controllers' sticks and analog triggers reach the core as they are; in games played with the stick
 (N64 ones), the left stick isn't also the d-pad. On a keyboard, the arrows push the stick all the
 way. `ROMI_CORE_LOG=file` writes what the core says there, which is the place to look when a game

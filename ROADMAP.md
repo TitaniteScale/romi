@@ -359,8 +359,8 @@ is tried in a separate process first). In the order worth trying:
      with threaded rendering, Flycast waits 100 ms for a frame the game isn't drawing. RetroArch
      gets the same.
    - Still to do: Vulkan (Mupen's ParaLLEl-RDP, Flycast's and Beetle's Vulkan renderers, which
-     some people pick in RetroArch, and which then won't start); the PlayStation controller type
-     from RetroArch's remap files, since Ape Escape needs a DualShock (see 8);
+     some people pick in RetroArch, and which then won't start); more PlayStation games that need a
+     DualShock than Ape Escape (`DUALSHOCK_GAMES` in `emucfg.rs`, which romi plugs in by itself);
      a core that changes its frame rate with `SET_SYSTEM_AV_INFO` keeps the old one for pacing;
      PPSSPP isn't installed here, so it's untried (Dolphin plays, see 9.2); Naomi needs `naomi.zip`.
 2. ✓ **Core options** (`GET_VARIABLE`, which romi answers with "no" now, so every core runs on its

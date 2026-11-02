@@ -103,6 +103,9 @@ fn is_wii_disc(rom: &Path) -> bool {
 pub fn remap(core: Option<&str>, rom: &Path, controls: &[&Controls]) -> Remap {
     let retroarch = core.map(|name| crate::emucfg::retroarch_remap(name, rom)).unwrap_or_default();
     let mut remap = controls.iter().fold(retroarch, |remap, controls| remap.with(controls));
+    if let Some(device) = core.and_then(|name| crate::emucfg::known_device(name, rom)) {
+        remap.devices[0].get_or_insert(device);
+    }
     if core == Some("dolphin-emu") && is_wii_disc(rom) {
         // The core plugs in a lone Wii Remote unless told otherwise, which has no stick; a Nunchuk
         // gives the left stick something to be. RetroArch's remap can say what to plug in instead.
