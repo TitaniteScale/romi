@@ -89,11 +89,28 @@ pub fn options(core: Option<&str>, rom: &Path, sets: &[&BTreeMap<String, String>
     options
 }
 
+/// Dolphin's core's controller for "Wii Remote + Nunchuk": the pad's type (1) and its place in the
+/// core's list (3), which it gives for each port with `SET_CONTROLLER_INFO`.
+const WII_REMOTE_WITH_NUNCHUK: u32 = 0x301;
+
+/// Whether `rom` is a Wii disc image, in any format Dolphin plays.
+fn is_wii_disc(rom: &Path) -> bool {
+    nod::read::DiscReader::new(rom, &nod::read::DiscOptions::default()).is_ok_and(|disc| disc.header().is_wii())
+}
+
 /// The remap a game plays with in `core` (by its name): RetroArch's for it, with each of `controls`
 /// over it in turn.
 pub fn remap(core: Option<&str>, rom: &Path, controls: &[&Controls]) -> Remap {
     let retroarch = core.map(|name| crate::emucfg::retroarch_remap(name, rom)).unwrap_or_default();
-    controls.iter().fold(retroarch, |remap, controls| remap.with(controls))
+    let mut remap = controls.iter().fold(retroarch, |remap, controls| remap.with(controls));
+    if core == Some("dolphin-emu") && is_wii_disc(rom) {
+        // The core plugs in a lone Wii Remote unless told otherwise, which has no stick; a Nunchuk
+        // gives the left stick something to be. RetroArch's remap can say what to plug in instead.
+        for device in remap.devices.iter_mut().filter(|d| d.is_none()) {
+            *device = Some(WII_REMOTE_WITH_NUNCHUK);
+        }
+    }
+    remap
 }
 
 /// The buttons remapped in romi for a game in the library, in the order they go over RetroArch's
@@ -432,6 +449,23 @@ fn hold_for(last: Duration, took: Duration, period: Duration) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wii_discs_are_known_by_their_header() {
+        let dir = std::env::temp_dir().join(format!("romi-wii-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let disc = |name: &str, at: usize, magic: [u8; 4]| {
+            let mut image = vec![0u8; 0x60000];
+            image[at..at + 4].copy_from_slice(&magic);
+            let path = dir.join(name);
+            std::fs::write(&path, image).unwrap();
+            is_wii_disc(&path)
+        };
+        assert!(disc("wii.iso", 0x18, [0x5D, 0x1C, 0x9E, 0xA3]));
+        assert!(!disc("not.iso", 0x18, [0, 0, 0, 0]), "no magic, no Wii");
+        assert!(!is_wii_disc(&dir.join("missing.iso")));
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn cores_warm_up_until_frames_come_quickly_or_a_second_has_gone() {

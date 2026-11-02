@@ -110,6 +110,9 @@ RetroArch's remap for the game.
 }
 ```
 
+Wii games play with a Wii Remote and Nunchuk (the left stick is the Nunchuk's, `x` and `y` are C and
+Z), unless RetroArch's remap for the game picks another controller (`input_libretro_device_p1`).
+
 ## Core options
 
 Options for the libretro core a game plays with in romi (the ones RetroArch calls core options),
