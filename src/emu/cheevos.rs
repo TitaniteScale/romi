@@ -628,13 +628,73 @@ pub fn forget_login() -> Result<bool> {
 }
 
 /// The RetroAchievements hash of a disc image, as rcheevos reads it (.iso, or .cue and its .bin
-/// files; not .chd, which rcheevos can't open by itself). None if it can't be read.
+/// files; GameCube and Wii images in any format Dolphin plays, through the nod crate; not .chd,
+/// which rcheevos can't open by itself). None if it can't be read.
 pub fn hash_disc(console: u32, path: &std::path::Path) -> Option<String> {
     let path = c_string(path.to_str()?).ok()?;
     let mut hash = [0 as c_char; 33];
     // SAFETY: rcheevos writes 32 characters and a NUL into the buffer.
     let ok = unsafe { romi_rc_hash_disc(console, path.as_ptr(), hash.as_mut_ptr()) };
     if ok == 0 { None } else { text(hash.as_ptr()) }
+}
+
+/// An open GameCube or Wii disc image, for rcheevos to hash (see `romi_rc_hash_disc`).
+struct DiscHandle(nod::read::DiscReader);
+
+#[unsafe(no_mangle)]
+extern "C" fn romi_disc_open(path: *const c_char) -> *mut c_void {
+    // SAFETY: rcheevos passes the NUL-terminated path it was given.
+    let Some(path) = text(path) else { return std::ptr::null_mut() };
+    // The default keeps a Wii's partitions as they are on the disc, encrypted: rcheevos decrypts
+    // them itself.
+    let options = nod::read::DiscOptions::default();
+    match nod::read::DiscReader::new(path, &options) {
+        Ok(disc) => Box::into_raw(Box::new(DiscHandle(disc))).cast(),
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn romi_disc_seek(handle: *mut c_void, offset: i64, origin: c_int) {
+    use std::io::{Seek, SeekFrom};
+    // SAFETY: the handle is one `romi_disc_open` made and `romi_disc_close` hasn't freed.
+    let disc = unsafe { &mut (*handle.cast::<DiscHandle>()).0 };
+    let to = match origin {
+        1 => SeekFrom::Current(offset),
+        2 => SeekFrom::End(offset),
+        _ => SeekFrom::Start(offset.max(0) as u64),
+    };
+    let _ = disc.seek(to);
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn romi_disc_tell(handle: *mut c_void) -> i64 {
+    use std::io::Seek;
+    // SAFETY: as in `romi_disc_seek`.
+    let disc = unsafe { &mut (*handle.cast::<DiscHandle>()).0 };
+    disc.stream_position().map_or(-1, |p| p as i64)
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn romi_disc_read(handle: *mut c_void, buffer: *mut c_void, bytes: usize) -> usize {
+    use std::io::Read;
+    // SAFETY: as in `romi_disc_seek`; rcheevos gives a buffer of `bytes` bytes.
+    let (disc, buffer) =
+        unsafe { (&mut (*handle.cast::<DiscHandle>()).0, std::slice::from_raw_parts_mut(buffer.cast::<u8>(), bytes)) };
+    let mut got = 0;
+    while got < bytes {
+        match disc.read(&mut buffer[got..]) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => got += n,
+        }
+    }
+    got
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn romi_disc_close(handle: *mut c_void) {
+    // SAFETY: the handle came from `romi_disc_open` and is closed once.
+    drop(unsafe { Box::from_raw(handle.cast::<DiscHandle>()) });
 }
 
 /// What a game needs for achievements while it's played in romi.

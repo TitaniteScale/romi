@@ -545,7 +545,7 @@ pub fn game_hash(lib: &Library, g: usize) -> Option<(u32, String)> {
 /// Whether rcheevos hashes this console's games from the disc's files, not the whole file. Only
 /// the consoles played in romi are here; the rest go by title.
 fn disc_hashed(console: u32) -> bool {
-    console == 21
+    matches!(console, 16 | 19 | 21)
 }
 
 impl Hashes {

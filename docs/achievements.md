@@ -82,6 +82,7 @@ earned, and how rare each is comes from Steam's public percentages when you open
 Games are matched the way RetroArch does it, by hashing the ROM, for arcade sets (the set name) and
 cartridges (the ROM, minus a copier header, in N64's native byte order), so a game only shows
 achievements if your dump can earn them. When it can't but another version of the game can (often
-a "Rev 1"), the details pane says so and links RetroAchievements' list of supported dumps. Disc
-systems and the DS are matched by title. The first refresh hashes every cartridge, which reads a
+a "Rev 1"), the details pane says so and links RetroAchievements' list of supported dumps. PlayStation 2, GameCube and Wii discs are matched by the hash of the disc's own files, read
+in any format Dolphin plays (`.iso`, `.rvz`, `.wia`, `.ciso`, `.gcz`, `.wbfs`); PS2 `.chd` isn't read yet.
+Other disc systems and the DS are matched by title. The first refresh hashes every cartridge, which reads a
 few GB; after that only new or changed files are read. Everything is cached in `~/.cache/romi/ra`.

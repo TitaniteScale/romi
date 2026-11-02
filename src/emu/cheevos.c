@@ -230,12 +230,26 @@ size_t romi_rc_user_agent_clause(rc_client_t* client, char* buffer, size_t size)
 /* The RetroAchievements hash of a disc image (.iso, or a .cue with its .bin files) for a disc
  * console, as rcheevos reads it. Writes 32 characters and a NUL to `hash`; returns non-zero if
  * the disc could be hashed. */
+/* Reads a GameCube or Wii disc image (.iso, .rvz, .wia, .ciso, .gcz, .wbfs...) for rcheevos, which
+ * can only open plain ISOs by itself: romi's Rust side decodes it (see cheevos.rs). */
+void* romi_disc_open(const char* path);
+void romi_disc_seek(void* handle, int64_t offset, int origin);
+int64_t romi_disc_tell(void* handle);
+size_t romi_disc_read(void* handle, void* buffer, size_t bytes);
+void romi_disc_close(void* handle);
+
 int romi_rc_hash_disc(uint32_t console_id, const char* path, char* hash) {
   rc_hash_iterator_t iterator;
   int ok;
+  int nintendo = console_id == RC_CONSOLE_GAMECUBE || console_id == RC_CONSOLE_WII;
+  rc_hash_filereader_t reader = { romi_disc_open, romi_disc_seek, romi_disc_tell, romi_disc_read, romi_disc_close };
+  if (nintendo)
+    rc_hash_init_custom_filereader(&reader);
   rc_hash_initialize_iterator(&iterator, path, NULL, 0);
   rc_hash_init_default_cdreader();
   ok = rc_hash_generate(hash, console_id, &iterator);
   rc_hash_destroy_iterator(&iterator);
+  if (nintendo)
+    rc_hash_init_custom_filereader(NULL);
   return ok;
 }

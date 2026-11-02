@@ -573,6 +573,11 @@ that have no libretro core. In the order they're worth doing:
      bytes, the size of rcheevos' PS2 table, so the flat fallback lines up; Sly Cooper unlocked live.
      PS2 discs are hashed by rcheevos (`rc_hash_generate`; `.iso`/`.cue`), and an unknown dump's
      notice gives its hash.
+   - GameCube and Wii achievements: games are hashed from `.rvz` and the rest with the `nod` crate
+     (rcheevos reads only plain ISOs), and RetroAchievements knows them. Still to do: an unlock
+     played live to prove the memory reads right (the core gives MEM1 as plain system RAM, big-endian
+     as RetroAchievements' Dolphin sets expect); Wii games whose achievements are in MEM2
+     (0x90000000 and up) can't earn them, as Dolphin's core gives no memory map for it.
    - Still to do for LRPS2: played on a real screen with a controller, past the menus; Burnout 3's
      sound when it's busy, which Jake hears stutter a little and scripted crashes didn't reproduce (live
      at 2×, 59.9 fps and never dry, a warm or empty LRPS2 shader cache alike, with Mesa's own cache
