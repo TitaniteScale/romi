@@ -206,6 +206,15 @@ impl Covers {
         self.sent.clear();
     }
 
+    /// Forgets a game's cover after it changed, leaving every other image on screen alone.
+    pub fn forget_cover(&mut self, key: &str) {
+        self.paths.remove(&(key.to_string(), Kind::Cover));
+        self.ready.retain(|slot, _| slot.0 != key);
+        self.order.retain(|slot| slot.0 != key);
+        self.failed.retain(|slot| slot.0 != key);
+        self.sent.clear();
+    }
+
     /// Starts over after a config reload (art folders may have changed).
     pub fn reset(&mut self, cfg: &Config) {
         self.finder = Finder::new(cfg);

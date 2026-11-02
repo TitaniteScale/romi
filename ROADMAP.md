@@ -94,7 +94,7 @@ not logged in, or no controller is bound, in RetroArch, PCSX2, Dolphin or melonD
 ## 3. Managing the library from inside romi ✓
 
 Changes made in the TUI are saved in `state.json` (sort orders, tags), in `overrides.jsonc`, a file
-the config includes (hidden games, emulator picks), or, for the options, in the config itself. All
+the config includes (hidden games, emulator picks, covers), or, for the options, in the config itself. All
 done.
 
 - ✓ **Multi-disc games as one entry.** "Mr. Bones (Disc 1)" and "(Disc 2)" become one game, launched
@@ -109,6 +109,8 @@ done.
   and filter by them.
 - ✓ **Hot reload**: the TUI reloads the config when it or a file it includes is saved, waiting while a
   game runs. The controller's A/B swap, covers and the animation's colors change without a restart.
+- ✓ **Your own covers**: Add art… in a game's menu takes an image dropped on the terminal (which
+  pastes its path), and keeps a copy next to the config. Remove custom art takes it away.
 - ✓ **Options**: a panel in the menu for volume, rounded corners, the launch animation, covers, title
   screens, the accent color, borders and the confirm button. Each change goes into `config.json`
   itself, only that value's text changed (`config_edit.rs`), so comments and layout stay.
@@ -624,15 +626,8 @@ Smaller items that fit between phases.
 - **More descriptions**: Wikipedia's summary API needs no key, but matching titles to articles is
   hit-or-miss. ScreenScraper and TheGamesDB need keys.
 - **SteamGridDB** (free key) for covers on PC ports and pinball tables.
-- **Drop an image on romi to make it the selected game's cover** (Jake's idea, 2026-11-01): a
-  terminal can't say where in its window a file was dropped, but Ghostty and kitty paste a dropped
-  file's path as text. With bracketed paste on (crossterm's `EnableBracketedPaste`, then
-  `Event::Paste` in `on_term_event`; romi doesn't turn it on yet, so a dropped path today arrives
-  as keystrokes), a pasted path that's an image becomes the selected game's cover: copied into
-  romi's art cache, or set as the game's `"art"` override, which every lookup already puts first
-  (`ArtRef::manual`). So it's select, then drop anywhere. First check by hand: drag an image from
-  Thunar onto a shell prompt in Ghostty, and see whether its path appears, and how it's quoted
-  (`'...'`, backslashes, or a `file://` URI).
+- **More of Add art…**, left out of the first version on purpose: an `https://` image, title screens
+  and screenshots, and art for a whole system.
 - **Tests that play leave frames behind**: `e2e/drive.py` ends romi with SIGKILL, and pyte never
   reads the frames, so each test that plays in romi leaves up to 30 in `/dev/shm` (about 150 MB
   for a whole run, until they're deleted or the machine restarts). Stopping romi with Esc, or a

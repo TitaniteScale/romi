@@ -39,6 +39,22 @@ on-screen keyboard: ✓ saves). Each tag shows in the systems pane as a collecti
 filter has a Tag row, so "backlog + 2 players" works too. A tag goes when its last game leaves it.
 Tags are kept in `state.json` with your favorites; `romi list --tag backlog` lists one.
 
+## Your own covers
+
+**Add art…** in a game's menu sets its cover: drag an image onto the terminal, or paste or type its
+path and press Enter. PNG, JPEG and WebP all work. The cover shows straight away and comes before
+any other art. romi keeps its own copy as a PNG in `art/<system>/`, next to the config (normally
+`~/.config/romi/art`), shrunk if its longer side is over 1200 pixels, so the original can move or
+go. `romi scrape` leaves it alone.
+
+**Remove custom art** in the same menu deletes that copy, and the game's other art shows again. A
+cover you set by hand with `"art"` in the config isn't touched by either, and if it's in the main
+config's top-level `"overrides"`, it stays in front of one added here. Every game has these,
+Steam's and hand-added ones included.
+
+Dropping a file relies on the terminal pasting its path, as Ghostty and kitty do. Elsewhere in romi
+a paste goes into the text field that's open, or is ignored if none is.
+
 ## Emulators
 
 When a system's games can run in something else you have installed (ParaLLEl N64 next to

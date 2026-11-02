@@ -24,9 +24,10 @@ The TUI starts instantly and fills database info in a moment later; `romi check`
 ## Box art
 
 `romi scrape` reports which games have art and downloads what it can. It's safe to rerun: only new
-matches are fetched. romi looks in this order, using local files where they are:
+matches are fetched, and a game with a cover you chose is left alone. romi looks in this order, using local files where they are:
 
-1. `"art": "/path/to/image.png"` on a game entry or a system override
+1. An image you chose: **Add art…** in the game's menu ([how](tui.md#your-own-covers)), or
+   `"art": "/path/to/image.png"` on a game entry or an override
 2. romi's cache, `~/.cache/romi/art/<system>/`
 3. ES-DE's `downloaded_media` (covers, then 3D boxes); set `art.esde_media_dir`
 4. Skyscraper's cache (`art.skyscraper_cache`), matched by ROM file name

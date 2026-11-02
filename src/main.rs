@@ -30,7 +30,9 @@ mod tui;
 use anyhow::Result;
 use gamepad::{PadAction, PadEvent};
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, DisableFocusChange, EnableFocusChange, Event, KeyEventKind};
+use ratatui::crossterm::event::{
+    self, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste, EnableFocusChange, Event, KeyEventKind,
+};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
@@ -88,6 +90,12 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
         gamepad::spawn(tx, app.swap_confirm.clone());
     }
     let mut terminal = ratatui::init();
+    // ratatui's own hook, called from this one, puts back what it changed in the terminal.
+    let restore = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = execute!(stdout(), DisableBracketedPaste, DisableFocusChange);
+        restore(info);
+    }));
     // Ask the terminal about itself; this has to happen before reading events. Covers and the
     // animation's colors are set up even when they're off, since the options can turn them on.
     let answers = terminal_answers();
@@ -105,9 +113,9 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     // Terminals that don't understand the query may have echoed part of it. Nothing is drawn yet,
     // so wiping the screen keeps it in sync with ratatui's (empty) buffer.
     execute!(stdout(), Clear(ClearType::All))?;
-    execute!(stdout(), EnableFocusChange)?;
+    execute!(stdout(), EnableFocusChange, EnableBracketedPaste)?;
     let result = event_loop(&mut terminal, &mut app, &rx);
-    let _ = execute!(stdout(), DisableFocusChange);
+    let _ = execute!(stdout(), DisableBracketedPaste, DisableFocusChange);
     ratatui::restore();
     app.save_selection();
     result
@@ -181,7 +189,7 @@ fn run_in_terminal(
     rx: &Receiver<PadEvent>,
     job: TerminalJob,
 ) -> Result<()> {
-    execute!(stdout(), DisableFocusChange, LeaveAlternateScreen)?;
+    execute!(stdout(), DisableBracketedPaste, DisableFocusChange, LeaveAlternateScreen)?;
     disable_raw_mode()?;
 
     let mut played = Duration::ZERO;
@@ -215,7 +223,7 @@ fn run_in_terminal(
     enable_raw_mode()?;
     wait_for_any_input(rx);
 
-    execute!(stdout(), EnterAlternateScreen, EnableFocusChange)?;
+    execute!(stdout(), EnterAlternateScreen, EnableFocusChange, EnableBracketedPaste)?;
     terminal.clear()?;
     if let Some(c) = &mut app.covers {
         c.forget_rendered();

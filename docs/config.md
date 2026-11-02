@@ -78,7 +78,7 @@ Other emulators for a system, for the game menu to offer alongside the ones ES-D
 
 The top-level `"overrides"` change any game, Steam and hand-added ones included, using its key from
 `romi list`. They take the same fields as a system's overrides and beat everything else. romi's
-menus write theirs (hidden games and emulator picks) to `overrides.jsonc` next to the config,
+menus write theirs (hidden games, emulator picks and covers) to `overrides.jsonc` next to the config,
 adding it to `"include"` the first time. romi rewrites that file whole, so keep your own overrides
 in config.json: for a game in both, yours win field by field, and an emulator pick (`emulator` with
 its `command`, `mode` and `cwd`) only applies if you haven't set a `command`. Unlike `init.jsonc`

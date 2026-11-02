@@ -63,6 +63,10 @@ pub enum MenuItem {
     /// One of your tags (by its place in name order), ticked when the game has it.
     Tag(usize),
     NewTag,
+    /// Asks for an image to use as the game's cover.
+    AddArt,
+    /// Takes away the cover added with `AddArt`.
+    RemoveArt,
 }
 
 /// An open menu. Everything that would otherwise need a keyboard is in one.
@@ -72,6 +76,17 @@ pub struct Menu {
     pub selected: usize,
     /// The game's tags rather than its menu.
     pub tags: bool,
+}
+
+/// The prompt for an image to use as a game's cover. A terminal pastes the path of a file dropped
+/// on it, and one that can't say it's a paste types it, so the text can be edited too.
+pub struct ArtPrompt {
+    /// Kept by key, since the config can be read again, and the games with it, while this is open.
+    key: String,
+    pub name: String,
+    pub text: String,
+    /// Why the last try didn't work.
+    pub error: Option<String>,
 }
 
 /// On-screen keyboard for searching with a controller.
@@ -254,6 +269,8 @@ pub struct App {
     pub show_hidden: bool,
     /// A new tag's name while it's being typed, in the game's tags.
     pub tag_name: Option<String>,
+    /// The prompt for a game's new cover, while it's open.
+    pub art_prompt: Option<ArtPrompt>,
     /// The other emulators for each system, found the first time one of its games' menus opens.
     emulators: Emulators,
     /// Cursor (row, column) while the on-screen keyboard is open.
@@ -337,6 +354,7 @@ impl App {
             menu: None,
             show_hidden: false,
             tag_name: None,
+            art_prompt: None,
             emulators: Emulators::default(),
             osk: None,
             flash: None,
@@ -656,8 +674,39 @@ impl App {
             Event::Key(k) if k.kind != KeyEventKind::Release && !self.input_blocked() => {
                 self.on_key(k);
             }
+            Event::Paste(text) if self.embedded.is_none() && !self.input_blocked() => self.on_paste(&text),
             _ => {}
         }
+    }
+
+    /// A paste: the art prompt takes it as a dropped file, and a text field as if it was typed.
+    /// Anywhere else it's ignored, rather than each letter being taken for a key's action.
+    fn on_paste(&mut self, text: &str) {
+        if let Some(prompt) = &mut self.art_prompt {
+            prompt.text = crate::art::first_line(text).to_string();
+            self.submit_art();
+        } else if self.typing() {
+            for c in text.chars().filter(|c| !c.is_control()) {
+                self.edit_query(Some(c));
+            }
+        }
+    }
+
+    /// Whether keys go to a text field `edit_query` knows, as in `on_key`.
+    fn typing(&self) -> bool {
+        if self.tag_name.is_some() {
+            return true;
+        }
+        if let Some(screen) = &self.cheevos {
+            return screen.typing;
+        }
+        let covered = self.stats.is_some()
+            || self.players.is_some()
+            || self.controls.is_some()
+            || self.filter_panel.is_some()
+            || self.options.is_some()
+            || self.menu.is_some();
+        self.search.is_some() && !covered
     }
 
     fn on_key(&mut self, k: KeyEvent) {
@@ -668,6 +717,22 @@ impl App {
         }
         if ctrl && k.code == KeyCode::Char('r') {
             self.reload();
+            return;
+        }
+        if let Some(prompt) = &mut self.art_prompt {
+            match k.code {
+                KeyCode::Enter => self.submit_art(),
+                KeyCode::Esc => self.art_prompt = None,
+                KeyCode::Backspace => {
+                    prompt.text.pop();
+                    prompt.error = None;
+                }
+                KeyCode::Char(c) if !ctrl => {
+                    prompt.text.push(c);
+                    prompt.error = None;
+                }
+                _ => {}
+            }
             return;
         }
         if let Some(name) = &mut self.tag_name {
@@ -908,6 +973,13 @@ impl App {
     }
 
     fn apply(&mut self, op: Op) {
+        // A path can't be entered with a controller, only given up on.
+        if self.art_prompt.is_some() {
+            if matches!(op, Op::Back | Op::Menu) {
+                self.art_prompt = None;
+            }
+            return;
+        }
         // The on-screen keyboard is up while a tag is named, over the game's tags.
         if self.tag_name.is_some() {
             return self.osk_op(op);
@@ -1134,6 +1206,98 @@ impl App {
         self.set_status(Level::Info, text);
     }
 
+    /// The cover added from a game's menu, if it has one. Only that is romi's to delete: an
+    /// `"art"` written by hand can point at any file of yours.
+    fn custom_art(&self, g: usize) -> Option<PathBuf> {
+        let game = &self.lib.games[g];
+        let own = crate::art::custom_path(&self.cfg_path, &self.lib.system_of(g).id, &game.key);
+        game.art.manual.as_ref().is_some_and(|p| *p == own).then_some(own)
+    }
+
+    /// Tries what's in the art prompt. It stays open, saying why, until that works.
+    fn submit_art(&mut self) {
+        let Some(prompt) = &self.art_prompt else { return };
+        if prompt.text.trim().is_empty() {
+            return;
+        }
+        let (key, source) = (prompt.key.clone(), crate::art::dropped_path(&prompt.text));
+        match self.add_art(&key, &source) {
+            Ok(()) => self.art_prompt = None,
+            Err(e) => {
+                if let Some(prompt) = &mut self.art_prompt {
+                    prompt.error = Some(format!("{e:#}"));
+                }
+            }
+        }
+    }
+
+    /// Saves a copy of an image as a game's cover, which its override in overrides.jsonc points at.
+    fn add_art(&mut self, key: &str, source: &Path) -> anyhow::Result<()> {
+        use anyhow::Context;
+        let g = self.lib.find(key).context("That game isn't in the library any more")?;
+        let dest = crate::art::custom_path(&self.cfg_path, &self.lib.system_of(g).id, key);
+        let edited_elsewhere = self.edited_elsewhere();
+        let replacing = dest.exists();
+        crate::art::save_custom(source, &dest)?;
+        let art = config::tilde(&dest);
+        if let Err(e) = crate::overrides::update(&self.cfg_path, key, |ov| ov.art = Some(art)) {
+            if !replacing {
+                let _ = std::fs::remove_file(&dest);
+            }
+            return Err(e.context("Couldn't save"));
+        }
+        if self.art_changed(key, edited_elsewhere) {
+            // The main config's overrides come before the file romi's menus write.
+            let used = self.lib.find(key).is_some_and(|g| self.lib.games[g].art.manual.as_ref() == Some(&dest));
+            match used {
+                true => self.set_status(Level::Info, "Art saved"),
+                false => self.set_status(Level::Warn, "Art saved, but the \"art\" in your config comes first"),
+            }
+        }
+        Ok(())
+    }
+
+    /// Takes away the cover added from a game's menu, so its other art shows again.
+    fn remove_art(&mut self, g: usize) {
+        let Some(copy) = self.custom_art(g) else { return };
+        let key = self.lib.games[g].key.clone();
+        let edited_elsewhere = self.edited_elsewhere();
+        if let Err(e) = crate::overrides::update(&self.cfg_path, &key, |ov| ov.art = None) {
+            self.set_status(Level::Error, format!("Couldn't save: {e:#}"));
+            return;
+        }
+        let deleted = std::fs::remove_file(&copy).or_else(|e| match e.kind() {
+            std::io::ErrorKind::NotFound => Ok(()),
+            _ => Err(e),
+        });
+        if self.art_changed(&key, edited_elsewhere) {
+            match deleted {
+                Ok(()) => self.set_status(Level::Info, "Art removed"),
+                Err(e) => {
+                    let text = format!("Art removed, but {} is still there: {e}", config::tilde(&copy));
+                    self.set_status(Level::Warn, text);
+                }
+            }
+        }
+    }
+
+    /// Shows what a game's override now says its cover is, without waiting for the file watcher to
+    /// reload everything. False if everything was read again anyway, or couldn't be, as
+    /// `read_config_again` says in the status.
+    fn art_changed(&mut self, key: &str, edited_elsewhere: bool) -> bool {
+        if !self.read_config_again(edited_elsewhere) {
+            return false;
+        }
+        if let Some(g) = self.lib.find(key) {
+            let art = self.cfg.overrides.get(key).and_then(|ov| ov.art.as_deref());
+            self.lib.games[g].set_art_override(art);
+        }
+        if let Some(covers) = &mut self.covers {
+            covers.forget_cover(key);
+        }
+        true
+    }
+
     /// The ways a game can run, default first, once its menu has looked them up.
     pub fn emulator_options(&self, g: usize) -> Vec<Emulator> {
         self.emulators.options(&self.lib, g)
@@ -1198,6 +1362,10 @@ impl App {
                 }
                 if self.achievements.games.contains_key(&self.lib.games[g].key) {
                     items.push(GameAchievements);
+                }
+                items.push(AddArt);
+                if self.custom_art(g).is_some() {
+                    items.push(RemoveArt);
                 }
                 items
             }
@@ -1277,6 +1445,8 @@ impl App {
                 let at = g.map_or(0, |g| self.current_emulator(g, &options));
                 format!("Emulator: {}", options.get(at).map_or("default", |e| e.name.as_str()))
             }
+            MenuItem::AddArt => "Add art…".into(),
+            MenuItem::RemoveArt => "Remove custom art".into(),
         }
     }
 
@@ -1371,6 +1541,22 @@ impl App {
                         self.menu = Some(Menu { game, selected, tags });
                         self.tag_name = Some(String::new());
                         self.osk = Some((0, 0));
+                    }
+                    MenuItem::AddArt => {
+                        if let Some(g) = game {
+                            let game = &self.lib.games[g];
+                            self.art_prompt = Some(ArtPrompt {
+                                key: game.key.clone(),
+                                name: game.name.clone(),
+                                text: String::new(),
+                                error: None,
+                            });
+                        }
+                    }
+                    MenuItem::RemoveArt => {
+                        if let Some(g) = game {
+                            self.remove_art(g);
+                        }
                     }
                     // Stays open, like Sort.
                     MenuItem::Emulator => {

@@ -2,8 +2,8 @@
 //! the rest.
 //!
 //! Lookup order: a path set in the config (covers only), romi's own cache, ES-DE's
-//! downloaded_media, the Skyscraper cache, then Steam's library cache (covers only). Only the
-//! cache is written to; the others are read in place.
+//! downloaded_media, the Skyscraper cache, then Steam's library cache (covers only). romi only
+//! writes to its cache and to the covers added from a game's menu; the others are read in place.
 //!
 //! Online sources need no keys: libretro's thumbnail server (RetroArch's box art, title screens
 //! and screenshots, named after No-Intro/Redump/MAME titles) and Steam's CDN. Art is fetched on the user's machine and cached
@@ -245,12 +245,100 @@ fn cache_stem(sys: &System, game: &Game, kind: Kind) -> PathBuf {
 }
 
 fn cache_stem_for(sys: &System, key: &str, kind: Kind) -> PathBuf {
-    let (_, rest) = key.split_once(':').unwrap_or(("", key));
     let mut dir = config::cache_dir().join("art").join(&sys.id);
     if let Some(sub) = kind.cache_dir() {
         dir.push(sub);
     }
-    dir.join(rest.replace('/', "__"))
+    dir.join(key_file_name(key))
+}
+
+/// A game's key as a file name, without the system it starts with.
+fn key_file_name(key: &str) -> String {
+    let (_, rest) = key.split_once(':').unwrap_or(("", key));
+    rest.replace('/', "__")
+}
+
+// ---- covers added from a game's menu ----
+
+/// The longest side of a saved cover, in pixels. Covers are shown far smaller.
+const CUSTOM_MAX_SIDE: u32 = 1200;
+
+/// Where a cover added from a game's menu is kept: next to the config, since it's yours and can't
+/// be downloaded again, and not in the cache, which `romi scrape` writes to.
+pub fn custom_path(cfg_path: &Path, system: &str, key: &str) -> PathBuf {
+    let cfg_path = std::path::absolute(cfg_path).unwrap_or_else(|_| cfg_path.to_path_buf());
+    let dir = cfg_path.parent().unwrap_or(Path::new(".")).join("art").join(system);
+    with_ext(&dir.join(key_file_name(key)), "png")
+}
+
+/// Saves a copy of the image at `source` as a PNG at `dest`, upright and no bigger than a cover
+/// needs to be. Fails, leaving `dest` as it was, if `source` isn't an image romi can read.
+pub fn save_custom(source: &Path, dest: &Path) -> Result<()> {
+    use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
+    // Not only for a clear message: reading a named pipe would wait forever.
+    if !source.is_file() {
+        anyhow::bail!("There's no file at {}", config::tilde(source));
+    }
+    let not_an_image = "That isn't an image romi can read";
+    let reader = ImageReader::open(source)
+        .with_context(|| format!("Couldn't read {}", config::tilde(source)))?
+        .with_guessed_format()
+        .with_context(|| format!("Couldn't read {}", config::tilde(source)))?;
+    let mut decoder = reader.into_decoder().context(not_an_image)?;
+    // A photo of a box from a phone is usually stored sideways, with a note saying so.
+    let orientation = decoder.orientation().context(not_an_image)?;
+    let mut img = DynamicImage::from_decoder(decoder).context(not_an_image)?;
+    img.apply_orientation(orientation);
+    if img.width().max(img.height()) > CUSTOM_MAX_SIDE {
+        img = img.resize(CUSTOM_MAX_SIDE, CUSTOM_MAX_SIDE, image::imageops::FilterType::Triangle);
+    }
+    let mut png = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut png), ImageFormat::Png).context("Couldn't convert it to PNG")?;
+    crate::files::write_atomic(dest, png).with_context(|| format!("Couldn't save {}", config::tilde(dest)))
+}
+
+/// The first line of pasted text with anything around it gone. Dropping several files pastes one
+/// on each line in some terminals, which also turn newlines into carriage returns.
+pub fn first_line(text: &str) -> &str {
+    text.split(['\n', '\r']).map(str::trim).find(|line| !line.is_empty()).unwrap_or_default()
+}
+
+/// The file a terminal means by the text it pastes when one is dropped on it, or that was typed:
+/// a plain path, one escaped or quoted for a shell, or a `file://` URL.
+pub fn dropped_path(text: &str) -> PathBuf {
+    let text = unquote(first_line(text));
+    match text.strip_prefix("file://") {
+        // What comes before the path is a host, usually none.
+        Some(rest) => PathBuf::from(decode(&rest[rest.find('/').unwrap_or(rest.len())..])),
+        None => expand_path(&text),
+    }
+}
+
+/// Undoes a shell's backslashes and quotes. Quotes only count if the text starts with one, so the
+/// apostrophe in a plain `/games/it's.png` stays.
+fn unquote(text: &str) -> String {
+    let quoted = text.starts_with(['\'', '"']);
+    let mut out = String::new();
+    let mut quote = None;
+    let mut chars = text.chars();
+    while let Some(c) = chars.next() {
+        match (quote, c) {
+            (Some(q), c) if c == q => quote = None,
+            // In double quotes a backslash only escapes these.
+            (Some('"'), '\\') => match chars.clone().next() {
+                Some(next @ ('"' | '\\' | '$' | '`')) => {
+                    out.push(next);
+                    chars.next();
+                }
+                _ => out.push('\\'),
+            },
+            (Some(_), c) => out.push(c),
+            (None, '\\') => out.extend(chars.next()),
+            (None, '\'' | '"') if quoted => quote = Some(c),
+            (None, c) => out.push(c),
+        }
+    }
+    out
 }
 
 // ---- libretro thumbnail sets ----
@@ -614,5 +702,130 @@ mod tests {
         let s = "Pokémon - Red (USA, Europe) & more";
         assert_eq!(decode(&encode(s)), s);
         assert_eq!(encode("A B(C)"), "A%20B%28C%29");
+    }
+
+    #[test]
+    fn dropped_paths_in_every_shape() {
+        let plain = PathBuf::from("/a/b c.png");
+        for text in [
+            "/a/b c.png",
+            "/a/b\\ c.png",
+            "'/a/b c.png'",
+            "\"/a/b c.png\"",
+            "file:///a/b%20c.png",
+            "file://localhost/a/b%20c.png",
+            "'file:///a/b%20c.png'",
+            "  /a/b\\ c.png \n",
+            "/a/b\\ c.png\r",
+            "\r\n/a/b\\ c.png\r\n/other.png\r\n",
+            "/a/b\\ c.png\r/other.png",
+        ] {
+            assert_eq!(dropped_path(text), plain, "{text:?}");
+        }
+        assert_eq!(dropped_path("~/b.png"), config::home().join("b.png"));
+        assert_eq!(dropped_path("'~/b c.png'"), config::home().join("b c.png"));
+        // Apostrophes: plain, and the way a shell quotes them.
+        assert_eq!(dropped_path("/a/it's.png"), PathBuf::from("/a/it's.png"));
+        assert_eq!(dropped_path("/a/it\\'s.png"), PathBuf::from("/a/it's.png"));
+        assert_eq!(dropped_path("'/a/it'\\''s.png'"), PathBuf::from("/a/it's.png"));
+        assert_eq!(dropped_path("\"/a/say \\\"hi\\\" \\x.png\""), PathBuf::from("/a/say \"hi\" \\x.png"));
+        assert_eq!(dropped_path("/a/\\(USA\\)\\&\\\\.png"), PathBuf::from("/a/(USA)&\\.png"));
+        assert_eq!(dropped_path("file:///a/caf%C3%A9.png"), PathBuf::from("/a/café.png"));
+    }
+
+    #[test]
+    fn custom_covers_are_named_after_the_key() {
+        let cfg = Path::new("/home/me/.config/romi/config.json");
+        let dest = "/home/me/.config/romi/art/gba/Advance Wars (USA).gba.png";
+        assert_eq!(custom_path(cfg, "gba", "gba:Advance Wars (USA).gba"), PathBuf::from(dest));
+        let dest = "/home/me/.config/romi/art/psx/Sub__Game.chd.png";
+        assert_eq!(custom_path(cfg, "psx", "psx:Sub/Game.chd"), PathBuf::from(dest));
+        // Games without a ROM: hand-added and Steam's.
+        let dest = "/home/me/.config/romi/art/pc/Sonic 3 A.I.R..png";
+        assert_eq!(custom_path(cfg, "pc", "game:Sonic 3 A.I.R."), PathBuf::from(dest));
+        let dest = "/home/me/.config/romi/art/steam/736260.png";
+        assert_eq!(custom_path(cfg, "steam", "steam:736260"), PathBuf::from(dest));
+        // A config given by a relative path still gives a path that works from anywhere.
+        assert!(custom_path(Path::new("config.json"), "gba", "gba:a.gba").is_absolute());
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("romi-art-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn saved(dest: &Path) -> image::DynamicImage {
+        assert!(std::fs::read(dest).unwrap().starts_with(b"\x89PNG"), "not a PNG");
+        image::open(dest).unwrap()
+    }
+
+    #[test]
+    fn saving_converts_to_png_and_shrinks_only_big_images() {
+        let dir = temp_dir("save");
+        let dest = dir.join("art/gba/game.png");
+
+        // A JPEG, misnamed for good measure; the folder gets made.
+        let jpeg = dir.join("cover.png");
+        image::RgbImage::new(300, 400).save_with_format(&jpeg, image::ImageFormat::Jpeg).unwrap();
+        save_custom(&jpeg, &dest).unwrap();
+        assert_eq!((saved(&dest).width(), saved(&dest).height()), (300, 400));
+        assert!(jpeg.exists(), "the original stays");
+
+        // Too big, with its shape kept. Saving again replaces the last one.
+        let big = dir.join("big.png");
+        image::RgbImage::new(1000, 2400).save(&big).unwrap();
+        save_custom(&big, &dest).unwrap();
+        assert_eq!((saved(&dest).width(), saved(&dest).height()), (500, 1200));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_turns_photos_upright() {
+        let dir = temp_dir("exif");
+        let mut jpeg = Vec::new();
+        let img = image::DynamicImage::ImageRgb8(image::RgbImage::new(40, 20));
+        img.write_to(&mut std::io::Cursor::new(&mut jpeg), image::ImageFormat::Jpeg).unwrap();
+        // An Exif segment right after the start of the file, saying "rotate 90 degrees".
+        let tiff: &[u8] = &[
+            b'M', b'M', 0, 42, 0, 0, 0, 8, // big-endian, first directory at 8
+            0, 1, // one entry
+            1, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, // Orientation (a short): 6
+            0, 0, 0, 0, // no more directories
+        ];
+        let mut segment = vec![0xFF, 0xE1];
+        segment.extend(((2 + 6 + tiff.len()) as u16).to_be_bytes());
+        segment.extend(b"Exif\0\0");
+        segment.extend(tiff);
+        jpeg.splice(2..2, segment);
+        let source = dir.join("photo.jpg");
+        std::fs::write(&source, jpeg).unwrap();
+
+        let dest = dir.join("game.png");
+        save_custom(&source, &dest).unwrap();
+        assert_eq!((saved(&dest).width(), saved(&dest).height()), (20, 40));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn saving_something_else_leaves_the_old_cover() {
+        let dir = temp_dir("bad");
+        let dest = dir.join("game.png");
+        std::fs::write(&dest, b"the old cover").unwrap();
+
+        let text = dir.join("notes.txt");
+        std::fs::write(&text, "not a picture").unwrap();
+        let bad = [
+            (text, "That isn't an image romi can read"),
+            (dir.join("missing.png"), "There's no file at"),
+            (dir.clone(), "There's no file at"),
+        ];
+        for (source, message) in bad {
+            let err = format!("{:#}", save_custom(&source, &dest).unwrap_err());
+            assert!(err.starts_with(message), "{err}");
+        }
+        assert_eq!(std::fs::read(&dest).unwrap(), b"the old cover");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

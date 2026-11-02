@@ -65,8 +65,8 @@ impl Game {
         }
         self.launch.env.extend(ov.env.clone());
         self.emulator.clone_from(&ov.emulator);
-        if let Some(art) = &ov.art {
-            self.art.manual = Some(expand_path(art));
+        if ov.art.is_some() {
+            self.set_art_override(ov.art.as_deref());
         }
         let mut meta = configured_meta(None, ov.genre.as_deref(), ov.players, ov.year);
         meta.fill(&self.meta);
@@ -74,6 +74,11 @@ impl Game {
         self.hidden = ov.hidden;
         self.controls.0.extend(ov.controls.0.clone());
         self.core_options.extend(ov.core_options.clone());
+    }
+
+    /// Sets the image from the game's top-level override; with none, it's the one set lower down.
+    pub fn set_art_override(&mut self, art: Option<&str>) {
+        self.art.manual = art.map(expand_path).or_else(|| self.art.configured.clone());
     }
 }
 
@@ -83,8 +88,10 @@ pub struct ArtRef {
     /// Title to search thumbnail sets for: the ROM's file stem, or the MAME title for arcade sets.
     pub title: Option<String>,
     pub appid: Option<String>,
-    /// Image set by hand in the config.
+    /// Image set by hand in the config, or added from the game's menu. It comes before all others.
     pub manual: Option<PathBuf>,
+    /// The image set on a game entry or a system's override, which a top-level override beats.
+    pub configured: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -219,6 +226,7 @@ impl Library {
         }
 
         for game in &mut lib.games {
+            game.art.configured.clone_from(&game.art.manual);
             if let Some(ov) = cfg.overrides.get(&game.key) {
                 game.apply(ov);
             }
@@ -393,6 +401,7 @@ impl Library {
             title: Some(mame_title.unwrap_or_else(|| stem.clone())),
             appid: None,
             manual: ov.art.as_deref().map(expand_path),
+            ..ArtRef::default()
         };
 
         let mut vars = cfg.vars.clone();

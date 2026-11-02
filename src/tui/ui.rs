@@ -132,6 +132,9 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if let (Some(area), Some(_)) = (osk_area, app.osk) {
         draw_osk(f, app, &theme, area);
     }
+    if app.art_prompt.is_some() {
+        draw_art_prompt(f, app, &theme, body);
+    }
     if app.filter_panel.is_some() {
         draw_filter(f, app, &theme, body);
     }
@@ -338,6 +341,42 @@ fn draw_menu(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     };
     let block = theme.block(title, true).padding(Padding::vertical(1));
     f.render_widget(Paragraph::new(items).block(block), rect);
+}
+
+/// The prompt for a game's new cover.
+fn draw_art_prompt(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    let Some(prompt) = &app.art_prompt else { return };
+    let width = area.width.min(66);
+    // Inside the border, a space each side, the prompt and the cursor.
+    let room = width.saturating_sub(8) as usize;
+    // The end of a long path is what tells it apart.
+    let extra = prompt.text.chars().count().saturating_sub(room);
+    let shown = match extra {
+        0 => prompt.text.clone(),
+        _ => format!("…{}", prompt.text.chars().skip(extra + 1).collect::<String>()),
+    };
+    let mut lines = vec![
+        Line::raw("Drag an image here, or paste its path. Esc to cancel."),
+        Line::raw(""),
+        Line::from(vec![
+            Span::styled("> ", Style::new().fg(theme.accent).bold()),
+            Span::raw(shown),
+            Span::styled("█", Style::new().fg(theme.accent)),
+        ]),
+    ];
+    let mut height = lines.len() as u16 + 4;
+    if let Some(error) = &prompt.error {
+        lines.push(Line::raw(""));
+        lines.push(Line::styled(error.clone(), Style::new().fg(Color::Red)));
+        // Words wrap, which can take a line more than the length says.
+        let wrapped = error.chars().count().div_ceil(room.max(1) + 2) + 1;
+        height += 1 + wrapped as u16;
+    }
+    let rect = centered(area, width, height);
+    f.render_widget(Clear, rect);
+    let title = format!(" Add art: {} ", text::truncate(&prompt.name, 40));
+    let block = theme.block(title, true).padding(Padding::uniform(1));
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(block), rect);
 }
 
 /// The on-screen keyboard, docked at the bottom of the games pane so results stay visible above.
@@ -926,6 +965,15 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     }
     if app.stats.is_some() {
         let line = if pad { hints(&[(back, "close")]) } else { hints(&[("esc", "close")]) };
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
+    if app.art_prompt.is_some() {
+        let line = if pad {
+            hints(&[("enter", "save"), (back, "cancel")])
+        } else {
+            hints(&[("enter", "save"), ("esc", "cancel")])
+        };
         f.render_widget(Paragraph::new(line), area);
         return;
     }
