@@ -1,7 +1,8 @@
 //! The main panels: the systems, the games as a list or a grid, the details, and a game playing.
 
-use super::{Theme, draw_toast, runs_label};
+use super::{Theme, draw_toast};
 use crate::art::Kind;
+use crate::emulators::runs_label;
 use crate::sort::Sort;
 use crate::state::now;
 use crate::text;

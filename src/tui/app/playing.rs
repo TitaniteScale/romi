@@ -38,7 +38,7 @@ impl App {
         let options = self.emulator_options(g);
         match options.get(self.current_emulator(g, &options)) {
             Some(e) => e.name.clone(),
-            None => crate::tui::ui::runs_label(&self.lib.games[g].launch.command),
+            None => crate::emulators::runs_label(&self.lib.games[g].launch.command),
         }
     }
 

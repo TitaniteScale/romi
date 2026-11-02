@@ -53,7 +53,7 @@ impl Emulators {
         let mut default = game.default_run.clone();
         default.name = match others.iter().find(is_default) {
             Some(e) => e.name.clone(),
-            None => crate::tui::ui::runs_label(&default.command),
+            None => runs_label(&default.command),
         };
         let mut options = vec![default];
         options.extend(others.iter().filter(|e| !is_default(e)).cloned());
@@ -76,4 +76,15 @@ pub fn core(game: &Game, options: &[Emulator]) -> Option<PathBuf> {
 pub fn current(game: &Game, options: &[Emulator]) -> usize {
     let picked = game.emulator.as_deref();
     picked.and_then(|name| options.iter().skip(1).position(|e| e.name == name).map(|i| i + 1)).unwrap_or(0)
+}
+
+/// "retroarch · mgba" for libretro cores, otherwise just the program name.
+pub fn runs_label(command: &str) -> String {
+    let mut words = command.split_whitespace();
+    let program = words.next().unwrap_or_default();
+    let program = program.rsplit('/').next().unwrap_or(program);
+    match words.find_map(|w| w.rsplit('/').next()?.strip_suffix("_libretro.so")) {
+        Some(core) => format!("{program} · {core}"),
+        None => program.to_string(),
+    }
 }

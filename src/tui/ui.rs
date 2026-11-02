@@ -367,17 +367,6 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     f.render_widget(Paragraph::new(line), area);
 }
 
-/// "retroarch · mgba" for libretro cores, otherwise just the program name.
-pub fn runs_label(command: &str) -> String {
-    let mut words = command.split_whitespace();
-    let program = words.next().unwrap_or_default();
-    let program = program.rsplit('/').next().unwrap_or(program);
-    match words.find_map(|w| w.rsplit('/').next()?.strip_suffix("_libretro.so")) {
-        Some(core) => format!("{program} · {core}"),
-        None => program.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
