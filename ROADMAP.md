@@ -578,6 +578,11 @@ that have no libretro core. In the order they're worth doing:
      played live to prove the memory reads right (the core gives MEM1 as plain system RAM, big-endian
      as RetroAchievements' Dolphin sets expect); Wii games whose achievements are in MEM2
      (0x90000000 and up) can't earn them, as Dolphin's core gives no memory map for it.
+   - Launch animation models: the other handhelds borrow the Game Boy, and every other console is the
+     TV alone. Still to do: a landscape handheld for the Game Gear, Lynx, PSP and the like (the
+     credited "Handheld videogame console" model is credited in CREDITS.md, not imported yet);
+     consoles of their own for the biggest TV systems (Genesis, PlayStation, N64...), as each is
+     one `build.sh` line with the NES's recipe. The NES was facing the TV; it faces you now.
    - Still to do for LRPS2: played on a real screen with a controller, past the menus; Burnout 3's
      sound when it's busy, which Jake hears stutter a little and scripted crashes didn't reproduce (live
      at 2×, 59.9 fps and never dry, a warm or empty LRPS2 shader cache alike, with Mesa's own cache

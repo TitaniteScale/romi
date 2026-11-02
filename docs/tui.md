@@ -171,10 +171,11 @@ of the game's, so a small panel shows less of them. `"none"`, the default, leave
 the game drew it.
 
 Games start with a launch animation: a wireframe of the system builds itself out of lines across
-the panel, then the camera dives into its screen as the game starts on it. Game Boy, Game Boy
-Color and Game Boy Advance games get a Game Boy, NES and SNES games an old TV with the console in
-front of it, arcade and Neo Geo games an upright cabinet, and every other system the TV on its
-own. A game that isn't its screen's shape (the GBA's wide picture on the Game Boy) sits in the
+the panel, then the camera dives into its screen as the game starts on it. Game Boy,
+Game Boy Color and Game Boy Advance games get a Game Boy, and so do the other handhelds (DS, PSP,
+Game Gear, Lynx, Neo Geo Pocket, WonderSwan) until they have models of their own. NES and SNES
+games get an old TV with the console in front of it, arcade, Neo Geo and Naomi games an upright
+cabinet, and every other system the TV on its own. A game that isn't its screen's shape (the GBA's wide picture on the Game Boy) sits in the
 middle of the glass. The game's file name decides how it builds and its color, so a game always starts
 the same way.
 The color comes from the terminal's own palette (red, green, yellow, blue, magenta, cyan and their

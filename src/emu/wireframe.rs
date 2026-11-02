@@ -38,13 +38,20 @@ const CONTRAST: f64 = 3.0;
 /// How long to wait for the terminal to say what its colors are.
 const ASK_FOR: Duration = Duration::from_millis(300);
 
-/// The wireframe for a system, by its id: its own console's, or a TV for the rest.
+/// The wireframe for a system, by its id: its own console's, a Game Boy for the other handhelds
+/// (until they have models of their own), an arcade cabinet for arcade boards, or a TV for the
+/// rest, the consoles you play on one.
 pub fn for_system(system: &str) -> &'static str {
     match system {
-        "gb" | "gbc" | "gba" => include_str!("wireframes/gameboy.json"),
+        "gb" | "gbc" | "gba" | "nds" | "3ds" | "psp" | "psvita" | "gamegear" | "atarilynx" | "ngp" | "ngpc"
+        | "wonderswan" | "wonderswancolor" | "pokemini" | "supervision" | "gamate" => {
+            include_str!("wireframes/gameboy.json")
+        }
         "nes" | "famicom" | "fds" => include_str!("wireframes/nes.json"),
         "snes" | "snesna" | "sfc" | "satellaview" | "sufami" => include_str!("wireframes/snes.json"),
-        "arcade" | "mame" | "fbneo" | "neogeo" | "cps1" | "cps2" | "cps3" => include_str!("wireframes/arcade.json"),
+        "arcade" | "mame" | "fbneo" | "neogeo" | "cps1" | "cps2" | "cps3" | "naomi" | "atomiswave" => {
+            include_str!("wireframes/arcade.json")
+        }
         _ => include_str!("wireframes/tv.json"),
     }
 }
@@ -1231,6 +1238,19 @@ mod tests {
         for system in ["gb", "nes", "snes", "arcade", "gba"] {
             Model::load(for_system(system)).unwrap();
         }
+    }
+
+    #[test]
+    fn handhelds_get_a_handheld_and_consoles_a_tv() {
+        let handheld = for_system("gb");
+        for system in ["gba", "nds", "psp", "gamegear", "atarilynx", "ngpc"] {
+            assert_eq!(for_system(system), handheld, "{system}");
+        }
+        let tv = for_system("psx");
+        for system in ["gc", "wii", "n64", "megadrive", "saturn", "dreamcast", "pcengine", "ps2", "mastersystem"] {
+            assert_eq!(for_system(system), tv, "{system}");
+        }
+        assert_eq!(for_system("naomi"), for_system("arcade"));
     }
 
     #[test]

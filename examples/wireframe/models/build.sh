@@ -33,7 +33,7 @@ $import "$models/old-tv/model.obj" $tv --system tv --credit "$tv_credit, $licens
 
 # The consoles, on the floor in front of the TV and to its right, turned a little toward the
 # middle. Pieces 4 on are the NES's grip ridges, dozens of thin plates that draw as a smudge.
-$import "$models/nes/model.obj" --no-glass --width 25.4 --drop 4-59 -o "$parts/nes.json"
+$import "$models/nes/model.obj" --no-glass --front -z --width 25.4 --drop 4-59 -o "$parts/nes.json"
 $import "$models/old-tv/model.obj" $tv --add "$parts/nes.json:24,26,-20" --system nes \
   --credit "$tv_credit and $nes_credit, $license" -o "$out/nes.json"
 
