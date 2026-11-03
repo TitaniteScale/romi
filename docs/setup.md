@@ -34,7 +34,11 @@ with `--roms` somewhere other than `roms_dir` get full paths instead, leaving `r
 
 ## romi check
 
-`romi check` uses the same knowledge to suggest fixes: a system whose emulator is gone but which
+`romi check` says which terminal it's in and whether games can show in it (Ghostty and kitty), how
+many libretro cores it found and where, or everywhere it looked if it found none, and whether LRPS2
+is missing its BIOS.
+
+It uses the same knowledge as init to suggest fixes: a system whose emulator is gone but which
 something else installed can run (with the command to use), folders with games that aren't in your
 config yet, and folders for systems you have no emulator for.
 

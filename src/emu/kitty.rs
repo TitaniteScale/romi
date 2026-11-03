@@ -13,6 +13,42 @@ use std::num::NonZeroU16;
 
 const PLACEHOLDER: char = '\u{10EEEE}';
 
+/// The terminal romi is in, as far as its environment says.
+pub struct Terminal {
+    pub name: String,
+    /// Whether games show in it. They need Kitty graphics with Unicode placeholders, which terminals
+    /// don't report and which only these two were found to have, of Ghostty, kitty, foot, Alacritty,
+    /// Konsole and WezTerm.
+    pub shows_games: bool,
+}
+
+pub fn terminal() -> Terminal {
+    terminal_from(|name| std::env::var(name).ok().filter(|v| !v.is_empty()))
+}
+
+fn terminal_from(var: impl Fn(&str) -> Option<String>) -> Terminal {
+    let (term, program) = (var("TERM").unwrap_or_default(), var("TERM_PROGRAM").unwrap_or_default());
+    let is = |name: &str, shows_games: bool| Terminal { name: name.to_string(), shows_games };
+    // These pass on what's outside them, so it says nothing about what they can show.
+    if var("TMUX").is_some() {
+        return is("tmux", false);
+    }
+    if var("ZELLIJ").is_some() {
+        return is("zellij", false);
+    }
+    if term == "xterm-ghostty" || program == "ghostty" {
+        return is("Ghostty", true);
+    }
+    if term == "xterm-kitty" || var("KITTY_WINDOW_ID").is_some() {
+        return is("kitty", true);
+    }
+    if var("KONSOLE_VERSION").is_some() {
+        return is("Konsole", false);
+    }
+    let name = [program, term].into_iter().find(|n| !n.is_empty());
+    is(name.as_deref().unwrap_or("this terminal"), false)
+}
+
 /// The marks that number rows and columns, in order: row 0 is U+0305, row 1 U+030D and so on.
 /// From kitty's rowcolumn-diacritics.txt (the same table ratatui-image carries, MIT licensed).
 static DIACRITICS: [char; 297] = [
@@ -426,6 +462,24 @@ mod tests {
         assert_eq!(stale_pid(&format!("romi-{}-7", std::process::id())), None, "this run's own");
         assert_eq!(stale_pid("pulse-shm-123"), None);
         assert_eq!(stale_pid("romi-x-1"), None);
+    }
+
+    #[test]
+    fn terminals_are_known_by_their_environment() {
+        let in_env = |vars: &[(&str, &str)]| {
+            let t = terminal_from(|name| vars.iter().find(|(k, _)| *k == name).map(|(_, v)| v.to_string()));
+            (t.name, t.shows_games)
+        };
+        let named = |name: &str, shows| (name.to_string(), shows);
+        assert_eq!(in_env(&[("TERM", "xterm-ghostty"), ("TERM_PROGRAM", "ghostty")]), named("Ghostty", true));
+        assert_eq!(in_env(&[("TERM", "xterm-kitty")]), named("kitty", true));
+        assert_eq!(in_env(&[("TERM", "xterm-256color"), ("KITTY_WINDOW_ID", "1")]), named("kitty", true));
+        assert_eq!(in_env(&[("TERM", "foot")]), named("foot", false));
+        assert_eq!(in_env(&[("TERM", "xterm-256color"), ("TERM_PROGRAM", "WezTerm")]), named("WezTerm", false));
+        assert_eq!(in_env(&[("TERM", "xterm-256color"), ("KONSOLE_VERSION", "251200")]), named("Konsole", false));
+        assert_eq!(in_env(&[]), named("this terminal", false));
+        let in_tmux = [("TERM", "xterm-kitty"), ("KITTY_WINDOW_ID", "1"), ("TMUX", "/tmp/tmux,1,0")];
+        assert_eq!(in_env(&in_tmux), named("tmux", false));
     }
 
     #[test]

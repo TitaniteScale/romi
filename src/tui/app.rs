@@ -218,6 +218,10 @@ pub struct App {
     pub achievements: crate::ra::Achievements,
     achievements_rx: Option<Receiver<Result<crate::ra::Achievements, String>>>,
     term_focused: bool,
+    /// Whether it's been said why A starts emulators in this terminal.
+    told_about_terminal: bool,
+    /// What to say when the game that's running exits, since it won't be seen until then.
+    after_game: Option<String>,
     cooldown_until: Option<Instant>,
     /// Remembered game selection per view, so hopping between systems doesn't lose your place.
     positions: HashMap<String, usize>,
@@ -286,6 +290,8 @@ impl App {
             achievements: crate::ra::Achievements::default(),
             achievements_rx: None,
             term_focused: true,
+            told_about_terminal: false,
+            after_game: None,
             cooldown_until: None,
             positions: HashMap::new(),
             matcher: SkimMatcherV2::default(),

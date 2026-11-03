@@ -268,7 +268,7 @@ impl App {
             Some(g) => {
                 let mut items = Vec::new();
                 if self.embeddable(g).is_some() {
-                    items.extend([if self.cfg.play_in_romi { PlayOutside } else { PlayHere }, Controls]);
+                    items.extend([if self.a_plays_here() { PlayOutside } else { PlayHere }, Controls]);
                 }
                 items.extend([Favorite, Hide, Tags]);
                 if self.emulator_options(g).len() > 1 {

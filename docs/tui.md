@@ -97,7 +97,9 @@ in the middle panel, with the systems and details still around it, drawn behind 
 placeholders. Esc, or holding Select+Start, stops it. Arcade games on their side, like Ms. Pac-Man,
 are turned upright.
 
-It needs Ghostty or kitty ([requirements](../README.md#requirements)). In-game saves go where RetroArch keeps them: the ROM's
+It needs Ghostty or kitty ([requirements](../README.md#requirements)). In any other terminal, A
+starts the emulator instead and says why, and **Play in romi** in the game's menu will still try,
+for a terminal that turns out to be able to show it. In-game saves go where RetroArch keeps them: the ROM's
 name with `.srm`, in RetroArch's save folder for that core (or next to the ROM, if RetroArch saves
 there), so a game saved in romi carries on in RetroArch and back. romi writes the save within a
 second of the game saving, and again when you stop. What a core keeps itself (FinalBurn Neo's high

@@ -19,17 +19,43 @@ impl App {
         crate::emu::libretro::can_open(&core, &rom).then_some((core, rom))
     }
 
-    /// Plays a game as A does: inside romi when `play_in_romi` is on and it can play there, or
-    /// else in its emulator.
+    /// Whether A plays games inside romi, where they can play there. Not in a terminal they don't
+    /// show in, though the game's menu can still try.
+    pub(super) fn a_plays_here(&self) -> bool {
+        self.cfg.play_in_romi && crate::emu::kitty::terminal().shows_games
+    }
+
+    /// Plays a game as A does: inside romi when it can, or else in its emulator.
     pub(super) fn play(&mut self, g: usize) {
         if self.cfg.play_in_romi {
             // A game that runs in another emulator may play in romi through one of its others.
             self.emulators.find(&self.cfg, &self.lib, g);
             if self.embeddable(g).is_some() {
-                return self.play_here(g);
+                if self.a_plays_here() {
+                    return self.play_here(g);
+                }
+                return self.launch_instead(g);
             }
         }
         self.launch(g);
+    }
+
+    /// Starts a game that could play in romi in its emulator, because of the terminal, saying why
+    /// the first time, or if it can't start.
+    fn launch_instead(&mut self, g: usize) {
+        if let Err(e) = self.lib.games[g].launch.prepare().and_then(|p| p.check_program()) {
+            return self.set_status(Level::Error, format!("Games only show in Ghostty or kitty, and {e:#}"));
+        }
+        self.launch(g);
+        if std::mem::replace(&mut self.told_about_terminal, true) {
+            return;
+        }
+        let why =
+            format!("{} can't show games in romi, so A starts their emulators", crate::emu::kitty::terminal().name);
+        match self.running {
+            Some(_) => self.after_game = Some(why),
+            None => self.set_status(Level::Warn, why),
+        }
     }
 
     /// What a game runs with outside romi, by the name of its emulator: the one picked for it in
@@ -234,6 +260,9 @@ impl App {
                 .set_status(Level::Error, format!("{name} exited with code {c} (log: {})", config::tilde(&log_path()))),
             Some(None) => self.set_status(Level::Warn, format!("{name} was killed by a signal")),
             None => self.set_status(Level::Error, format!("Lost track of {name}")),
+        }
+        if let Some(why) = self.after_game.take() {
+            self.set_status(Level::Warn, why);
         }
         self.rebuild_keeping_selection();
     }

@@ -215,6 +215,40 @@ def play_a_game_boy_game(start, sandbox, **settings):
     return bytes(romi.output)
 
 
+def test_in_a_terminal_that_cant_show_games_a_starts_the_emulator(start, sandbox):
+    set_up_a_game_boy_game(sandbox, play_in_romi=True)
+    romi = start(term="foot")
+    romi.keys("\r")
+    romi.wait_for("foot can't show games in romi, so A starts their emulators")
+    assert GAME_IMAGE not in romi.output
+    # Once is enough.
+    romi.pump(1)
+    romi.keys("\r")
+    romi.wait_for("Played Pocket Lantern")
+
+
+def test_a_says_why_when_it_cant_show_a_game_or_start_its_emulator(start, sandbox):
+    set_up_a_game_boy_game(sandbox, play_in_romi=True)
+    config = json.loads(sandbox.config_path.read_text())
+    config["systems"][0]["command"] = config["systems"][0]["command"].replace("true -L", "no-such-emulator -L")
+    sandbox.write_config(config)
+    romi = start(term="foot")
+    romi.keys("\r")
+    romi.wait_for("Games only show in Ghostty or kitty, and no-such-emulator: not found")
+
+
+def test_a_plays_in_romi_in_a_terminal_that_shows_games(start, sandbox):
+    set_up_a_game_boy_game(sandbox, play_in_romi=True, launch_animation={"enabled": False})
+    romi = start(term="xterm-ghostty")
+    romi.keys("\r")
+    romi.wait_for(lambda: GAME_IMAGE in romi.output, timeout=10)
+
+
+def test_the_menu_can_still_try_a_terminal_that_may_not_show_games(start, sandbox):
+    set_up_a_game_boy_game(sandbox)
+    play_in_romi(start(term="foot"))
+
+
 def test_a_game_boy_game_starts_with_its_wireframe(start, sandbox):
     out = play_a_game_boy_game(start, sandbox)
     first_intro, first_game = out.find(INTRO_IMAGE), out.find(GAME_IMAGE)

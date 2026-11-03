@@ -38,7 +38,7 @@ opens.
 | Saturn                                            | Beetle Saturn    |                                       |
 | Dreamcast, NAOMI                                  | Flycast          | GPU                                   |
 | PlayStation                                       | Beetle PSX HW    | GPU                                   |
-| PlayStation 2                                     | LRPS2            | GPU, [added by hand](docs/ps2.md)     |
+| PlayStation 2                                     | LRPS2            | GPU, [takes a little setup](docs/ps2.md) |
 | PlayStation Portable                              | PPSSPP           | GPU                                   |
 | PC Engine                                         | Beetle PCE Fast  |                                       |
 | Arcade, Neo Geo                                   | FinalBurn Neo    | MAME's core plays arcade games too   |
@@ -47,7 +47,7 @@ opens.
 | Atari 7800                                        | ProSystem        |                                       |
 
 **You don't need RetroArch, only the core.** romi is the frontend: it loads the same `.so` files
-RetroArch does, from your distro's `libretro-*` packages or
+RetroArch does, from your distro's `libretro-*` packages (and on Arch, the AUR's), or
 [libretro's nightly builds](https://buildbot.libretro.com/nightly/linux/x86_64/latest/). Put a
 downloaded core in `~/.config/retroarch/cores`. If you do have RetroArch, romi uses its cores, BIOS
 folder, core options and button remaps, and in-game saves carry on in either one.
@@ -65,7 +65,7 @@ While you play:
 instead; Options → A plays turns that round. There are no save states or rewind yet. More in
 [Play in romi](docs/tui.md#play-in-romi) and [achievements](docs/achievements.md).
 
-**PS2** runs on LRPS2, PCSX2's libretro core, which you [add yourself](docs/ps2.md). romi falls back
+**PS2** runs on LRPS2, PCSX2's libretro core, which [takes a little setup](docs/ps2.md). romi falls back
 to Play! (`libretro-play`) if that's all you have, but Play! runs far fewer games and isn't
 recommended. PCSX2 is still there for anything else, in its own window.
 
@@ -90,9 +90,8 @@ recommended. PCSX2 is still there for anything else, in its own window.
   placeholders, and it doesn't work in foot, Alacritty, Konsole or WezTerm, the others it's been
   tried in. Cores marked GPU above draw with OpenGL and need libEGL; Vulkan-only renderers won't
   start. They've been tested on one laptop so far: a Radeon 890M with Mesa, and an RTX 4060 for PS2.
-- **In other terminals,** romi doesn't check yet, so A starts the game anyway, and you won't see it.
-  Set Options → A plays, or `"play_in_romi": false`, and A starts games in their emulators instead.
-  Box art is drawn with Kitty graphics, Sixel or iTerm2 images, or colored half-blocks where there
+- **In other terminals,** you still get the library, and A starts games in their emulators and says
+  why. If yours can show them, **Play in romi** in a game's menu will still try. Box art is drawn with Kitty graphics, Sixel or iTerm2 images, or colored half-blocks where there
   are none.
 
 ## Install

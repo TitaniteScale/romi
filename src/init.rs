@@ -34,9 +34,13 @@ const CORE_DIRS: &[&str] = &[
 /// Where people usually keep ROMs, in the order they're tried.
 const ROM_DIRS: &[&str] = &["~/ROMs", "~/roms", "~/Emulation/roms", "~/RetroPie/roms"];
 
-/// Other names people give ROM folders, and the ES-DE folder each one means.
+/// Names for the same system's ROM folder, as ES-DE, romi's own list and people use them.
 const FOLDER_ALIASES: &[(&str, &str)] = &[
     ("scd", "segacd"),
+    ("megacd", "segacd"),
+    ("megacd", "scd"),
+    ("mame", "arcade"),
+    ("lynx", "atarilynx"),
     ("ps1", "psx"),
     ("playstation", "psx"),
     ("playstation2", "ps2"),
@@ -170,11 +174,14 @@ impl Catalog {
     /// The system a ROM folder is for, by its name or a common alternate name.
     fn lookup(&self, folder: &str) -> Option<&SystemDef> {
         let key = squash(folder);
-        let alias = FOLDER_ALIASES.iter().find(|(a, _)| *a == key).map_or(key.as_str(), |(_, to)| to);
+        let same_system = |s: &&SystemDef| {
+            let name = squash(&s.folder);
+            FOLDER_ALIASES.iter().any(|&(a, b)| (a == key && b == name) || (a == name && b == key))
+        };
         self.systems
             .iter()
             .find(|s| squash(&s.folder) == key)
-            .or_else(|| self.systems.iter().find(|s| s.folder == alias))
+            .or_else(|| self.systems.iter().find(same_system))
             .or_else(|| self.systems.iter().find(|s| squash(&s.name) == key))
     }
 
@@ -183,6 +190,24 @@ impl Catalog {
         let folder = sys.dir.as_deref().unwrap_or(&sys.id);
         let folder = Path::new(folder).file_name().map_or(folder.to_string(), |f| f.to_string_lossy().into_owned());
         self.lookup(&folder).or_else(|| self.lookup(&sys.id))
+    }
+
+    /// The folders cores are looked for in, each once, and how many are in each.
+    pub fn core_folders(&self) -> Vec<(PathBuf, usize)> {
+        let mut seen = Vec::new();
+        let mut out = Vec::new();
+        for dir in &self.rules.core_dirs {
+            let dir = expand_path(dir);
+            let real = dir.canonicalize().unwrap_or_else(|_| dir.clone());
+            if seen.contains(&real) {
+                continue;
+            }
+            seen.push(real);
+            let is_core = |e: &std::fs::DirEntry| e.file_name().to_string_lossy().ends_with("_libretro.so");
+            let cores = std::fs::read_dir(&dir).into_iter().flatten().flatten().filter(is_core).count();
+            out.push((dir, cores));
+        }
+        out
     }
 
     /// The emulators installed here that can run a configured system's ROMs, best first. That
@@ -690,7 +715,7 @@ fn bios_for(id: &str) -> Vec<BiosFile> {
     let any = |files: &[&str]| BiosFile::AnyOf(files.iter().map(|f| f.to_string()).collect());
     match id {
         "psx" => vec![any(&["scph5501.bin", "scph5500.bin", "scph5502.bin", "scph1001.bin"])],
-        "ps2" => vec![BiosFile::One("~/.config/PCSX2/bios/*.bin".into())],
+        "ps2" => vec![any(&["~/.config/PCSX2/bios/*.bin", "pcsx2/bios/*.bin"])],
         "saturn" => vec![any(&["sega_101.bin", "mpr-17933.bin"])],
         "segacd" | "megacd" | "scd" => vec![any(&["bios_CD_U.bin", "bios_CD_E.bin", "bios_CD_J.bin"])],
         "neogeo" => vec![BiosFile::One("neogeo.zip".into())],
@@ -775,6 +800,25 @@ pub fn render(report: &Report) -> String {
     out
 }
 
+/// What could run a system nothing installed can, from why each of its commands can't: the
+/// emulators ES-DE knows, or the cores and emulators romi's own list asks for.
+pub fn what_would_run(tried: &[String], esde: bool) -> String {
+    let mut names: Vec<&str> = Vec::new();
+    for t in tried {
+        let name = t.split(':').next().unwrap_or(t);
+        let name = if esde { name } else { name.trim_start_matches("no ").trim_end_matches(" not installed") };
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    names.truncate(4);
+    match (names.is_empty(), esde) {
+        (true, _) => String::new(),
+        (false, true) => format!(" (ES-DE knows: {})", names.join(", ")),
+        (false, false) => format!(" (needs: {})", names.join(", ")),
+    }
+}
+
 /// A short account of what was found, for people.
 pub fn summary(report: &Report) -> String {
     let mut out = String::new();
@@ -792,13 +836,12 @@ pub fn summary(report: &Report) -> String {
                 format!("  = {folder:<14} already in your config as \"{id}\"")
             }
             Finding::NoEmulator { def, games, tried } => {
-                let tried: Vec<&str> = tried.iter().map(|t| t.split(':').next().unwrap_or(t)).take(4).collect();
                 format!(
-                    "  ! {:<14} {:<28} {}  no emulator installed (ES-DE knows: {})",
+                    "  ! {:<14} {:<28} {}  no emulator installed{}",
                     def.folder,
                     def.shown_name(),
                     plural(*games),
-                    tried.join(", ")
+                    what_would_run(tried, report.esde)
                 )
             }
             Finding::Empty { def } => format!("  - {:<14} {:<28}    no games", def.folder, def.shown_name()),
@@ -1000,6 +1043,39 @@ mod tests {
         // Not set at all (so it was the default): it gets a line of its own.
         let out = set_roms_dir("// romi\n{\n  \"games\": []\n}\n", "~/roms").unwrap();
         assert_eq!(out, "// romi\n{\n  \"roms_dir\": \"~/roms\",\n  \"games\": []\n}\n");
+    }
+
+    #[test]
+    fn folders_go_by_any_of_a_systems_names() {
+        let builtin = Catalog::builtin();
+        for (folder, id) in [
+            ("segacd", "scd"),
+            ("scd", "scd"),
+            ("Mega CD", "scd"),
+            ("mame", "arcade"),
+            ("fbneo", "fbneo"),
+            ("lynx", "atarilynx"),
+            ("gamecube", "gc"),
+            ("Genesis", "megadrive"),
+        ] {
+            assert_eq!(builtin.lookup(folder).map(|s| s.id.as_str()), Some(id), "{folder}");
+        }
+        assert!(builtin.lookup("notes").is_none());
+    }
+
+    #[test]
+    fn what_would_run_a_system_is_named_for_the_list_it_came_from() {
+        let tried = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            what_would_run(&tried(&["mGBA: no mgba_libretro.so", "VBA-M: vbam not installed"]), true),
+            " (ES-DE knows: mGBA, VBA-M)"
+        );
+        assert_eq!(what_would_run(&tried(&["no mesen_libretro.so"]), false), " (needs: mesen_libretro.so)");
+        assert_eq!(
+            what_would_run(&tried(&["melonDS not installed", "melonDS: no melonds_libretro.so"]), false),
+            " (needs: melonDS)"
+        );
+        assert_eq!(what_would_run(&[], false), "");
     }
 
     #[test]

@@ -638,10 +638,9 @@ Smaller items that fit between phases.
   it's not planned. `romi status --json` already has what one needs.
 - **7z ROMs in romi**: zips are unpacked for cores that can't open them, 7z files aren't. Only cores
   that open 7z themselves (FinalBurn Neo) can play them.
-- **Check the terminal before playing in romi**: nothing checks, so A starts the game in any terminal.
-  On 2026-11-02 foot showed a blank panel, Alacritty and Konsole garbage, and WezTerm went black, with
-  no message. A terminal that can't show it should start the emulator instead, and say why. Terminals
-  don't report Unicode placeholder support, so it may have to go by which terminal it is.
+- **Terminals other than Ghostty and kitty**: A starts the emulator in them, going by the terminal's name
+  (`kitty::terminal`), since terminals don't report Unicode placeholder support. foot, Alacritty, Konsole
+  and WezTerm were tried on 2026-11-02. Over SSH, a kitty or Ghostty `TERM` still claims it can show games.
 - **Steam games full screen**: on by default, off from Options or per game in its menu. romi only asks
   Steam to start a game, and Wayland doesn't let one app make another's window full screen, so romi
   would wait for the game's window and ask the compositor: Hyprland first, then sway, and a message

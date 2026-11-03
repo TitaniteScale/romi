@@ -262,6 +262,25 @@ def test_a_core_without_retroarch_passes_check(machine):
     assert "retroarch not found" not in out.stdout
 
 
+def test_other_names_for_rom_folders_on_the_built_in_list(machine):
+    # The names Batocera uses, among them.
+    fresh(machine)
+    cores = machine.home / ".config/retroarch/cores"
+    cores.mkdir(parents=True)
+    executable(machine.root / "bin/retroarch")
+    for core in ["genesis_plus_gx", "mame", "fbneo", "handy"]:
+        (cores / f"{core}_libretro.so").touch()
+    for folder, game in {"segacd": "a.chd", "mame": "a.zip", "fbneo": "b.zip", "lynx": "a.zip"}.items():
+        (machine.home / "ROMs" / folder).mkdir()
+        (machine.home / "ROMs" / folder / game).touch()
+    found = systems(romi(machine, "init", "--no-esde", "--print").stdout)
+    # The sandbox has an scd folder too, so this one goes by its own name.
+    assert found["segacd"]["command"].endswith("genesis_plus_gx_libretro.so {rom}")
+    assert found["arcade"]["dir"] == "mame"
+    assert found["fbneo"]["command"].endswith("fbneo_libretro.so {rom}")
+    assert found["atarilynx"]["dir"] == "lynx"
+
+
 def test_bad_esde_folder(machine):
     out = romi(machine, "init", "--esde", str(machine.root), "--print")
     assert out.returncode == 64
@@ -328,6 +347,36 @@ def test_check_suggests_folders_to_add_and_emulators_to_install(machine):
     assert "  snes         2 games for Nintendo SNES, but no emulator for it is installed (ES-DE knows: Nope)" in out
     # Empty and unknown folders aren't worth mentioning.
     assert "n64" not in out and "notes" not in out
+
+
+def test_check_says_what_the_terminal_can_show(sandbox):
+    sandbox.extra_env["TERM"] = "xterm-ghostty"
+    assert "terminal  Ghostty: games play inside romi" in check(sandbox)
+    sandbox.extra_env["TERM"] = "foot"
+    assert "terminal  ! foot: games only show inside romi in Ghostty or kitty" in check(sandbox)
+
+
+def test_check_says_where_cores_are(machine):
+    with_esde(machine, CONFIG)
+    assert "cores     2 in ~/cores" in check(machine)
+    for core in (machine.home / "cores").iterdir():
+        core.unlink()
+    assert "cores     ! none found, looked in ~/nowhere, ~/cores" in check(machine)
+
+
+def test_check_says_when_lrps2_has_no_bios(machine):
+    config = json.loads(json.dumps(CONFIG))
+    config["systems"].append({"id": "ps2", "name": "PlayStation 2", "extensions": ["iso"], "command": "true {rom}"})
+    with_esde(machine, config)
+    (machine.home / "ROMs/ps2").mkdir()
+    (machine.home / "ROMs/ps2/a.iso").touch()
+    assert "LRPS2" not in check(machine), "no LRPS2 installed"
+    (machine.home / "cores/pcsx2_libretro.so").touch()
+    assert "! LRPS2 has no BIOS in ~/.config/retroarch/system/pcsx2/bios" in check(machine)
+    bios = machine.home / ".config/retroarch/system/pcsx2/bios"
+    bios.mkdir(parents=True)
+    (bios / "ps2.bin").touch()
+    assert "LRPS2" not in check(machine)
 
 
 def test_check_has_no_suggestions_when_all_is_well(sandbox):

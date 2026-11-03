@@ -6,7 +6,7 @@ Radeon 890M and an RTX 4060, in November 2026.
 
 | | What it is | Plays in romi | Notes |
 |---|---|---|---|
-| **LRPS2** | PCSX2's libretro core | Yes, first choice | Not packaged for Arch; you add it yourself |
+| **LRPS2** | PCSX2's libretro core | Yes, first choice | In the AUR, or a nightly download; it needs your BIOS |
 | **Play!** | Another emulator's libretro core (`libretro-play`) | Yes, if LRPS2 isn't there | Not recommended: runs far fewer games, and slower |
 | **PCSX2** | The standalone emulator | No, it opens its own window | Runs the most games; nothing here changes it |
 
@@ -16,19 +16,29 @@ to turn that round, so that A starts the emulator.
 
 ## Adding LRPS2
 
-Put libretro's nightly in the cores folder (RetroArch's, though you don't need RetroArch), and link
-your BIOS where LRPS2 looks for it:
+You don't need RetroArch for this. On Arch, it's in the AUR, and it builds from source:
+
+```
+yay -S libretro-lrps2-git
+```
+
+Anywhere else, put libretro's nightly in the cores folder:
 
 ```
 curl -LO https://buildbot.libretro.com/nightly/linux/x86_64/latest/pcsx2_libretro.so.zip
 unzip pcsx2_libretro.so.zip -d ~/.config/retroarch/cores
+```
+
+Then link your BIOS where LRPS2 looks for it. `romi check` says if it isn't there:
+
+```
 mkdir -p ~/.config/retroarch/system/pcsx2/bios
 ln -s ~/.config/PCSX2/bios/*.bin ~/.config/retroarch/system/pcsx2/bios/
 ```
 
 If `"vars"` or `"bios_dirs"` in your config point elsewhere, use those folders instead. With no BIOS,
-romi's status bar shows LRPS2's own message: `Could not find any valid PS2 BIOS File`. A nightly isn't
-a fixed release, and LRPS2's graphics code changes often, so a new one can behave differently.
+romi's status bar shows LRPS2's own message: `Could not find any valid PS2 BIOS File`. Neither is a
+fixed release, and LRPS2's graphics code changes often, so a new one can behave differently.
 
 ## How it draws
 

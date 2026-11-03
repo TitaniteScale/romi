@@ -103,6 +103,12 @@
       "command": "retroarch -L {cores}/mame_libretro.so {rom}"
     },
     {
+      "id": "fbneo", "arcade": true, "name": "FinalBurn Neo",
+      "extensions": ["zip", "7z"],
+      "exclude": ["naomi*.zip", "mie.zip", "segadimm.zip", "jvs13551.zip", "neogeo.zip"],
+      "command": "retroarch -L {cores}/fbneo_libretro.so {rom}"
+    },
+    {
       "id": "neogeo", "arcade": true, "name": "Neo Geo",
       "extensions": ["zip", "7z", "neo"],
       "bios": ["neogeo.zip"],
@@ -232,7 +238,8 @@
     {
       "id": "ps2", "name": "PlayStation 2",
       "extensions": ["iso", "chd", "cso", "zso", "gz", "m3u"],
-      "bios": ["~/.config/PCSX2/bios/*.bin"],
+      // PCSX2's folder, or the one LRPS2 looks in.
+      "bios": [["~/.config/PCSX2/bios/*.bin", "pcsx2/bios/*.bin"]],
       "command": "pcsx2-qt -batch {rom}"
     },
     {

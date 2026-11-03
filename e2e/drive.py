@@ -171,10 +171,13 @@ class Romi:
 
     `answer_queries=False` plays a terminal that ignores romi's image-support query.
     `answer_modes` says which modes it knows, by number, when romi asks (DECRQM): 1 or 2 for set
-    or reset. Others it says it doesn't know.
+    or reset. Others it says it doesn't know. `term` is the terminal it says it is: games only play
+    inside romi in Ghostty and kitty.
     """
 
-    def __init__(self, sandbox=None, cols=100, rows=30, args=(), pad=None, answer_queries=True, answer_modes=None):
+    def __init__(
+        self, sandbox=None, cols=100, rows=30, args=(), pad=None, answer_queries=True, answer_modes=None, term="xterm-kitty"
+    ):
         self.cols, self.rows = cols, rows
         self.pad = pad
         self.answer_queries = answer_queries
@@ -186,7 +189,9 @@ class Romi:
         # The start of a graphics command, until the rest of it comes.
         self.partial = b""
         env = sandbox.env if sandbox else dict(os.environ)
-        env["TERM"] = "xterm-256color"
+        for name in ("TERM_PROGRAM", "KITTY_WINDOW_ID", "KONSOLE_VERSION", "TMUX", "ZELLIJ"):
+            env.pop(name, None)
+        env["TERM"] = term
         argv = [binary(), *args]
         self.pid, self.fd = pty.fork()
         if self.pid == 0:

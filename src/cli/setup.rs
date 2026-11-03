@@ -280,19 +280,38 @@ fn print_suggestions(cfg: &Config, lib: &Library) {
                 describe(&run)
             ),
             Suggestion::Install { folder, name, games: n, tried } => {
-                let known: Vec<&str> = tried.iter().map(|t| t.split(':').next().unwrap_or(t)).take(4).collect();
-                let known =
-                    if known.is_empty() { String::new() } else { format!(" (ES-DE knows: {})", known.join(", ")) };
+                let known = crate::init::what_would_run(&tried, catalog.esde);
                 println!("  {folder:<12} {} for {name}, but no emulator for it is installed{known}", games(n));
             }
         }
     }
 }
 
+/// "34 in ~/cores, 17 in /usr/lib/libretro", or where it looked if it found none.
+fn where_cores_are(folders: &[(std::path::PathBuf, usize)]) -> String {
+    let found: Vec<String> =
+        folders.iter().filter(|(_, n)| *n > 0).map(|(dir, n)| format!("{n} in {}", config::tilde(dir))).collect();
+    if !found.is_empty() {
+        return found.join(", ");
+    }
+    let looked: Vec<String> = folders.iter().map(|(dir, _)| config::tilde(dir)).collect();
+    format!("! none found, looked in {}", looked.join(", "))
+}
+
 pub(super) fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
     let lib = Library::load_complete(cfg);
-    println!("config  {}", config::tilde(cfg_path));
-    println!("roms    {}\n", cfg.roms_dir);
+    println!("config    {}", config::tilde(cfg_path));
+    println!("roms      {}", cfg.roms_dir);
+    let terminal = crate::emu::kitty::terminal();
+    match terminal.shows_games {
+        true => println!("terminal  {}: games play inside romi", terminal.name),
+        false => println!(
+            "terminal  ! {}: games only show inside romi in Ghostty or kitty, so A starts their emulators",
+            terminal.name
+        ),
+    }
+    let core_folders = crate::init::Catalog::for_config(cfg).core_folders();
+    println!("cores     {}\n", where_cores_are(&core_folders));
     let roms = config::expand_path(&cfg.roms_dir);
     let width = lib.systems.iter().map(|s| s.name.chars().count()).max().unwrap_or(0).max(24);
     let games = |n: usize| format!("{n:>4} {:<5}", text::plural(n, "game"));
@@ -324,6 +343,14 @@ pub(super) fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
         }
     }
     print_suggestions(cfg, &lib);
+    // PCSX2's BIOS doesn't count: LRPS2 only looks in the folder it has in romi's system folder.
+    let has_lrps2 = core_folders.iter().any(|(dir, _)| dir.join("pcsx2_libretro.so").is_file());
+    let has_ps2_games = lib.systems.iter().any(|s| s.id == "ps2" && !s.games.is_empty());
+    let lrps2_bios = [config::BiosFile::One("pcsx2/bios/*.bin".into())];
+    if has_lrps2 && has_ps2_games && !config::missing_bios(&lrps2_bios, &cfg.bios_dirs).is_empty() {
+        let folder = cfg.bios_dirs.first().map_or("your system folder", String::as_str);
+        println!("\n  ! LRPS2 has no BIOS in {folder}/pcsx2/bios, so PS2 games won't start in romi");
+    }
     if cfg.steam.enabled && steam::find_steam_dir(cfg.steam.dir.as_deref()).is_none() {
         println!("\n  steam is enabled but no Steam install was found");
     }
