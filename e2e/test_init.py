@@ -221,6 +221,47 @@ def test_builtin_systems_without_esde(machine):
     assert jsonc(out.stdout)["vars"]["cores"] == "~/.config/retroarch/cores"
 
 
+def no_retroarch(machine):
+    """Only the sandbox's own programs, and no RetroArch among them."""
+    (machine.root / "bin/fake-retroarch").unlink()
+    machine.env_extra = {"PATH": str(machine.root / "bin")}
+
+
+def test_a_core_is_enough_without_retroarch(machine):
+    fresh(machine)
+    no_retroarch(machine)
+    # Gambatte's core comes first in ES-DE's list for the Game Boy, ahead of FakeGB.
+    (machine.home / "cores/gambatte_libretro.so").touch()
+    found = systems(init(machine, "--print").stdout)
+    assert found["segacd"]["command"] == "retroarch -L {cores}/genesis_plus_gx_libretro.so {rom}"
+    # What can start by itself comes before a core that can only play in romi.
+    assert found["gb"]["command"] == "~/Apps/FakeGB-1.2.AppImage -f {rom}"
+    # No core and no emulator for the N64.
+    assert "n64" not in found
+
+
+def test_built_in_systems_without_retroarch(machine):
+    fresh(machine)
+    no_retroarch(machine)
+    cores = machine.home / ".config/retroarch/cores"
+    cores.mkdir(parents=True)
+    (cores / "mesen_libretro.so").touch()
+    (machine.home / "ROMs/nes").mkdir()
+    (machine.home / "ROMs/nes/Donkey Kong (World).nes").touch()
+    out = romi(machine, "init", "--no-esde", "--print")
+    assert out.returncode == 0, out.stderr
+    assert systems(out.stdout)["nes"]["command"] == "retroarch -L {cores}/mesen_libretro.so {rom}"
+
+
+def test_a_core_without_retroarch_passes_check(machine):
+    fresh(machine)
+    no_retroarch(machine)
+    assert init(machine, "--yes").returncode == 0
+    out = romi(machine, "check")
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "retroarch not found" not in out.stdout
+
+
 def test_bad_esde_folder(machine):
     out = romi(machine, "init", "--esde", str(machine.root), "--print")
     assert out.returncode == 64

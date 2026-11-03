@@ -155,7 +155,8 @@ pub fn check_command(command: &str, vars: &HashMap<String, String>, rom_keys: &[
             continue;
         }
         if i == 0 {
-            if find_program(&w).is_none() {
+            // A core plays in romi without the program that starts it elsewhere.
+            if find_program(&w).is_none() && crate::emu::libretro::core_in(&words).is_none() {
                 return Some(format!("{w} not found"));
             }
         } else if w.starts_with('/') && !Path::new(&w).exists() {

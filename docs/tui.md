@@ -86,8 +86,9 @@ only counts in the totals, and the year fills in as you play.
 
 A (or Enter) plays a game in romi when it runs through a libretro core, or could: a game that
 runs in another emulator, like a DS game in standalone melonDS, plays in romi through
-the first of its other emulators that's RetroArch with a core installed. For PS2 games, which
-usually run in PCSX2, that's RetroArch's LRPS2 core where it's installed ([PS2 in romi](ps2.md) says how), or
+the first of its other emulators that has a core installed. RetroArch itself doesn't need to be
+there: romi loads the core on its own. For PS2 games, which
+usually run in PCSX2, that's the LRPS2 core where it's installed ([PS2 in romi](ps2.md) says how), or
 else its Play! core (`libretro-play`), which romi adds to the emulators ES-DE knows, as ES-DE
 doesn't list it. Its emulator is still in its menu (`o`), as
 **Play with** and the emulator's name. `"play_in_romi": false` (or Options → A plays) turns that
@@ -96,7 +97,7 @@ in the middle panel, with the systems and details still around it, drawn behind 
 placeholders. Esc, or holding Select+Start, stops it. Arcade games on their side, like Ms. Pac-Man,
 are turned upright.
 
-This is experimental: Kitty graphics only. In-game saves go where RetroArch keeps them: the ROM's
+It needs Kitty graphics. In-game saves go where RetroArch keeps them: the ROM's
 name with `.srm`, in RetroArch's save folder for that core (or next to the ROM, if RetroArch saves
 there), so a game saved in romi carries on in RetroArch and back. romi writes the save within a
 second of the game saving, and again when you stop. What a core keeps itself (FinalBurn Neo's high

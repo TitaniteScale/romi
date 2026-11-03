@@ -8,8 +8,10 @@ opens. No ROMs yet is fine too: it starts with your Steam games and anything you
 `romi init` looks for your ROM folders (the one set in ES-DE, `~/ROMs`, `~/roms`,
 `~/Emulation/roms`, `~/RetroPie/roms`, or `--roms DIR`) and works out which system each folder is
 for, by its name or else by its file types. It then picks an emulator you have installed for each
-one. When ES-DE is installed it uses ES-DE's list of about 200 systems and their emulators,
-otherwise the systems in romi's default config. It shows what it found and asks before writing:
+one. A libretro core counts on its own, with or without RetroArch, since romi plays cores itself;
+without RetroArch, such a game can only play in romi. When ES-DE is installed it uses ES-DE's list
+of about 200 systems and their emulators, otherwise the systems in romi's default config. It shows
+what it found and asks before writing:
 
 ```
   + gba            Nintendo Game Boy Advance      30 games  mGBA

@@ -3,7 +3,7 @@
 //! What each system is and how to launch it comes from ES-DE when it's installed:
 //! `es_systems.xml` lists about 200 systems with their folder names, file extensions and a
 //! labelled command per emulator, and `es_find_rules.xml` says where to look for each emulator.
-//! For each ROM folder, the first command whose emulator (and RetroArch core) is installed wins.
+//! For each ROM folder, the first command whose emulator or RetroArch core is installed wins.
 //! Without ES-DE, the systems in romi's default config stand in, with one command each.
 //!
 //! The result goes in its own file, `init.jsonc`, which the main config includes. Rerunning init
@@ -106,10 +106,16 @@ pub struct Catalog {
 /// libretro cores that play a system's games in romi but that its list may not have, as (system,
 /// label, core): for PS2, LRPS2, which runs more games and faster, where it's installed (Arch doesn't
 /// package it; ES-DE lists it, the built-in list doesn't), then Play!, which Arch packages and ES-DE
-/// doesn't list. Listed after the system's own, so they're offered in a game's menu, and used to play
-/// it in romi when its own emulator isn't RetroArch, without coming first.
-const MORE_CORES: &[(&str, &str, &str)] =
-    &[("ps2", "LRPS2", "pcsx2_libretro.so"), ("ps2", "Play!", "play_libretro.so")];
+/// doesn't list; and the cores of the systems the built-in list starts in a standalone emulator.
+/// Listed after the system's own, so they're offered in a game's menu, and used to play it in romi
+/// when its own emulator isn't RetroArch, without coming first.
+const MORE_CORES: &[(&str, &str, &str)] = &[
+    ("ps2", "LRPS2", "pcsx2_libretro.so"),
+    ("ps2", "Play!", "play_libretro.so"),
+    ("nds", "melonDS", "melonds_libretro.so"),
+    ("gc", "Dolphin", "dolphin_libretro.so"),
+    ("wii", "Dolphin", "dolphin_libretro.so"),
+];
 
 impl Catalog {
     /// Adds `MORE_CORES` to the systems they're for, in ES-DE's syntax or romi's.
@@ -209,6 +215,10 @@ impl Catalog {
                 Ok(t) => runnable.push(t),
                 Err(why) => tried.push(if label.is_empty() { why } else { format!("{label}: {why}") }),
             }
+        }
+        // Without RetroArch a core only plays in romi, so what can also start by itself comes first.
+        if find_program("retroarch").is_none() {
+            runnable.sort_by_key(|t| t.command.starts_with("retroarch "));
         }
         (runnable, tried)
     }
@@ -397,7 +407,12 @@ impl<'a> Finder<'a> {
                     }
                     t if t.starts_with("EMULATOR_") => {
                         let name = &t["EMULATOR_".len()..];
-                        self.emulator(name).ok_or_else(|| format!("{} not installed", name.to_lowercase()))?
+                        match self.emulator(name) {
+                            Some(found) => found,
+                            // romi plays a core itself, so all that needs finding is the core.
+                            None if name == "RETROARCH" && raw.contains("%CORE_RETROARCH%") => "retroarch".to_string(),
+                            None => return Err(format!("{} not installed", name.to_lowercase())),
+                        }
                     }
                     t => return Err(format!("needs %{t}%")),
                 };
@@ -411,7 +426,8 @@ impl<'a> Finder<'a> {
     /// Checks a command already in romi's syntax (from the default config).
     fn check_romi(&mut self, raw: &str) -> Result<Translated, String> {
         let program = raw.split_whitespace().next().unwrap_or_default();
-        if find_program(program).is_none() {
+        // romi plays a core itself, so all that needs finding is the core.
+        if find_program(program).is_none() && !raw.contains("{cores}/") {
             return Err(format!("{program} not installed"));
         }
         if let Some(i) = raw.find("{cores}/") {

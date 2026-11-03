@@ -137,6 +137,11 @@
       "command": "melonDS -f {rom}"
     },
     {
+      "id": "nes", "name": "NES",
+      "extensions": ["nes", "unf", "zip", "7z"],
+      "command": "retroarch -L {cores}/mesen_libretro.so {rom}"
+    },
+    {
       "id": "snes",
       "extensions": ["sfc", "smc", "zip", "7z"],
       "command": "retroarch -L {cores}/bsnes_hd_beta_libretro.so {rom}"
@@ -152,9 +157,39 @@
       "command": "dolphin-emu -b -e {rom}"
     },
     {
+      "id": "wii", "name": "Wii",
+      "extensions": ["rvz", "iso", "wbfs", "wia", "gcz", "ciso", "m3u"],
+      "command": "dolphin-emu -b -e {rom}"
+    },
+    {
+      "id": "psp", "name": "PlayStation Portable",
+      "extensions": ["iso", "cso", "pbp", "chd"],
+      "command": "retroarch -L {cores}/ppsspp_libretro.so {rom}"
+    },
+    {
       "id": "megadrive",
-      "extensions": ["md", "gen", "smd", "bin", "32x", "sms", "gg", "zip", "7z"],
+      "extensions": ["md", "gen", "smd", "bin", "32x", "zip", "7z"],
       "command": "retroarch -L {cores}/genesis_plus_gx_libretro.so {rom}"
+    },
+    {
+      "id": "mastersystem", "name": "Master System",
+      "extensions": ["sms", "zip", "7z"],
+      "command": "retroarch -L {cores}/genesis_plus_gx_libretro.so {rom}"
+    },
+    {
+      "id": "gamegear", "name": "Game Gear",
+      "extensions": ["gg", "zip", "7z"],
+      "command": "retroarch -L {cores}/genesis_plus_gx_libretro.so {rom}"
+    },
+    {
+      "id": "atarilynx", "name": "Atari Lynx",
+      "extensions": ["lnx", "zip", "7z"],
+      "command": "retroarch -L {cores}/handy_libretro.so {rom}"
+    },
+    {
+      "id": "atari7800", "name": "Atari 7800",
+      "extensions": ["a78", "zip", "7z"],
+      "command": "retroarch -L {cores}/prosystem_libretro.so {rom}"
     },
     {
       "id": "scd",
