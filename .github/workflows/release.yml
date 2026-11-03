@@ -1,7 +1,7 @@
 name: Release
 
-# Pushing a tag like v0.3.0 runs CI on it, builds romi for x86_64 and aarch64 Linux, and makes a
-# draft release with both, ready for notes before it's published.
+# Pushing a tag like v0.3.0 runs CI on it, builds romi for x86_64 and aarch64 Linux, makes a draft
+# release with both, ready for notes before it's published, and publishes the crate to crates.io.
 
 on:
   push:
@@ -67,3 +67,22 @@ jobs:
           sha256sum romi-*.tar.gz > SHA256SUMS
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag --draft \
             --title "romi $GITHUB_REF_NAME" --generate-notes romi-*.tar.gz SHA256SUMS
+
+  # Last, because a version on crates.io can't be changed or deleted. crates.io trusts this file by
+  # name (its Trusted Publishing settings for the crate), so renaming it means changing them too.
+  crate:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

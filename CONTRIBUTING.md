@@ -41,10 +41,13 @@ on a laptop saving power; run it a few times.
 
 Pushing a tag builds the release. `.github/workflows/release.yml` runs CI on the tag, builds romi
 for x86_64 and aarch64 Linux (on Ubuntu 22.04, so the binaries run on glibc 2.35 and newer), and
-makes a draft release on GitHub with both tarballs and their checksums. The Arch package's recipe
-in `packaging/arch` builds from GitHub's tarball of the tag, so it's updated after. (The AUR isn't
-taking new packages, so it isn't published there; people build it with `makepkg -si`.) For a
-release:
+makes a draft release on GitHub with both tarballs and their checksums. Once those have all passed,
+it publishes the crate to crates.io, with no token stored anywhere: crates.io's Trusted Publishing
+settings for the crate name this repository and `release.yml`. A published version can be yanked but
+never changed or deleted, so a tag on a commit that passes CI goes out as it is, before the draft's
+notes are written. The Arch package's recipe in `packaging/arch` builds from GitHub's tarball of
+the tag, so it's updated after. (The AUR isn't taking new packages, so it isn't published there;
+people build it with `makepkg -si`.) For a release:
 
 1. Set the version in `Cargo.toml`, build so `Cargo.lock` follows, and commit. The release
    workflow stops if the tag and `Cargo.toml` disagree.
@@ -56,10 +59,6 @@ release:
 5. Build it: `makepkg -f`, or `pkgctl build` (from `devtools`) for a clean chroot that catches
    missing dependencies. `namcap PKGBUILD *.pkg.tar.zst` checks for common mistakes.
 6. `makepkg --printsrcinfo > .SRCINFO`, and commit both files.
-7. From the tagged commit, publish to crates.io: `cargo publish` (after `cargo login` the first
-   time). A published version can be yanked but never deleted or changed, so do this once the
-   release's CI has passed. Set `CARGO_TARGET_DIR` to another folder for it: its check build can
-   leave `target/` looking up to date when it isn't, until `cargo clean -p romi`.
 
 A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 
