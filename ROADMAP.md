@@ -638,6 +638,16 @@ Smaller items that fit between phases.
   it's not planned. `romi status --json` already has what one needs.
 - **7z ROMs in romi**: zips are unpacked for cores that can't open them, 7z files aren't. Only cores
   that open 7z themselves (FinalBurn Neo) can play them.
+- **Check the terminal before playing in romi**: nothing checks, so A starts the game in any terminal.
+  On 2026-11-02 foot showed a blank panel, Alacritty and Konsole garbage, and WezTerm went black, with
+  no message. A terminal that can't show it should start the emulator instead, and say why. Terminals
+  don't report Unicode placeholder support, so it may have to go by which terminal it is.
+- **Input lag at 4K**: press to composited picture, on a test core that responds at once, against
+  RetroArch's 40 ms: about 50 ms for 2D and 63 ms for 3D at 1080p, but 74 and 96 ms on a 4K panel
+  (2026-11-02, one laptop, with wide variation between runs at 4K). A core's frame reaches the
+  terminal in about 7 ms, so the likely cost is the terminal taking 9 MB frames, 546 MB/s. Ghostty and
+  the compositor also keep the GPU about 75% busy at 4K even for an Atari 7800 game. Try sending
+  smaller frames. Keyboard lag and what each core costs still need measuring.
 - **`romi run` crashes on the way out with some cores**: PPSSPP in `retro_unload_game` (7 of 8 short
   runs on 2026-11-02, Bust-A-Move and Persona), after the game has run and the JSON has been printed,
   so the exit code is wrong for scripts. PPSSPP games stopped from the launcher left it running.

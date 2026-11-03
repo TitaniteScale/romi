@@ -86,12 +86,14 @@ recommended. PCSX2 is still there for anything else, in its own window.
 ## Requirements
 
 - **Linux**, x86_64 or aarch64.
-- **Playing in the terminal** needs Kitty graphics with Unicode placeholders: Ghostty, where it's
-  tested, or kitty. Cores marked GPU above draw with OpenGL and need libEGL; Vulkan-only renderers
-  won't start. They've been tested on one laptop so far: a Radeon 890M with Mesa, and an RTX 4060
-  for PS2.
-- **Any other terminal** still gets the library and starts games in their emulators. Box art is
-  drawn with Kitty graphics, Sixel or iTerm2 images, or colored half-blocks where there are none.
+- **Playing in the terminal** needs Ghostty or kitty. It takes Kitty graphics with Unicode
+  placeholders, and it doesn't work in foot, Alacritty, Konsole or WezTerm, the others it's been
+  tried in. Cores marked GPU above draw with OpenGL and need libEGL; Vulkan-only renderers won't
+  start. They've been tested on one laptop so far: a Radeon 890M with Mesa, and an RTX 4060 for PS2.
+- **In other terminals,** romi doesn't check yet, so A starts the game anyway, and you won't see it.
+  Set Options → A plays, or `"play_in_romi": false`, and A starts games in their emulators instead.
+  Box art is drawn with Kitty graphics, Sixel or iTerm2 images, or colored half-blocks where there
+  are none.
 
 ## Install
 
