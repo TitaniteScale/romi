@@ -642,6 +642,11 @@ Smaller items that fit between phases.
   On 2026-11-02 foot showed a blank panel, Alacritty and Konsole garbage, and WezTerm went black, with
   no message. A terminal that can't show it should start the emulator instead, and say why. Terminals
   don't report Unicode placeholder support, so it may have to go by which terminal it is.
+- **Steam games full screen**: on by default, off from Options or per game in its menu. romi only asks
+  Steam to start a game, and Wayland doesn't let one app make another's window full screen, so romi
+  would wait for the game's window and ask the compositor: Hyprland first, then sway, and a message
+  elsewhere. The hard part is telling the game's window from its launcher or splash screen, and never
+  touching anything else. Proton games have the class `steam_app_<id>`, but native ones often don't.
 - **Input lag at 4K**: press to composited picture, on a test core that responds at once, against
   RetroArch's 40 ms: about 50 ms for 2D and 63 ms for 3D at 1080p, but 74 and 96 ms on a 4K panel
   (2026-11-02, one laptop, with wide variation between runs at 4K). A core's frame reaches the
