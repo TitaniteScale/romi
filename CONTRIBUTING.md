@@ -56,6 +56,10 @@ release:
 5. Build it: `makepkg -f`, or `pkgctl build` (from `devtools`) for a clean chroot that catches
    missing dependencies. `namcap PKGBUILD *.pkg.tar.zst` checks for common mistakes.
 6. `makepkg --printsrcinfo > .SRCINFO`, and commit both files.
+7. From the tagged commit, publish to crates.io: `cargo publish` (after `cargo login` the first
+   time). A published version can be yanked but never deleted or changed, so do this once the
+   release's CI has passed. Set `CARGO_TARGET_DIR` to another folder for it: its check build can
+   leave `target/` looking up to date when it isn't, until `cargo clean -p romi`.
 
 A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 

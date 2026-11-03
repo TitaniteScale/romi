@@ -2,10 +2,10 @@
   <img src="Images/romi_logo.png" alt="romi" width="498" />
 </h1>
 
-A game launcher for the terminal. ROMs, scripts, native ports and Steam games in one list, driven
-by a keyboard or a controller. Games can also play right inside it, with sound, saves and
-RetroAchievements: Game Boy to SNES, Genesis, arcade and the DS, and in 3D, N64, PlayStation,
-Dreamcast and GameCube. PS2 plays too, as an experiment.
+Play your games in your terminal. romi is a libretro frontend and game library: it runs emulator
+cores itself and draws the game right inside its own interface, with sound, saves and
+RetroAchievements, from the Game Boy to the PS2. Everything else you play (standalone emulators,
+native ports, scripts, Steam) starts from the same list, with a keyboard or a controller.
 
 <img width="720" height="450" alt="Picking Crazy Taxi from the Dreamcast covers in romi: a wireframe arcade cabinet builds itself, and the game plays in the middle of the launcher" src="https://github.com/user-attachments/assets/226ba686-b2f8-4c54-805b-b708a5a86dc3" />
 
@@ -16,36 +16,82 @@ https://github.com/user-attachments/assets/3546be21-ad2e-4cfb-91fb-bc42bb2cdb4f
 
 </details>
 
-- **Play in the terminal.** romi loads RetroArch's libretro cores itself and draws the game in the
-  middle of the launcher. A wireframe of the console builds itself in your terminal's colors, then
-  the camera dives into its screen as the game starts. Scanline, CRT and LCD filters,
-  achievements that unlock as you play, and saves shared with RetroArch.
+romi doesn't come with any games or cores: bring your own ROMs, the cores for the systems you play,
+and BIOS files for the systems that need them.
+
+## Play in your terminal
+
+Press A on a game. A wireframe of the console builds itself in your terminal's colors, the camera
+dives into its screen, and the game starts there, with the rest of romi still around it. No window
+opens.
+
+| System                                            | Core             | Notes                                 |
+|---------------------------------------------------|------------------|---------------------------------------|
+| Game Boy, Game Boy Color, Game Boy Advance        | mGBA             |                                       |
+| NES                                               | Mesen            |                                       |
+| Super Nintendo                                    | bsnes-hd         |                                       |
+| Nintendo 64                                       | Mupen64Plus-Next | GPU                                   |
+| GameCube                                          | Dolphin          | GPU, needs Dolphin's `Sys` folder     |
+| Wii                                               | Dolphin          | GPU, a Wii Remote and Nunchuk on your pad |
+| Nintendo DS                                       | melonDS          | Touch the screen with the mouse       |
+| Genesis, Sega CD, Master System, Game Gear        | Genesis Plus GX  |                                       |
+| Saturn                                            | Beetle Saturn    |                                       |
+| Dreamcast, NAOMI                                  | Flycast          | GPU                                   |
+| PlayStation                                       | Beetle PSX HW    | GPU                                   |
+| PlayStation 2                                     | LRPS2            | GPU, [added by hand](docs/ps2.md)     |
+| PlayStation Portable                              | PPSSPP           | GPU                                   |
+| PC Engine                                         | Beetle PCE Fast  |                                       |
+| Arcade, Neo Geo                                   | FinalBurn Neo    | MAME's core plays arcade games too   |
+| Neo Geo Pocket Color                              | Beetle NeoPop    |                                       |
+| Atari Lynx                                        | Handy            |                                       |
+| Atari 7800                                        | ProSystem        |                                       |
+
+**You don't need RetroArch, only the core.** romi is the frontend: it loads the same `.so` files
+RetroArch does, from your distro's `libretro-*` packages or
+[libretro's nightly builds](https://buildbot.libretro.com/nightly/linux/x86_64/latest/). Put a
+downloaded core in `~/.config/retroarch/cores`. If you do have RetroArch, romi uses its cores, BIOS
+folder, core options and button remaps, and in-game saves carry on in either one.
+
+While you play:
+
+- **RetroAchievements** unlock as you go, with badges, progress and rich presence. They count as
+  softcore, and on GameCube and Wii an unlock hasn't been seen live yet.
+- **Sharp 3D:** GPU cores draw about as big as they're shown, not at the console's 640×480.
+- **Screen filters:** scanlines, CRT and LCD.
+- **Controls** you can change per game or per system from its menu, with a controller for each
+  player.
+
+**A** plays a game in romi when it can, and **Play with** in its menu (`o`) starts its emulator
+instead; Options → A plays turns that round. There are no save states or rewind yet. More in
+[Play in romi](docs/tui.md#play-in-romi) and [achievements](docs/achievements.md).
+
+**PS2** runs on LRPS2, PCSX2's libretro core, which you [add yourself](docs/ps2.md). romi falls back
+to Play! (`libretro-play`) if that's all you have, but Play! runs far fewer games and isn't
+recommended. PCSX2 is still there for anything else, in its own window.
+
+## Everything else
+
 - **One library.** Box art in a list or a cover grid, genres, years and player counts, fuzzy
   search, filters, your own tags, favorites, play time and a stats screen.
-- **Controller first.** Everything works from a gamepad, and couch mode opens romi full screen on
-  the TV from the controller's Guide button.
-- **Sets itself up.** `romi init` finds your ROM folders and the emulators you have installed.
-  `romi check` says what's missing or broken and how to fix it.
+- **It starts the rest too.** Standalone emulators, native ports, scripts, `.desktop` launchers and
+  Steam games are in the same list.
+- **Controller first.** Everything works from a gamepad.
+- **Sets itself up.** `romi init` finds your ROM folders, cores and emulators. `romi check` says
+  what's missing or broken and how to fix it.
 - **Scriptable.** `list`, `info`, `play` and `status` with JSON output and stable exit codes, for
   rofi, fzf, keybinds or coding agents. `romi run` boots a game headless with scripted input and
   saves a screenshot, the same every time.
 - **Matches your theme.** It only uses your terminal's palette.
 
-romi doesn't come with any games: bring your own ROMs, and the emulators to run them.
-
 ## Requirements
 
 - **Linux**, x86_64 or aarch64.
-- **Any terminal** for the launcher. Box art is drawn with Kitty graphics, Sixel or iTerm2 images,
-  or colored half-blocks where there are none.
 - **Playing in the terminal** needs Kitty graphics with Unicode placeholders: Ghostty, where it's
-  tested, or kitty. It runs libretro cores, the 2D systems' and the 3D ones that draw with
-  OpenGL (Flycast, Mupen64Plus-Next, Beetle PSX HW, Dolphin), which need libEGL. 3D is new, and
-  so far tested on AMD with Mesa. Any other game launches in its emulator as usual.
-- **PS2 in the terminal is experimental.** It plays best through LRPS2, PCSX2's RetroArch core,
-  which Arch doesn't package, so you add it yourself. Without it, romi uses Play! (`libretro-play`),
-  which runs fewer games, and slower. PCSX2 still runs every PS2 game as usual. [PS2 in
-  romi](docs/ps2.md) covers setting it up, and which games work.
+  tested, or kitty. Cores marked GPU above draw with OpenGL and need libEGL; Vulkan-only renderers
+  won't start. They've been tested on one laptop so far: a Radeon 890M with Mesa, and an RTX 4060
+  for PS2.
+- **Any other terminal** still gets the library and starts games in their emulators. Box art is
+  drawn with Kitty graphics, Sixel or iTerm2 images, or colored half-blocks where there are none.
 
 ## Install
 
@@ -65,7 +111,7 @@ may have bugs a release doesn't.
 [Shell completions](docs/cli.md#completions) are set up with one line.
 
 **On Arch,** build the package from a clone. It builds the latest release, and sets up shell
-completions and the couch mode examples:
+completions:
 
 ```
 git clone https://github.com/TitaniteScale/romi
@@ -73,40 +119,37 @@ cd romi/packaging/arch
 makepkg -si
 ```
 
-**From source,** with Rust installed, and a C compiler and the headers for udev and ALSA:
+**With Cargo,** with Rust installed, and a C compiler and the headers for udev and ALSA:
 
 ```
 sudo apt install build-essential pkg-config libudev-dev libasound2-dev        # Debian, Ubuntu
 sudo dnf install gcc pkgconf-pkg-config systemd-devel alsa-lib-devel          # Fedora
-cargo install --locked --git https://github.com/TitaniteScale/romi --root ~/.local
+cargo install --locked romi
 ```
+
+For the newest code on `main`: `cargo install --locked --git https://github.com/TitaniteScale/romi`.
 
 ## Getting started
 
 Run `romi`. With no config yet, it first does what `romi init` does: it finds your ROM folders,
-works out which system each is for, picks an emulator you have installed for each, and shows what
-it found before writing anything. No ROMs yet is fine too: it starts with your Steam games and
-anything you `romi add`. Rerun `romi init` after installing an emulator or adding a folder, and
+works out which system each is for, picks a core or emulator you have installed for each, and shows
+what it found before writing anything. No ROMs yet is fine too: it starts with your Steam games and
+anything you `romi add`. Rerun `romi init` after installing a core or adding a folder, and
 `romi check` when something doesn't launch. More in [setting up](docs/setup.md).
 
 ```
-romi           # open the launcher
-romi init      # find your ROMs and emulators and write a config for them
+romi           # open it
+romi init      # find your ROMs, cores and emulators and write a config for them
 romi add ~/Games/celeste   # add a native game, script or .desktop launcher
 romi check     # what got found, what looks broken, and what could fix it
 romi list      # every game as TSV: system, name, key (handy for rofi/fzf scripts)
 romi info chrono trigger   # everything romi knows about one game
-romi play super metroid    # start it, from a script, a keybind, or another launcher
+romi play super metroid    # start it in its emulator, from a script, a keybind, or another launcher
 romi status    # what's running right now, and for how long
 romi stats     # play time per system, most-played games, and this year month by month
 romi achievements          # refresh your RetroAchievements progress, list games that have them
 romi scrape    # find box art on disk, download the rest (or: romi scrape psx gba)
-romi guide -- CMD          # run CMD when a controller's Guide button is pressed (couch mode)
 ```
-
-A (or Enter) plays a game inside romi when it can, and **Play with** in its menu (`o`) starts its
-emulator instead; Options → A plays turns that round. [Play in romi](docs/tui.md#play-in-romi)
-covers the filters, saves and the launch animation, and [achievements](docs/achievements.md) how to log in to RetroAchievements.
 
 ## Controls
 
@@ -137,13 +180,6 @@ The controller is read directly, since terminals never see gamepad input, and ig
 is running or the terminal isn't focused. [The launcher](docs/tui.md) covers the cover grid,
 sorting, filters, tags, hiding games and picking another emulator.
 
-## Couch mode
-
-romi full screen on the TV, opened from the couch with the controller's Guide button: a script that
-starts romi in a full-screen Ghostty window, a Hyprland config that gives it a workspace of its own,
-and `romi guide` to bring it up from the controller. See [couch mode](docs/couch.md) and
-[`examples/couch`](examples/couch).
-
 ## More
 
 - [The launcher](docs/tui.md): the cover grid, sorting, filters, tags, hiding games, picking
@@ -155,6 +191,8 @@ and `romi guide` to bring it up from the controller. See [couch mode](docs/couch
 - [Achievements](docs/achievements.md): RetroAchievements and Steam
 - [PS2 in romi](docs/ps2.md): LRPS2, Play! and PCSX2, setting it up, speed, saves, and which games work
 - [Game info and box art](docs/game-info.md): where descriptions, genres and covers come from
+- [Couch mode](docs/couch.md): for a PC plugged into a TV, open romi full screen from the
+  controller's Guide button
 - [Roadmap](ROADMAP.md): what's done and what's next
 - [Working on romi](CONTRIBUTING.md): tests, releasing, and a map of the code
 - [Credits](CREDITS.md): other people's work in this repository: the logo, by Andrea Reyes, and the

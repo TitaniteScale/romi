@@ -2,9 +2,12 @@
 name = "romi"
 version = "0.5.0"
 edition = "2024"
-description = "A terminal game launcher for ROMs, native ports and Steam, driven by keyboard or controller"
+description = "Play your games in your terminal: a libretro frontend and game library, with RetroAchievements"
 license = "MIT"
 repository = "https://github.com/TitaniteScale/romi"
+keywords = ["emulator", "libretro", "retroachievements", "tui", "terminal"]
+categories = ["emulators", "games", "command-line-utilities"]
+exclude = ["/.github/", "/e2e/", "/packaging/"]
 
 [dependencies]
 anyhow = "1.0.104"

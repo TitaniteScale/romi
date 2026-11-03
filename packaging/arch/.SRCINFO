@@ -1,5 +1,5 @@
 pkgbase = romi
-	pkgdesc = A terminal game launcher for ROMs, native ports and Steam, driven by keyboard or controller
+	pkgdesc = Play your games in your terminal: a libretro frontend and game library, with RetroAchievements
 	pkgver = 0.4.0
 	pkgrel = 1
 	url = https://github.com/TitaniteScale/romi
@@ -11,8 +11,8 @@ pkgbase = romi
 	depends = glibc
 	depends = libgcc
 	depends = systemd-libs
-	optdepends = retroarch: run most systems, through libretro cores
-	optdepends = libglvnd: 3D games played in romi (Dreamcast, NAOMI, N64, PlayStation)
+	optdepends = retroarch: start games outside romi; romi plays libretro-* cores without it
+	optdepends = libglvnd: 3D games played in romi (N64, GameCube, Wii, Dreamcast, PlayStation 1 and 2, PSP)
 	optdepends = emulationstation-de: system definitions and emulators for romi init, names from its gamelists
 	options = !lto
 	source = romi-0.4.0.tar.gz::https://github.com/TitaniteScale/romi/archive/refs/tags/v0.4.0.tar.gz

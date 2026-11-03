@@ -1,13 +1,13 @@
 # PS2 in romi
 
-PS2 games can run three ways, and the choice has more consequences here than on other systems. PS2
-in the terminal is still experimental. What's below was tested on one laptop, a Ryzen AI 9 HX 370
-with a Radeon 890M and an RTX 4060, in November 2026.
+PS2 games can run three ways, and the choice has more consequences here than on other systems. Use
+LRPS2: Play! isn't recommended. What's below was tested on one laptop, a Ryzen AI 9 HX 370 with a
+Radeon 890M and an RTX 4060, in November 2026.
 
 | | What it is | Plays in romi | Notes |
 |---|---|---|---|
-| **LRPS2** | PCSX2's RetroArch core | Yes, first choice | Not packaged for Arch; you add it yourself |
-| **Play!** | Another emulator's RetroArch core (`libretro-play`) | Yes, if LRPS2 isn't there | Runs fewer games, and slower |
+| **LRPS2** | PCSX2's libretro core | Yes, first choice | Not packaged for Arch; you add it yourself |
+| **Play!** | Another emulator's libretro core (`libretro-play`) | Yes, if LRPS2 isn't there | Not recommended: runs far fewer games, and slower |
 | **PCSX2** | The standalone emulator | No, it opens its own window | Runs the most games; nothing here changes it |
 
 A plays a game in romi using the first core it finds installed, LRPS2 before Play!. Your usual
@@ -16,7 +16,8 @@ to turn that round, so that A starts the emulator.
 
 ## Adding LRPS2
 
-Put libretro's nightly in RetroArch's cores folder, and link your BIOS where LRPS2 looks for it:
+Put libretro's nightly in the cores folder (RetroArch's, though you don't need RetroArch), and link
+your BIOS where LRPS2 looks for it:
 
 ```
 curl -LO https://buildbot.libretro.com/nightly/linux/x86_64/latest/pcsx2_libretro.so.zip

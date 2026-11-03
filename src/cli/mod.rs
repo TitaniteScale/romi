@@ -82,7 +82,7 @@ fn fail<T>(code: i32, message: impl Into<String>) -> Result<T> {
     Err(Exit { code, message: message.into() }.into())
 }
 
-/// romi - a terminal game launcher. Run with no command to open the launcher.
+/// romi - play your games in your terminal. Run with no command to open it.
 #[derive(Parser)]
 #[command(version = env!("ROMI_VERSION"), after_help = KEYS)]
 struct Cli {

@@ -15,9 +15,9 @@ included.
   Kitty graphics, Sixel or iTerm2 images, or colored half-blocks.
 - **Game info:** genre for 365 games, year for 319, player count for 328 and a description for 212.
   You can filter by genre, players, decade and whether you've played it.
-- **Plays in romi:** Game Boy to SNES, Genesis, arcade and the DS draw in the middle of the
-  launcher, and so do N64, PlayStation, Dreamcast and GameCube (drawn with the GPU), with PS2 as an
-  experiment. RetroAchievements unlock as you play, with badges, progress, challenges and rich
+- **Plays in romi:** every emulated system in the library draws in the middle of the launcher, from
+  the Game Boy to the PS2 (see the README's table), with or without RetroArch installed.
+  RetroAchievements unlock as you play, with badges, progress, challenges and rich
   presence.
 
 ## 0. Groundwork ✓
@@ -638,8 +638,16 @@ Smaller items that fit between phases.
   it's not planned. `romi status --json` already has what one needs.
 - **7z ROMs in romi**: zips are unpacked for cores that can't open them, 7z files aren't. Only cores
   that open 7z themselves (FinalBurn Neo) can play them.
-- **MAME in romi**: its core crashed while starting, before cores got a system and save folder. Not
-  tried since; FinalBurn Neo covers most arcade sets.
+- **`romi run` crashes on the way out with some cores**: PPSSPP in `retro_unload_game` (7 of 8 short
+  runs on 2026-11-02, Bust-A-Move and Persona), after the game has run and the JSON has been printed,
+  so the exit code is wrong for scripts. PPSSPP games stopped from the launcher left it running.
+  Nestopia exited the same way in its one run, and hasn't been tried in the launcher.
+- **Play with RetroArch when it's not installed**: a core with no RetroArch is still listed as
+  `retroarch · mgba` in **Play with**, and `romi play` tries to start it and says it isn't found.
+  `romi play` could play through the core instead.
+- **MAME in romi**: its core crashed while starting, before cores got a system and save folder. It
+  boots now (MAME 0.289, 2026-11-02, a short headless run) if the ROM set matches its version, but
+  hasn't been played; FinalBurn Neo covers most arcade sets.
 
 Code to tidy, when it gets in the way:
 

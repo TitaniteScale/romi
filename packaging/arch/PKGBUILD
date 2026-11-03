@@ -3,7 +3,7 @@
 pkgname=romi
 pkgver=0.4.0
 pkgrel=1
-pkgdesc="A terminal game launcher for ROMs, native ports and Steam, driven by keyboard or controller"
+pkgdesc="Play your games in your terminal: a libretro frontend and game library, with RetroAchievements"
 arch=('x86_64' 'aarch64')
 url="https://github.com/TitaniteScale/romi"
 license=('MIT')
@@ -12,8 +12,8 @@ makedepends=('cargo')
 # With makepkg's LTO flags, ring's C code comes out as GCC bitcode that Rust's linker can't read.
 options=('!lto')
 optdepends=(
-  'retroarch: run most systems, through libretro cores'
-  'libglvnd: 3D games played in romi (Dreamcast, NAOMI, N64, PlayStation)'
+  'retroarch: start games outside romi; romi plays libretro-* cores without it'
+  'libglvnd: 3D games played in romi (N64, GameCube, Wii, Dreamcast, PlayStation 1 and 2, PSP)'
   'emulationstation-de: system definitions and emulators for romi init, names from its gamelists'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")

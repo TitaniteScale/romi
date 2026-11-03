@@ -1,7 +1,9 @@
 # Couch mode
 
-romi full screen on the TV, opened from the couch with the controller's Guide button. The pieces
-are in [`examples/couch`](../examples/couch):
+For a PC plugged into a TV: romi full screen, opened from the couch with the controller's Guide
+button, with no keyboard to reach for. You don't need any of this to use romi with a controller;
+it's a recipe, written for Hyprland and Ghostty, built around one command, `romi guide`, that works
+anywhere. The pieces are in [`examples/couch`](../examples/couch):
 
 - **`romi-couch`** starts romi in a Ghostty window of its own: full screen, no decorations, a big
   font (`ROMI_FONT_SIZE`, 18 by default, which leaves room for box art on a 1920-pixel-wide screen),
