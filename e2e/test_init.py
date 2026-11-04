@@ -326,7 +326,7 @@ def test_a_new_config_with_retroarch_keeps_using_its_folders(machine, left_behin
         (machine.home / ".config/retroarch").mkdir(parents=True)
     out = romi(machine, "init", "--no-esde", "--yes")
     assert out.returncode == 0, out.stderr
-    assert ".local/share/romi" not in out.stdout
+    assert "BIOS files go in ~/.config/retroarch/system." in out.stdout
     config = jsonc(machine.config_path.read_text())
     assert "saves_dir" not in config and "bios_dirs" not in config
     assert not (machine.home / ".local/share/romi").exists()
