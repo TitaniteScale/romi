@@ -252,7 +252,11 @@ pub(super) fn init(
     if let Some(text) = main {
         std::fs::write(cfg_path, text)?;
     }
-    let folders = own_folders.then(crate::init::make_own_folders).transpose()?;
+    let folders = match (own_folders, existing.is_none()) {
+        (true, _) => Some(crate::init::make_own_folders()?),
+        (false, true) => Some(crate::init::make_retroarch_system_folder()?),
+        (false, false) => None,
+    };
     // Catch anything that would stop romi from starting now, rather than the next time it does.
     let cfg = load_config(cfg_path)?;
     let lib = Library::load(&cfg);
@@ -276,6 +280,7 @@ fn print_suggestions(cfg: &Config, lib: &Library) {
         return;
     }
     let games = |n: usize| format!("{n} {}", text::plural(n, "game"));
+    let missing = suggestions.iter().any(|s| matches!(s, Suggestion::Install { .. }));
     println!("\nsuggestions");
     for s in suggestions {
         match s {
@@ -293,6 +298,9 @@ fn print_suggestions(cfg: &Config, lib: &Library) {
                 println!("  {folder:<12} {} for {name}, but no emulator for it is installed{known}", games(n));
             }
         }
+    }
+    if missing {
+        println!("\n{}", crate::init::where_cores_come_from());
     }
 }
 

@@ -123,7 +123,9 @@ cd romi/packaging/arch
 makepkg -si
 ```
 
-**With Cargo,** with Rust installed, and a C compiler and the headers for udev and ALSA:
+**With Cargo,** with Rust 1.90 or newer, and a C compiler and the headers for udev and ALSA. Distros'
+Rust can be too old, as Ubuntu 24.04's is, which fails with `feature edition2024 is required`:
+[rustup](https://rustup.rs) gets a current one.
 
 ```
 sudo apt install build-essential pkg-config libudev-dev libasound2-dev        # Debian, Ubuntu

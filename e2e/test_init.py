@@ -345,6 +345,17 @@ def test_an_existing_config_stays_as_it_is_without_retroarch(machine):
     assert "bios      ! ~/.config/retroarch/system doesn't exist" in check(machine)
 
 
+def test_retroarch_never_opened_still_gives_cores_a_system_folder(machine):
+    fresh(machine)
+    no_retroarch(machine)
+    shutil.rmtree(machine.home / ".config/retroarch", ignore_errors=True)
+    executable(machine.root / "bin/retroarch")
+    out = romi(machine, "init", "--no-esde", "--yes")
+    assert out.returncode == 0, out.stderr
+    assert "BIOS files go in ~/.config/retroarch/system." in out.stdout
+    assert "bios      ~/.config/retroarch/system" in check(machine)
+
+
 def test_bad_esde_folder(machine):
     out = romi(machine, "init", "--esde", str(machine.root), "--print")
     assert out.returncode == 64

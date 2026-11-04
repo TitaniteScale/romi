@@ -2,6 +2,7 @@
 name = "romi"
 version = "0.6.0"
 edition = "2024"
+rust-version = "1.90"
 description = "Play your games in your terminal: a libretro frontend and game library, with RetroAchievements"
 license = "MIT"
 repository = "https://github.com/TitaniteScale/romi"

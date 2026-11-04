@@ -121,10 +121,42 @@ const MORE_CORES: &[(&str, &str, &str)] = &[
     ("wii", "Dolphin", "dolphin_libretro.so"),
 ];
 
+/// Other cores for the systems in romi's default config, as (system, label, core), since its one may not
+/// be what a distro packages: Ubuntu has Snes9x and Nestopia, and not bsnes-hd or Mesen. ES-DE lists its own.
+const OTHER_BUILT_IN_CORES: &[(&str, &str, &str)] = &[
+    ("nds", "DeSmuME", "desmume_libretro.so"),
+    ("arcade", "FinalBurn Neo", "fbneo_libretro.so"),
+    ("gb", "Gambatte", "gambatte_libretro.so"),
+    ("gb", "SameBoy", "sameboy_libretro.so"),
+    ("gbc", "Gambatte", "gambatte_libretro.so"),
+    ("gbc", "SameBoy", "sameboy_libretro.so"),
+    ("gba", "VBA-M", "vbam_libretro.so"),
+    ("gba", "VBA Next", "vba_next_libretro.so"),
+    ("gba", "gpSP", "gpsp_libretro.so"),
+    ("nes", "Nestopia", "nestopia_libretro.so"),
+    ("nes", "FCEUmm", "fceumm_libretro.so"),
+    ("nes", "QuickNES", "quicknes_libretro.so"),
+    ("snes", "Snes9x", "snes9x_libretro.so"),
+    ("snes", "bsnes", "bsnes_libretro.so"),
+    ("snes", "bsnes-mercury", "bsnes_mercury_balanced_libretro.so"),
+    ("n64", "ParaLLEl N64", "parallel_n64_libretro.so"),
+    ("megadrive", "PicoDrive", "picodrive_libretro.so"),
+    ("mastersystem", "PicoDrive", "picodrive_libretro.so"),
+    ("scd", "PicoDrive", "picodrive_libretro.so"),
+    ("atarilynx", "Beetle Lynx", "mednafen_lynx_libretro.so"),
+    ("saturn", "Yabause", "yabause_libretro.so"),
+    ("pcengine", "Beetle PCE", "mednafen_pce_libretro.so"),
+    ("psx", "Beetle PSX", "mednafen_psx_libretro.so"),
+    ("psx", "SwanStation", "swanstation_libretro.so"),
+    ("psx", "PCSX ReARMed", "pcsx_rearmed_libretro.so"),
+];
+
 impl Catalog {
-    /// Adds `MORE_CORES` to the systems they're for, in ES-DE's syntax or romi's.
+    /// Adds `MORE_CORES` to the systems they're for, in ES-DE's syntax or romi's, and to romi's own
+    /// list, `OTHER_BUILT_IN_CORES`.
     fn add_more_cores(&mut self) {
-        for (id, label, core) in MORE_CORES {
+        let others = if self.esde { &[][..] } else { OTHER_BUILT_IN_CORES };
+        for (id, label, core) in MORE_CORES.iter().chain(others) {
             let Some(sys) = self.systems.iter_mut().find(|s| s.id == *id) else { continue };
             if sys.commands.iter().any(|(_, raw)| raw.contains(core)) {
                 continue;
@@ -812,8 +844,11 @@ pub fn render(report: &Report) -> String {
 pub fn what_would_run(tried: &[String], esde: bool) -> String {
     let mut names: Vec<&str> = Vec::new();
     for t in tried {
-        let name = t.split(':').next().unwrap_or(t);
-        let name = if esde { name } else { name.trim_start_matches("no ").trim_end_matches(" not installed") };
+        // From romi's list, the file to get says more than a core's label: "VBA-M: no vbam_libretro.so".
+        let name = match esde {
+            true => t.split(':').next().unwrap_or(t),
+            false => t.rsplit(": ").next().unwrap_or(t).trim_start_matches("no ").trim_end_matches(" not installed"),
+        };
         if !names.contains(&name) {
             names.push(name);
         }
@@ -829,6 +864,7 @@ pub fn what_would_run(tried: &[String], esde: bool) -> String {
 /// A short account of what was found, for people.
 pub fn summary(report: &Report) -> String {
     let mut out = String::new();
+    let missing = report.findings.iter().any(|f| matches!(f, Finding::NoEmulator { .. }));
     let source = if report.esde { "ES-DE's system list" } else { "romi's built-in system list" };
     let _ = writeln!(out, "ROMs in {} (using {source})\n", crate::config::tilde(&report.roms_dir));
     let plural = |n: usize| format!("{n:>4} {:<5}", crate::text::plural(n, "game"));
@@ -858,6 +894,9 @@ pub fn summary(report: &Report) -> String {
     }
     let added = report.findings.iter().filter(|f| matches!(f, Finding::New { .. })).count();
     let _ = writeln!(out, "\n{added} {} to add", crate::text::plural(added, "system"));
+    if missing {
+        let _ = writeln!(out, "\n{}", where_cores_come_from());
+    }
     out
 }
 
@@ -886,6 +925,24 @@ pub fn retroarch_here() -> bool {
 /// keep, in-game saves, and downloaded cores.
 fn own_folder(name: &str) -> PathBuf {
     crate::config::data_dir().join(name)
+}
+
+/// Makes the folder for BIOS files where it isn't yet, as RetroArch's isn't until it's first opened
+/// (Ubuntu's core packages install it, whether it's wanted or not), and says where it is. A core with
+/// no such folder gets no system folder at all.
+pub fn make_retroarch_system_folder() -> std::io::Result<String> {
+    let system = expand_path("~/.config/retroarch/system");
+    std::fs::create_dir_all(&system)?;
+    Ok(format!("BIOS files go in {}.", crate::config::tilde(&system)))
+}
+
+/// Where to get what `romi init` and `romi check` say is missing.
+pub fn where_cores_come_from() -> String {
+    format!(
+        "Cores come from your distro's libretro-* packages, or from libretro's nightly builds\n\
+         (https://buildbot.libretro.com/nightly/linux/x86_64/latest/): unzip them in {}, then run `romi init`.",
+        crate::config::tilde(&own_folder("cores"))
+    )
 }
 
 /// Makes the folders a machine without RetroArch uses, and says what goes in them.
@@ -1112,9 +1169,46 @@ mod tests {
         assert_eq!(what_would_run(&tried(&["no mesen_libretro.so"]), false), " (needs: mesen_libretro.so)");
         assert_eq!(
             what_would_run(&tried(&["melonDS not installed", "melonDS: no melonds_libretro.so"]), false),
-            " (needs: melonDS)"
+            " (needs: melonDS, melonds_libretro.so)"
         );
         assert_eq!(what_would_run(&[], false), "");
+    }
+
+    /// What the built-in list makes of a folder of SNES games, with only `cores` installed.
+    fn snes_with_cores(name: &str, cores: &[&str]) -> Report {
+        let dir = std::env::temp_dir().join(format!("romi-init-{name}-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("roms/snes")).unwrap();
+        std::fs::create_dir_all(dir.join("cores")).unwrap();
+        std::fs::write(dir.join("roms/snes/a.sfc"), "").unwrap();
+        for core in cores {
+            std::fs::write(dir.join("cores").join(core), "").unwrap();
+        }
+        let mut catalog = Catalog::builtin();
+        catalog.rules.core_dirs = vec![dir.join("cores").to_string_lossy().into_owned()];
+        let report = scan(&catalog, &dir.join("roms"), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+        report
+    }
+
+    #[test]
+    fn the_built_in_list_takes_the_cores_distros_package_after_its_own() {
+        let used = |report: &Report| match &report.findings[..] {
+            [Finding::New { run, .. }] => run.command.clone(),
+            other => panic!("{} findings", other.len()),
+        };
+        let snes9x = snes_with_cores("snes9x", &["snes9x_libretro.so"]);
+        assert_eq!(used(&snes9x), "retroarch -L {cores}/snes9x_libretro.so {rom}");
+        let both = snes_with_cores("both", &["snes9x_libretro.so", "bsnes_hd_beta_libretro.so"]);
+        assert_eq!(used(&both), "retroarch -L {cores}/bsnes_hd_beta_libretro.so {rom}");
+        assert!(!summary(&both).contains("buildbot"), "nothing's missing");
+    }
+
+    #[test]
+    fn a_system_with_no_core_says_where_cores_come_from() {
+        let none = snes_with_cores("none", &[]);
+        assert!(matches!(&none.findings[..], [Finding::NoEmulator { .. }]));
+        let said = summary(&none);
+        assert!(said.contains("libretro-* packages") && said.contains("buildbot.libretro.com"), "{said}");
     }
 
     #[test]
