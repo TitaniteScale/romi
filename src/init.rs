@@ -931,9 +931,29 @@ fn own_folder(name: &str) -> PathBuf {
 /// (Ubuntu's core packages install it, whether it's wanted or not), and says where it is. A core with
 /// no such folder gets no system folder at all.
 pub fn make_retroarch_system_folder() -> std::io::Result<String> {
-    let system = expand_path("~/.config/retroarch/system");
+    let system = crate::emucfg::retroarch_system_dir();
     std::fs::create_dir_all(&system)?;
     Ok(format!("BIOS files go in {}.", crate::config::tilde(&system)))
+}
+
+/// What a first run would find in `roms`, and where it would keep things, for showing before it does.
+pub fn first_look(roms: Option<&Path>, own_folders: bool) -> String {
+    let catalog = Catalog::esde(None).unwrap_or_else(Catalog::builtin);
+    let mut out = match roms {
+        Some(dir) => summary(&scan(&catalog, dir, None)),
+        None => format!(
+            "No ROMs yet, so romi will start with your Steam games and anything you add with `romi add`.\n\
+             Once you have ROMs, put them in ~/ROMs/<system> and run `romi init`.\n\n{}\n",
+            where_cores_come_from()
+        ),
+    };
+    let system = if own_folders { own_folder("system") } else { crate::emucfg::retroarch_system_dir() };
+    let _ = writeln!(out, "\nBIOS files go in {}.", crate::config::tilde(&system));
+    let _ = match own_folders {
+        true => writeln!(out, "Saves and save states go in {}.", crate::config::tilde(&crate::config::data_dir())),
+        false => writeln!(out, "In-game saves are shared with RetroArch, and save states go in romi's own folder."),
+    };
+    out
 }
 
 /// Where to get what `romi init` and `romi check` say is missing.
@@ -957,9 +977,10 @@ pub fn make_own_folders() -> std::io::Result<String> {
     ))
 }
 
-/// A new main config, for when there isn't one yet. Without RetroArch (`own_folders`), BIOS files and
-/// in-game saves go in romi's own folder. It's said here, in the config, and not worked out each time,
-/// so that installing RetroArch later doesn't move them.
+/// A new main config, for when there isn't one yet. With `own_folders`, the choice without RetroArch and
+/// on offer with it, BIOS files and in-game saves go in romi's own folder. It's said here, in the
+/// config, and not worked out each time, so that installing RetroArch later doesn't move them. So is
+/// RetroArch's folder for BIOS files, if its settings name one other than romi's default.
 pub fn fresh_config(roms_dir: &Path, own_folders: bool) -> String {
     let q = |s: &str| serde_json::to_string(s).unwrap_or_default();
     let mut out = String::from(
@@ -983,6 +1004,14 @@ pub fn fresh_config(roms_dir: &Path, own_folders: bool) -> String {
         let _ = writeln!(out, "  \"bios_dirs\": [{}],", shown("system"));
         out.push_str("  // In-game saves, in a folder for each core.\n");
         let _ = writeln!(out, "  \"saves_dir\": {},", shown("saves"));
+    } else if crate::config::Config::default()
+        .bios_dirs
+        .iter()
+        .all(|d| expand_path(d) != crate::emucfg::retroarch_system_dir())
+    {
+        out.push_str("  // BIOS files, in the folder RetroArch's settings name.\n");
+        let _ =
+            writeln!(out, "  \"bios_dirs\": [{}],", q(&crate::config::tilde(&crate::emucfg::retroarch_system_dir())));
     }
     out.push_str("  // Systems found by `romi init`. Add your own below; they take priority.\n");
     let _ = writeln!(out, "  \"include\": [{}],", q(INCLUDE_FILE));

@@ -234,6 +234,22 @@ pub fn retroarch_save_dir(core: &str, rom: &Path) -> Option<PathBuf> {
     save_dir(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
 }
 
+/// The folder RetroArch gives cores for BIOS files, from its settings: `~/.config/retroarch/system`
+/// unless they name another.
+pub fn retroarch_system_dir() -> PathBuf {
+    let dir = Emulator::RetroArch.config_dir(false);
+    system_dir(&Ini::read(&dir.join("retroarch.cfg")), &dir)
+}
+
+fn system_dir(ini: &Ini, config_dir: &Path) -> PathBuf {
+    match ini.get("", "system_directory") {
+        // RetroArch's own words for its default, and a folder relative to itself.
+        None | Some("" | "default") => config_dir.join("system"),
+        Some(dir) if dir.starts_with(':') => config_dir.join("system"),
+        Some(dir) => expand_path(dir),
+    }
+}
+
 /// Saves a libretro core shares with the emulator a game runs in outside romi.
 #[derive(Debug, PartialEq)]
 pub enum SharedSaves {

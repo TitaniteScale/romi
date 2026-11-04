@@ -32,14 +32,26 @@ systems you've set up in `config.json` take priority. The one exception: if your
 with `--roms` somewhere other than `roms_dir` get full paths instead, leaving `roms_dir` as it is.
 `--print` shows the result without writing; `--yes` skips the question.
 
+## The first run
+
+With no config, `romi` opens on its title screen. Then it asks where your ROMs are, with the folder
+filled in if it found one, and, if RetroArch is here, whether to share its folders or keep to romi's own.
+It shows what it found before writing anything. Saying yes does what
+`romi init` does, and the launcher opens. Esc goes back a screen, and from the title screen it leaves
+with nothing written. A controller works too, though it can only take the folder offered, not type one.
+
+You won't see the title screen again unless you want to: Options → Title screen at start, or
+`"title_screen": true`, shows it each time romi opens, until something's pressed.
+
 ## Where things go
 
 romi needs somewhere for BIOS files, in-game saves and downloaded cores. When init makes a new config,
-it picks once, and writes the answer in the config, so installing RetroArch later doesn't move them:
+it decides once, and writes the answer in the config, so installing RetroArch later doesn't move them.
+A first run in a terminal asks, when RetroArch is here. `romi init --yes` goes by this:
 
 | | RetroArch installed, or `~/.config/retroarch` there | Neither |
 |---|---|---|
-| BIOS files, and what cores keep there | `~/.config/retroarch/system` | `~/.local/share/romi/system` |
+| BIOS files, and what cores keep there | `~/.config/retroarch/system`, or the one in its settings | `~/.local/share/romi/system` |
 | In-game saves | RetroArch's save folder, shared with it | `~/.local/share/romi/saves/<core>` |
 | Downloaded cores | `~/.config/retroarch/cores` | `~/.local/share/romi/cores` |
 

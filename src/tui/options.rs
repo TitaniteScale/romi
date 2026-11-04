@@ -20,9 +20,10 @@ pub enum Setting {
     Accent,
     Borders,
     Confirm,
+    TitleScreen,
 }
 
-pub const SETTINGS: [Setting; 12] = [
+pub const SETTINGS: [Setting; 13] = [
     Setting::PlayInRomi,
     Setting::Volume,
     Setting::Corners,
@@ -35,6 +36,7 @@ pub const SETTINGS: [Setting; 12] = [
     Setting::Accent,
     Setting::Borders,
     Setting::Confirm,
+    Setting::TitleScreen,
 ];
 
 const ACCENTS: [&str; 7] = ["blue", "cyan", "green", "yellow", "magenta", "red", "white"];
@@ -55,6 +57,7 @@ impl Setting {
             Setting::Accent => "Accent color",
             Setting::Borders => "Borders",
             Setting::Confirm => "Confirm button",
+            Setting::TitleScreen => "Title screen at start",
         }
     }
 
@@ -73,6 +76,7 @@ impl Setting {
             Setting::Accent => &["theme", "accent"],
             Setting::Borders => &["theme", "borders"],
             Setting::Confirm => &["controller", "swap_confirm"],
+            Setting::TitleScreen => &["title_screen"],
         }
     }
 
@@ -91,6 +95,7 @@ impl Setting {
             Setting::Accent => json!(cfg.theme.accent),
             Setting::Borders => json!(cfg.theme.borders),
             Setting::Confirm => json!(cfg.controller.swap_confirm),
+            Setting::TitleScreen => json!(cfg.title_screen),
         }
     }
 
@@ -108,7 +113,8 @@ impl Setting {
             | Setting::Animation
             | Setting::Covers
             | Setting::Screens
-            | Setting::Confirm => {
+            | Setting::Confirm
+            | Setting::TitleScreen => {
                 vec![json!(true), json!(false)]
             }
         }
@@ -149,6 +155,7 @@ impl Setting {
             Setting::Borders => cfg.theme.borders.clone(),
             Setting::Confirm if cfg.controller.swap_confirm => "B (A goes back)".into(),
             Setting::Confirm => "A (B goes back)".into(),
+            Setting::TitleScreen => on(cfg.title_screen),
         }
     }
 }

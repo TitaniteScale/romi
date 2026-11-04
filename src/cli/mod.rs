@@ -420,7 +420,7 @@ pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
     // init works without a config (that's what it's for).
     match command {
         Command::Init { roms, print, yes, esde, no_esde } => {
-            return setup::init(cfg_path, roms, print, yes, esde, no_esde, false);
+            return setup::init(cfg_path, roms, print, yes, esde, no_esde, None);
         }
         // add edits the config's text, so it reads the config itself.
         Command::Add { path, name, system, mode, print, yes } => {

@@ -496,7 +496,7 @@ def test_roms_somewhere_else_get_full_paths(machine):
     assert "Wario Land" in names and "Advance Wars" in names
 
 
-def first_run(sandbox):
+def first_run(sandbox, pad=None):
     """romi with no config and no ES-DE of its own; it may find the machine's, so only what
     doesn't depend on that is checked."""
     fresh(sandbox)
@@ -505,28 +505,79 @@ def first_run(sandbox):
     cores.mkdir(parents=True)
     (cores / "mgba_libretro.so").touch()
     env = dict(sandbox.env, PATH=f"{sandbox.root / 'bin'}:{sandbox.env['PATH']}")
-    return Romi(types.SimpleNamespace(env=env))
+    return Romi(types.SimpleNamespace(env=env), pad=pad)
 
 
-def test_first_run_sets_up_then_opens(machine):
-    romi = first_run(machine)
+def test_first_run_works_from_a_controller(machine, pad):
+    romi = first_run(machine, pad=pad)
     try:
-        romi.wait_for("There's no config yet")
-        romi.wait_for("Go ahead?")
-        assert "ROMs in ~/ROMs" in romi.text()
-        romi.keys("\r")
-        romi.wait_for("Systems")
-        assert jsonc(machine.config_path.read_text())["include"] == ["init.jsonc"]
-        assert (machine.config_path.parent / "init.jsonc").exists()
+        romi.wait_for("Press any key to get started")
+        romi.press("WEST")
+        romi.wait_for("Where are your ROMs?")
+        romi.press("SOUTH")
+        romi.wait_for("Where should romi keep BIOS files and saves?")
+        romi.press("DOWN")
+        romi.wait_for("› romi's own folder")
+        romi.press("EAST")
+        romi.wait_for("Where are your ROMs?")
+        romi.press("SOUTH")
+        romi.wait_for("Where should romi keep BIOS files and saves?")
+        romi.press("SOUTH")
+        romi.wait_for("Here's what romi found")
+        assert "BIOS files go in ~/.local/share/romi/system." in romi.text()
+        romi.press("SOUTH")
+        romi.wait_for(lambda: machine.config_path.exists())
+        assert jsonc(machine.config_path.read_text())["saves_dir"] == "~/.local/share/romi/saves"
     finally:
         romi.close()
 
 
-def test_first_run_declined_writes_nothing(machine):
+def test_first_run_welcomes_asks_and_opens(machine):
     romi = first_run(machine)
     try:
-        romi.wait_for("Go ahead?")
-        romi.keys("n\r")
+        romi.wait_for("Press any key to get started")
+        assert "Play your games in your terminal" in romi.text()
+        assert b"\x1b_G" in romi.output, "the logo, as Kitty graphics"
+        assert not machine.config_path.exists(), "nothing's written yet"
+        romi.keys(" ")
+        romi.wait_for("Where are your ROMs?")
+        assert "~/ROMs" in romi.text()
+        romi.keys("\r")
+        romi.wait_for("Where should romi keep BIOS files and saves?")
+        assert "› RetroArch's folders" in romi.text(), "unless it's changed"
+        romi.keys("\r")
+        romi.wait_for("Here's what romi found")
+        assert "ROMs in ~/ROMs" in romi.text()
+        assert "BIOS files go in ~/.config/retroarch/system." in romi.text()
+        assert not machine.config_path.exists(), "still nothing"
+        romi.keys("\r")
+        romi.wait_for("Systems")
+        assert jsonc(machine.config_path.read_text())["include"] == ["init.jsonc"]
+        assert (machine.config_path.parent / "init.jsonc").exists()
+        # A first run doesn't turn the title screen on.
+        assert "title_screen" not in machine.config_path.read_text()
+    finally:
+        romi.close()
+
+
+def test_first_run_turned_down_writes_nothing(machine):
+    romi = first_run(machine)
+    try:
+        romi.wait_for("Press any key to get started")
+        romi.keys(" ")
+        romi.wait_for("Where are your ROMs?")
+        romi.keys("\r")
+        romi.wait_for("Where should romi keep BIOS files and saves?")
+        romi.keys("\r")
+        romi.wait_for("Here's what romi found")
+        # Back out, a screen at a time.
+        romi.keys("\x1b")
+        romi.wait_for("Where should romi keep BIOS files and saves?")
+        romi.keys("\x1b")
+        romi.wait_for("Where are your ROMs?")
+        romi.keys("\x1b")
+        romi.wait_for("Press any key to get started")
+        romi.keys("\x1b")
         romi.wait_for(lambda: romi.exited is not None)
         assert romi.exited == 0
         assert not machine.config_path.exists()
@@ -538,10 +589,127 @@ def test_first_run_without_roms_still_opens(machine):
     (machine.home / "ROMs").rename(machine.home / "elsewhere")
     romi = first_run(machine)
     try:
-        romi.wait_for("No ROM folders found")
+        romi.wait_for("Press any key to get started")
+        romi.keys(" ")
+        romi.wait_for("Where are your ROMs?")
+        assert "found none" in romi.text()
+        romi.keys("\r")
+        romi.wait_for("Where should romi keep BIOS files and saves?")
+        romi.keys("\r")
+        romi.wait_for("No ROMs yet")
         romi.keys("\r")
         romi.wait_for("No games found")
         assert jsonc(machine.config_path.read_text())["roms_dir"] == "~/ROMs"
+    finally:
+        romi.close()
+
+
+def test_first_run_takes_a_folder_typed_or_dropped(machine):
+    (machine.home / "ROMs").rename(machine.home / "elsewhere")
+    romi = first_run(machine)
+    try:
+        romi.wait_for("Press any key to get started")
+        romi.keys(" ")
+        romi.wait_for("Where are your ROMs?")
+        for _ in "~/ROMs":
+            romi.keys("\x7f", settle=0.02)
+        romi.keys("~/nowhere\r")
+        romi.wait_for("~/nowhere isn't a folder")
+        # Dropped on the terminal, in quotes, as some do, it replaces what's there.
+        romi.send(f"\x1b[200~'{machine.home / 'elsewhere'}'\x1b[201~")
+        romi.keys("\r")
+        romi.wait_for("Where should romi keep BIOS files and saves?")
+        romi.keys("\r")
+        romi.wait_for("ROMs in ~/elsewhere")
+        romi.keys("\r")
+        romi.wait_for("Systems")
+        assert jsonc(machine.config_path.read_text())["roms_dir"] == "~/elsewhere"
+    finally:
+        romi.close()
+
+
+def test_first_run_can_keep_things_in_romis_folder_with_retroarch_here(machine):
+    romi = first_run(machine)
+    try:
+        romi.wait_for("Press any key to get started")
+        romi.keys(" ")
+        romi.wait_for("Where are your ROMs?")
+        romi.keys("\r")
+        romi.wait_for("Where should romi keep BIOS files and saves?")
+        romi.send("\x1b[B")
+        romi.wait_for("› romi's own folder")
+        romi.keys("\r")
+        romi.wait_for("Saves and save states go in ~/.local/share/romi.")
+        assert "BIOS files go in ~/.local/share/romi/system." in romi.text()
+        romi.keys("\r")
+        romi.wait_for("Systems")
+        config = jsonc(machine.config_path.read_text())
+        assert config["bios_dirs"] == ["~/.local/share/romi/system"]
+        assert config["saves_dir"] == "~/.local/share/romi/saves"
+        assert (machine.home / ".local/share/romi/system").is_dir()
+    finally:
+        romi.close()
+
+
+def test_first_run_doesnt_ask_about_retroarch_without_it(machine):
+    fresh(machine)
+    no_retroarch(machine)
+    shutil.rmtree(machine.home / ".config/retroarch", ignore_errors=True)
+    env = dict(machine.env, PATH=str(machine.root / "bin"))
+    romi = Romi(types.SimpleNamespace(env=env))
+    try:
+        romi.wait_for("Press any key to get started")
+        romi.keys(" ")
+        romi.wait_for("Where are your ROMs?")
+        romi.keys("\r")
+        romi.wait_for("Here's what romi found")
+        assert "BIOS files go in ~/.local/share/romi/system." in romi.text()
+        romi.keys("\r")
+        # The launcher's first screen depends on what cores this machine has.
+        romi.wait_for(lambda: machine.config_path.exists())
+        assert jsonc(machine.config_path.read_text())["saves_dir"] == "~/.local/share/romi/saves"
+    finally:
+        romi.close()
+
+
+def test_first_run_goes_by_the_bios_folder_in_retroarchs_settings(machine):
+    settings = machine.home / ".config/retroarch/retroarch.cfg"
+    settings.parent.mkdir(parents=True)
+    settings.write_text('system_directory = "~/my-bios"\n')
+    romi = first_run(machine)
+    try:
+        romi.wait_for("Press any key to get started")
+        romi.keys(" ")
+        romi.wait_for("Where are your ROMs?")
+        romi.keys("\r")
+        romi.wait_for("BIOS files in ~/my-bios")
+        romi.keys("\r")
+        romi.wait_for("BIOS files go in ~/my-bios.")
+        romi.keys("\r")
+        romi.wait_for("Systems")
+        assert jsonc(machine.config_path.read_text())["bios_dirs"] == ["~/my-bios"]
+        assert (machine.home / "my-bios").is_dir()
+    finally:
+        romi.close()
+
+
+def test_the_title_screen_only_comes_back_if_its_turned_on(sandbox):
+    romi = Romi(sandbox)
+    try:
+        romi.wait_for("Systems")
+        assert "Press any key" not in romi.text()
+    finally:
+        romi.close()
+    config = json.loads(json.dumps(CONFIG))
+    config["title_screen"] = True
+    sandbox.write_config(config)
+    romi = Romi(sandbox)
+    try:
+        romi.wait_for("Press any key")
+        assert "Systems" not in romi.text()
+        romi.keys(" ")
+        romi.wait_for("Systems")
+        assert "Press any key" not in romi.text()
     finally:
         romi.close()
 

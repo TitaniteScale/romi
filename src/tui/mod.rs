@@ -8,3 +8,4 @@ pub mod cover;
 pub mod options;
 pub mod players;
 pub mod ui;
+pub mod welcome;

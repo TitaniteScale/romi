@@ -86,12 +86,13 @@ Built in this order, one commit each:
   stdout instead, and `--yes` skips the question.
 - ✓ **First run**: with no config, `romi` does what init does (asking first, in the terminal) and then
   opens, rather than writing a default that points at `~/ROMs` and gets in init's way.
-- **A first run with a welcome**: a title screen with the logo, then a few "let's get you started"
-  prompts in the TUI that do what `romi init` and the CLI do: where your ROMs are, what was found, and
-  where BIOS files and cores go. It works from a keyboard or a controller, for when romi is opened from
-  couch mode before there's a keyboard to hand. Today it's text in the terminal before the launcher
-  opens, which also hides the note about BIOS files
-  ([#5](https://github.com/TitaniteScale/romi/issues/5)).
+- ✓ **A first run with a welcome**: a title screen with the logo, then "Where are your ROMs?" with the
+  folder filled in if one was found, whether to share RetroArch's folders or keep to romi's own if
+  RetroArch is here, and what romi found, before anything's written. Saying yes
+  runs `romi init`. The keyboard and a controller both work, but a controller can only take the folder
+  offered, not type one. The title screen doesn't come back unless `"title_screen"` (Options → Title
+  screen at start) is on, for a nice-looking start. The note about BIOS files now shows before the
+  launcher opens ([#5](https://github.com/TitaniteScale/romi/issues/5)).
 - ✓ **`romi add <path>`** adds a program, script, folder or `.desktop` launcher as a game, run from
   its own folder, in a `games.jsonc` the config includes.
 

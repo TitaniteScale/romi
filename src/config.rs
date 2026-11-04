@@ -59,6 +59,8 @@ pub struct Config {
     /// Games that draw with the GPU draw about as big as they're shown, rather than at the
     /// console's size, so 3D looks sharp (see `emu::options`).
     pub sharp_3d: bool,
+    /// Show the title screen each time romi opens, until something's pressed.
+    pub title_screen: bool,
     pub systems: Vec<SystemConfig>,
     pub games: Vec<GameConfig>,
     /// Tweaks to any game (ROM, hand-added or Steam) by its key, as `romi list` shows it.
@@ -233,6 +235,7 @@ impl Default for Config {
             screen_filter: crate::emu::screen::Filter::None,
             crop_borders: true,
             sharp_3d: true,
+            title_screen: false,
             play_in_romi: true,
             systems: Vec::new(),
             games: Vec::new(),

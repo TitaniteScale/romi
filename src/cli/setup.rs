@@ -117,9 +117,30 @@ pub fn first_run(cfg_path: &Path) -> Result<bool> {
     if !std::io::stdin().is_terminal() {
         return load_config(cfg_path).map(|_| false);
     }
-    println!("Welcome to romi! There's no config yet, so let's find your games and emulators.\n");
-    init(cfg_path, None, false, false, None, false, true)?;
+    if !std::io::stdout().is_terminal() {
+        println!("Welcome to romi! There's no config yet, so let's find your games and emulators.\n");
+        let own_folders = !crate::init::retroarch_here();
+        init(cfg_path, None, false, false, None, false, Some(FirstRun { own_folders }))?;
+        return Ok(cfg_path.exists());
+    }
+    let found = crate::init::find_roms_dir(None, None);
+    let usual = crate::init::usual_roms_dirs();
+    let welcome =
+        crate::tui::welcome::first_run(found.as_deref(), &usual, crate::init::retroarch_here(), |roms, own| {
+            crate::init::first_look(roms, own)
+        });
+    let Some(answers) = welcome? else {
+        return Ok(false);
+    };
+    let first_run = FirstRun { own_folders: answers.own_folders };
+    init(cfg_path, answers.roms, false, true, None, false, Some(first_run))?;
     Ok(cfg_path.exists())
+}
+
+/// What a first run has settled before `init`.
+pub(super) struct FirstRun {
+    /// BIOS files and saves go in romi's own folder, not RetroArch's.
+    pub own_folders: bool,
 }
 
 pub(super) fn init(
@@ -129,7 +150,7 @@ pub(super) fn init(
     yes: bool,
     esde: Option<PathBuf>,
     no_esde: bool,
-    first_run: bool,
+    first_run: Option<FirstRun>,
 ) -> Result<()> {
     let existing = crate::init::existing_config(cfg_path);
     if cfg_path.exists() && existing.is_none() {
@@ -155,7 +176,7 @@ pub(super) fn init(
     let roms_dir = match &found {
         Some(dir) => dir.clone(),
         // A launcher with no ROMs is still one for Steam and for games added with `romi add`.
-        None if first_run => config::expand_path("~/ROMs"),
+        None if first_run.is_some() => config::expand_path("~/ROMs"),
         None => {
             let configured = existing_cfg.map(|c| format!("{} (your roms_dir) isn't a folder, and ", c.roms_dir));
             let msg = format!(
@@ -200,6 +221,10 @@ pub(super) fn init(
     }
 
     let include_path = cfg_path.parent().unwrap_or(Path::new(".")).join(crate::init::INCLUDE_FILE);
+    let own_folders = match &first_run {
+        Some(first_run) => first_run.own_folders,
+        None => existing.is_none() && !crate::init::retroarch_here(),
+    };
     let (main, plan) = match &existing {
         Some((raw, cfg)) => {
             let shown = config::tilde(cfg_path);
@@ -234,14 +259,13 @@ pub(super) fn init(
         }
         None => {
             let mut plan = format!("write {} and a new {}", config::tilde(&include_path), config::tilde(cfg_path));
-            if !crate::init::retroarch_here() {
+            if own_folders {
                 let folder = config::tilde(&config::data_dir());
                 plan = format!("{plan}, and make {folder} for your BIOS files, saves and cores");
             }
-            (Some(crate::init::fresh_config(&roms_dir, !crate::init::retroarch_here())), plan)
+            (Some(crate::init::fresh_config(&roms_dir, own_folders)), plan)
         }
     };
-    let own_folders = existing.is_none() && !crate::init::retroarch_here();
     if !confirm(&format!("\nThis will {plan}. Go ahead?"), yes)? {
         return Ok(());
     }
@@ -252,7 +276,7 @@ pub(super) fn init(
     if let Some(text) = main {
         std::fs::write(cfg_path, text)?;
     }
-    let folders = match (own_folders, existing.is_none()) {
+    let folders = match (own_folders && existing.is_none(), existing.is_none()) {
         (true, _) => Some(crate::init::make_own_folders()?),
         (false, true) => Some(crate::init::make_retroarch_system_folder()?),
         (false, false) => None,
@@ -261,7 +285,7 @@ pub(super) fn init(
     let cfg = load_config(cfg_path)?;
     let lib = Library::load(&cfg);
     let done = format!("{} games in {} systems", lib.games.len(), lib.systems.len());
-    if first_run {
+    if first_run.is_some() {
         println!("\nDone: {done}. `romi check` shows what was found, and what could fix anything missing.");
     } else {
         println!("\nDone: {done}. Run `romi` to browse them, or `romi check` for details.");

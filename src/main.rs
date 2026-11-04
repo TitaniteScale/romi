@@ -110,6 +110,9 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
     } else {
         Some(ratatui_image::picker::Picker::halfblocks())
     };
+    if app.cfg.title_screen {
+        tui::welcome::title_screen(&mut terminal, picker.clone(), &rx)?;
+    }
     app.covers = picker.map(|p| tui::cover::Covers::new(p, &app.cfg));
     // Terminals that don't understand the query may have echoed part of it. Nothing is drawn yet,
     // so wiping the screen keeps it in sync with ratatui's (empty) buffer.
@@ -125,7 +128,7 @@ fn run(cfg: config::Config, cfg_path: PathBuf) -> Result<()> {
 /// Asks the terminal for a status report and waits for the reply. The image-support query reads
 /// stdin on a thread that outlives its own timeout, so on a terminal that never answers, that
 /// thread would swallow the first keypress. Asking first means the query only runs if it can finish.
-fn terminal_answers() -> bool {
+pub(crate) fn terminal_answers() -> bool {
     use rustix::event::{PollFd, PollFlags, Timespec, poll};
     let mut out = stdout();
     if out.write_all(b"\x1b[5n").and_then(|()| out.flush()).is_err() {
