@@ -86,8 +86,12 @@ Built in this order, one commit each:
   stdout instead, and `--yes` skips the question.
 - ✓ **First run**: with no config, `romi` does what init does (asking first, in the terminal) and then
   opens, rather than writing a default that points at `~/ROMs` and gets in init's way.
-- **First run with a controller**: the same steps in a TUI wizard, for when romi is opened from
-  couch mode before there's a keyboard to hand.
+- **A first run with a welcome**: a title screen with the logo, then a few "let's get you started"
+  prompts in the TUI that do what `romi init` and the CLI do: where your ROMs are, what was found, and
+  where BIOS files and cores go. It works from a keyboard or a controller, for when romi is opened from
+  couch mode before there's a keyboard to hand. Today it's text in the terminal before the launcher
+  opens, which also hides the note about BIOS files
+  ([#5](https://github.com/TitaniteScale/romi/issues/5)).
 - ✓ **`romi add <path>`** adds a program, script, folder or `.desktop` launcher as a game, run from
   its own folder, in a `games.jsonc` the config includes.
 
