@@ -103,7 +103,18 @@ impl App {
             crate::emu::runner::load(&self.cfg, &core, &rom, runs_with, &controls, &core_options, self.shown_height())
                 .and_then(|core| crate::emu::embedded::Embedded::start(core, start));
         match started {
-            Ok(e) => self.embedded = Some(e),
+            Ok(e) => {
+                self.embedded = Some(e);
+                // Recorded as any other game is. Its process is this one, which is how `romi guide`
+                // knows to leave the Guide button alone while it plays.
+                let hooks = Hooks::for_game(&self.cfg, &self.lib, g);
+                if let Some(problem) = hooks.launch() {
+                    self.set_status(Level::Warn, problem);
+                }
+                let (session, state) = Session::begin(&self.lib, g, std::process::id(), hooks);
+                self.state = state;
+                self.embedded_session = Some(session);
+            }
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),
         }
     }
@@ -176,6 +187,10 @@ impl App {
     pub fn stop_embedded(&mut self) {
         if let Some(mut embedded) = self.embedded.take() {
             let g = embedded.game;
+            if let Some(session) = self.embedded_session.take() {
+                let (_, state, _hooks) = session.end(None);
+                self.state = state;
+            }
             match embedded.write_timings() {
                 Some(Ok(path)) => self.set_status(Level::Info, format!("Frame timings in {}", config::tilde(&path))),
                 Some(Err(e)) => self.set_status(Level::Warn, format!("{e:#}")),
@@ -187,6 +202,7 @@ impl App {
             // For the controls screen, which can't ask the core.
             let names = crate::emu::libretro::button_names();
             crate::tui::controls::remember(&self.lib.games[g].key, &self.lib.system_of(g).id, names);
+            self.rebuild_keeping_selection();
         }
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);
     }

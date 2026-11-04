@@ -433,6 +433,23 @@ def test_the_menu_can_still_try_a_terminal_that_may_not_show_games(start, sandbo
     play_in_romi(start(term="foot"))
 
 
+def test_a_game_played_in_romi_is_recorded_like_any_other(start, sandbox):
+    set_up_a_game_boy_game(sandbox, launch_animation={"enabled": False})
+    romi = start()
+    play_in_romi(romi)
+    running = json.loads(run_cli(sandbox, "status", "--json").stdout)
+    assert [game["name"] for game in running] == ["Pocket Lantern"], "`romi guide` goes by this"
+    romi.pump(1.5)
+    romi.keys("\x1b")
+    romi.wait_for(lambda: not json.loads(run_cli(sandbox, "status", "--json").stdout))
+    state = sandbox.state()
+    key = state["recent"][0]
+    assert "Pocket Lantern" in key
+    assert state["playtime"][key] >= 1
+    history = (sandbox.home / ".local/state/romi/history.jsonl").read_text().splitlines()
+    assert json.loads(history[-1])["key"] == key
+
+
 def test_a_game_boy_game_starts_with_its_wireframe(start, sandbox):
     out = play_a_game_boy_game(start, sandbox)
     first_intro, first_game = out.find(INTRO_IMAGE), out.find(GAME_IMAGE)

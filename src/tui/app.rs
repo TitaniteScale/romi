@@ -154,6 +154,8 @@ pub struct App {
     pub running: Option<Running>,
     /// A game played inside romi, in the middle panel.
     pub embedded: Option<crate::emu::embedded::Embedded>,
+    /// What's recording the game in `embedded`, as an emulator's would be.
+    embedded_session: Option<Session>,
     /// The middle panel, where a game played here goes, as it was last drawn.
     pub middle: ratatui::layout::Rect,
     /// The colors the launch animation picks from, and whether the terminal's background is light.
@@ -253,6 +255,7 @@ impl App {
             status: None,
             running: None,
             embedded: None,
+            embedded_session: None,
             middle: ratatui::layout::Rect::default(),
             look: crate::emu::wireframe::Look::new(None, Default::default()),
             terminal_colors: Default::default(),
