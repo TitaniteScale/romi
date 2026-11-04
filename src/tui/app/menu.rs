@@ -268,7 +268,12 @@ impl App {
             Some(g) => {
                 let mut items = Vec::new();
                 if self.embeddable(g).is_some() {
-                    items.extend([if self.a_plays_here() { PlayOutside } else { PlayHere }, Controls]);
+                    if !self.a_plays_here() {
+                        items.push(PlayHere);
+                    } else if self.can_launch(g) {
+                        items.push(PlayOutside);
+                    }
+                    items.push(Controls);
                 }
                 items.extend([Favorite, Hide, Tags]);
                 if self.emulator_options(g).len() > 1 {

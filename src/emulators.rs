@@ -72,6 +72,13 @@ pub fn core(game: &Game, options: &[Emulator]) -> Option<PathBuf> {
     core(&game.launch.command).or_else(|| options.iter().find_map(|e| core(&e.command)))
 }
 
+/// The core and ROM to play a game inside romi with, if it has a core that can open the ROM.
+pub fn playable(game: &Game, options: &[Emulator]) -> Option<(PathBuf, PathBuf)> {
+    let rom = game.path.clone()?;
+    let core = core(game, options)?;
+    crate::emu::libretro::can_open(&core, &rom).then_some((core, rom))
+}
+
 /// Which of `options` the game uses now.
 pub fn current(game: &Game, options: &[Emulator]) -> usize {
     let picked = game.emulator.as_deref();

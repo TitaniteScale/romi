@@ -16,17 +16,29 @@ pub(super) fn play(
     let lib = Library::load(cfg);
     let g = resolve(&lib, query, system)?;
     let game = &lib.games[g];
-    let mode = mode.unwrap_or(game.launch.mode);
-    let prepared = match game.launch.prepare() {
+    let asked_to_detach = mode == Some(LaunchMode::Detach);
+    let mut mode = mode.unwrap_or(game.launch.mode);
+    let mut prepared = match game.launch.prepare() {
         Ok(p) => p,
         Err(e) => return fail(exit::CONFIG, format!("{}: {e:#}", game.name)),
     };
+    let missing = prepared.check_program().err();
+    let mut problem = missing.as_ref().map(|e| format!("{}: {e:#}", game.name));
+    // With its program missing, a game with a core plays through that, as A does in the TUI.
+    if missing.is_some() && cfg.play_in_romi && !asked_to_detach {
+        let live = live_command(cfg, cfg_path, &lib, g);
+        if live.is_some() && !can_show_games() {
+            problem = problem.map(|p| format!("{p}, and its core only plays in a Ghostty or kitty terminal"));
+        } else if let Some(live) = live {
+            (prepared, mode, problem) = (live, LaunchMode::Terminal, None);
+        }
+    }
     let hooks = crate::hooks::Hooks::for_game(cfg, &lib, g);
     if dry_run {
         return print_command(game, &prepared, mode, &hooks, json);
     }
-    if let Err(e) = prepared.check_program() {
-        return fail(exit::UNAVAILABLE, format!("{}: {e:#}", game.name));
+    if let Some(problem) = problem {
+        return fail(exit::UNAVAILABLE, problem);
     }
     let log = app::log_path();
     if mode == LaunchMode::Detach {
@@ -72,6 +84,27 @@ pub(super) fn play(
         return fail(code, format!("{} {how}{log}", game.name));
     }
     Ok(())
+}
+
+/// The `romi run --live` that plays a game through its core, if it has one. It runs as its own
+/// process, as an emulator would, so the session, hooks and exit code work the same, and a core
+/// that crashes can't stop the session being recorded.
+fn live_command(cfg: &Config, cfg_path: &Path, lib: &Library, g: usize) -> Option<Prepared> {
+    let game = &lib.games[g];
+    let mut emulators = crate::emulators::Emulators::default();
+    emulators.find(cfg, lib, g);
+    crate::emulators::playable(game, &emulators.options(lib, g))?;
+    let exe = std::env::current_exe().ok()?;
+    let args = [exe.as_os_str(), OsStr::new("--config"), cfg_path.as_os_str(), OsStr::new("run"), OsStr::new("--live")];
+    let mut argv: Vec<String> = args.iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    argv.extend(["--".to_string(), game.key.clone()]);
+    Some(Prepared { argv, cwd: None, env: Vec::new() })
+}
+
+/// Whether a game can be drawn here: in a terminal that shows them, and not into a pipe.
+fn can_show_games() -> bool {
+    use std::io::IsTerminal;
+    crate::emu::kitty::terminal().shows_games && stdout().is_terminal()
 }
 
 fn print_command(game: &Game, prepared: &Prepared, mode: LaunchMode, hooks: &Hooks, json: bool) -> Result<()> {

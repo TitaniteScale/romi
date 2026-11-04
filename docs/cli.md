@@ -28,6 +28,13 @@ romi running in the background, so their play time is recorded even after the TU
 that started them has gone. A launcher that hands off and returns right away, like Steam, still
 counts as a few seconds.
 
+**Without the emulator**, a game with a libretro core plays through the core, as A does in the TUI:
+RetroArch doesn't need to be there. It plays with [`romi run --live`](#playing-in-the-terminal), in
+the whole terminal, whatever the launch mode, with history, play time and hooks as usual, but no
+achievements or save states. It needs Ghostty or kitty and a terminal to draw in, so in a pipe or
+any other terminal `romi play` exits with 69 and says so. `--mode detach` and `"play_in_romi": false`
+never do this, and `--dry-run` prints the `romi run` command when it would.
+
 ## Running a game headless
 
 `romi run` plays a game inside romi, with no window and no RetroArch, for a set number of frames

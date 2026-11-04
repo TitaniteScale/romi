@@ -3,10 +3,12 @@ animation before a game. Running a real core needs a ROM, so that's checked by h
 is checked with a made-up core that draws a blank Game Boy screen."""
 
 import json
+import os
+import signal
 import subprocess
 import zlib
 
-from drive import CONFIG, binary
+from drive import CONFIG, Romi, binary
 from test_play import eventually
 
 
@@ -365,7 +367,7 @@ INTRO_IMAGE = b"i=%d," % 0x776972
 GAME_IMAGE = b"i=%d," % 0x726F6D
 
 
-def set_up_a_game_boy_game(sandbox, **settings):
+def set_up_a_game_boy_game(sandbox, program="true", **settings):
     source = sandbox.home / "blank.c"
     source.write_text(DRAWING_CORE)
     core = sandbox.home / "blank_libretro.so"
@@ -374,7 +376,7 @@ def set_up_a_game_boy_game(sandbox, **settings):
     (sandbox.home / "ROMs/gb/Pocket Lantern (USA).gb").touch()
     config = json.loads(json.dumps(CONFIG))
     config["volume"] = 0
-    config["systems"] = [{"id": "gb", "name": "Game Boy", "extensions": ["gb"], "command": f"true -L {core} {{rom}}"}]
+    config["systems"] = [{"id": "gb", "name": "Game Boy", "extensions": ["gb"], "command": f"{program} -L {core} {{rom}}"}]
     config.update(settings)
     sandbox.write_config(config)
 
@@ -473,6 +475,98 @@ def test_with_play_in_romi_on_enter_plays_in_romi_and_the_menu_starts_the_emulat
     romi.choose("Play with")
     romi.wait_for("Played Pocket Lantern")
     eventually(lambda: sandbox.state().get("recent", [None])[0] == "gb:Pocket Lantern (USA).gb")
+
+
+NOT_INSTALLED = "definitely-not-retroarch"
+KEY = "gb:Pocket Lantern (USA).gb"
+
+
+def without_the_emulator(sandbox, **settings):
+    set_up_a_game_boy_game(sandbox, **{"program": NOT_INSTALLED, "play_in_romi": True, **settings})
+
+
+def test_the_menu_offers_no_emulator_that_isnt_installed(start, sandbox):
+    without_the_emulator(sandbox, launch_animation={"enabled": False})
+    romi = start()
+    romi.keys("o")
+    romi.wait_for("Controls")
+    assert "Play with" not in romi.text()
+    romi.keys("\x1b")
+    seen = len(romi.output)
+    romi.keys("\r")
+    romi.wait_for(lambda: GAME_IMAGE in romi.output[seen:], timeout=10)
+
+
+def test_romi_play_without_the_emulator_plays_through_the_core(sandbox):
+    without_the_emulator(sandbox)
+    romi = Romi(sandbox, args=("play", "pocket lantern", "--json"))
+    try:
+        romi.wait_for(lambda: b"a=T,i=1," in romi.output, timeout=10)
+        assert sandbox.state()["recent"][0] == KEY
+        romi.keys("\x1b")
+        romi.wait_for(lambda: romi.exited is not None)
+        assert romi.exited == 0
+        assert '"mode":"terminal"' in romi.output.decode(errors="replace")
+        assert KEY in sandbox.state()["playtime"]
+    finally:
+        romi.close()
+
+
+def test_a_signal_stops_a_game_played_through_the_core_and_puts_the_terminal_back(sandbox):
+    without_the_emulator(sandbox)
+    romi = Romi(sandbox, args=("play", "pocket lantern"))
+    try:
+        romi.wait_for(lambda: b"a=T,i=1," in romi.output, timeout=10)
+        seen = len(romi.output)
+        os.kill(romi.pid, signal.SIGTERM)
+        romi.wait_for(lambda: romi.exited is not None)
+        assert romi.exited == 128 + signal.SIGTERM
+        after = bytes(romi.output[seen:])
+        assert b"\x1b[?1049l" in after and b"\x1b[?25h" in after
+        assert KEY in sandbox.state()["playtime"]
+    finally:
+        romi.close()
+
+
+def test_romi_play_dry_run_shows_it_would_play_through_the_core(sandbox):
+    without_the_emulator(sandbox)
+    romi = Romi(sandbox, cols=300, args=("play", "pocket lantern", "--dry-run"))
+    try:
+        romi.wait_for(lambda: romi.exited is not None)
+        assert romi.exited == 0
+        output = romi.output.decode()
+        assert "mode     terminal" in output and "run --live" in output and NOT_INSTALLED not in output
+    finally:
+        romi.close()
+
+
+def missing_emulator_says(sandbox, *args, term="xterm-kitty"):
+    romi = Romi(sandbox, cols=300, args=("play", "pocket lantern", *args), term=term)
+    try:
+        romi.wait_for(lambda: romi.exited is not None)
+        assert romi.exited == 69
+        assert b"a=T," not in romi.output
+        return romi.text()
+    finally:
+        romi.close()
+
+
+def test_romi_play_needs_a_terminal_that_shows_games_to_use_the_core(sandbox):
+    without_the_emulator(sandbox)
+    assert "its core only plays in a Ghostty or kitty terminal" in missing_emulator_says(sandbox, term="foot")
+    out = run_cli(sandbox, "play", "pocket lantern")  # Into a pipe.
+    assert out.returncode == 69 and "its core only plays in a Ghostty or kitty terminal" in out.stderr
+    assert sandbox.state() == {}
+
+
+def test_romi_play_leaves_the_core_alone_when_told_not_to_play_in_romi(sandbox):
+    without_the_emulator(sandbox, play_in_romi=False)
+    assert f"{NOT_INSTALLED}: not found" in missing_emulator_says(sandbox)
+
+
+def test_romi_play_cant_detach_a_game_through_its_core(sandbox):
+    without_the_emulator(sandbox)
+    assert f"{NOT_INSTALLED}: not found" in missing_emulator_says(sandbox, "--mode", "detach")
 
 
 def test_games_played_in_romi_save_where_retroarch_does_and_carry_on_from_it(start, sandbox):

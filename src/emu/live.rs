@@ -25,7 +25,15 @@ use ratatui::crossterm::terminal::{self, EnterAlternateScreen, LeaveAlternateScr
 use ratatui::crossterm::{cursor, execute};
 use std::collections::VecDeque;
 use std::io::Write;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::{Duration, Instant};
+
+/// The signal that asked the game to stop, or 0.
+static STOP_SIGNAL: AtomicI32 = AtomicI32::new(0);
+
+extern "C" fn on_stop_signal(sig: libc::c_int) {
+    STOP_SIGNAL.store(sig, Ordering::Relaxed);
+}
 
 /// The id of the one image romi keeps replacing, and of its one placement.
 const IMAGE: u32 = 1;
@@ -77,6 +85,11 @@ pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     let fps = core.fps;
     let core_name = core.name.clone();
     let (shared, emu) = Shared::start(core, volume, false, None, None)?;
+    // A signal ends play like Esc does, so the game saves and the terminal is put back.
+    for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        // SAFETY: the handler only stores to an atomic.
+        unsafe { libc::signal(sig, on_stop_signal as extern "C" fn(libc::c_int) as libc::sighandler_t) };
+    }
     let mut view = View::new(name, &core_name, fps);
     let result = Screen::enter().and_then(|_screen| view.run(&shared));
     let stopped = shared.stop_and_wait(emu);
@@ -87,10 +100,19 @@ pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     }
     result?;
     anyhow::ensure!(stopped, "{}", crate::emu::runner::STUCK);
-    match shared.take_save_error() {
-        Some(e) => anyhow::bail!("the game wasn't saved: {e}"),
-        None => Ok(()),
+    if let Some(e) = shared.take_save_error() {
+        anyhow::bail!("the game wasn't saved: {e}");
     }
+    // Everything's put away, so go the way the signal would have, for whoever's waiting to see it.
+    let sig = STOP_SIGNAL.load(Ordering::Relaxed);
+    if sig != 0 {
+        // SAFETY: back to the default action for a signal, then raising it, in this thread.
+        unsafe {
+            libc::signal(sig, libc::SIG_DFL);
+            libc::raise(sig);
+        }
+    }
+    Ok(())
 }
 
 /// The terminal in the state live play needs, put back however play ends.
@@ -204,7 +226,7 @@ impl View {
                 shown = n;
                 frame
             });
-            if !self.read_input(shared)? {
+            if STOP_SIGNAL.load(Ordering::Relaxed) != 0 || !self.read_input(shared)? {
                 return Ok(());
             }
             if let Some(frame) = frame.filter(|f| f.width > 0) {

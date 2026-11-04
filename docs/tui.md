@@ -90,7 +90,7 @@ the first of its other emulators that has a core installed. RetroArch itself doe
 there: romi loads the core on its own. For PS2 games, which
 usually run in PCSX2, that's the LRPS2 core where it's installed ([PS2 in romi](ps2.md) says how), or
 else its Play! core (`libretro-play`), which romi adds to the emulators ES-DE knows, as ES-DE
-doesn't list it. Its emulator is still in its menu (`o`), as
+doesn't list it. Its emulator, if that's installed, is still in its menu (`o`), as
 **Play with** and the emulator's name. `"play_in_romi": false` (or Options → A plays) turns that
 round: A starts the emulator, and **Play in romi** is in the menu. It plays the game
 in the middle panel, with the systems and details still around it, drawn behind Kitty Unicode

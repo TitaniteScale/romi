@@ -13,10 +13,12 @@ const INPUT_COOLDOWN: Duration = Duration::from_millis(600);
 impl App {
     /// The core and ROM to play a game inside romi with, if it runs through a libretro core.
     pub(super) fn embeddable(&self, g: usize) -> Option<(PathBuf, PathBuf)> {
-        let game = &self.lib.games[g];
-        let rom = game.path.clone()?;
-        let core = crate::emulators::core(game, &self.emulator_options(g))?;
-        crate::emu::libretro::can_open(&core, &rom).then_some((core, rom))
+        crate::emulators::playable(&self.lib.games[g], &self.emulator_options(g))
+    }
+
+    /// Whether the program a game's command runs is installed, so it can start outside romi.
+    pub(super) fn can_launch(&self, g: usize) -> bool {
+        self.lib.games[g].launch.prepare().and_then(|p| p.check_program()).is_ok()
     }
 
     /// Whether A plays games inside romi, where they can play there. Not in a terminal they don't
