@@ -1,7 +1,7 @@
 # Maintainer: Jake Eaker <jacob.eaker@gmail.com>
 
 pkgname=romi
-pkgver=0.5.1
+pkgver=0.6.0
 pkgrel=1
 pkgdesc="Play your games in your terminal: a libretro frontend and game library, with RetroAchievements"
 arch=('x86_64' 'aarch64')
@@ -17,7 +17,7 @@ optdepends=(
   'emulationstation-de: system definitions and emulators for romi init, names from its gamelists'
 )
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('ac7f0e0c5cc39666fb0f8a5c12550158a96b78deea6aa51ba985b7dfaa2eba08')
+sha256sums=('0c903589b0c04217fe03aab24d5670e7a0b3604d7433180fe038959e6832ea45')
 
 prepare() {
   cd "$pkgname-$pkgver"
