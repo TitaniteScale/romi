@@ -1,6 +1,6 @@
 pkgbase = romi
 	pkgdesc = Play your games in your terminal: a libretro frontend and game library, with RetroAchievements
-	pkgver = 0.6.1
+	pkgver = 0.6.2
 	pkgrel = 1
 	url = https://github.com/TitaniteScale/romi
 	arch = x86_64
@@ -15,7 +15,7 @@ pkgbase = romi
 	optdepends = libglvnd: 3D games played in romi (N64, GameCube, Wii, Dreamcast, PlayStation 1 and 2, PSP)
 	optdepends = emulationstation-de: system definitions and emulators for romi init, names from its gamelists
 	options = !lto
-	source = romi-0.6.1.tar.gz::https://github.com/TitaniteScale/romi/archive/refs/tags/v0.6.1.tar.gz
-	sha256sums = 998e8d94254dcdf9ec9b5a4eac3208766c9e713be6a88fc83fb05a43f1ed50ff
+	source = romi-0.6.2.tar.gz::https://github.com/TitaniteScale/romi/archive/refs/tags/v0.6.2.tar.gz
+	sha256sums = bda73cfcdb670f08bd3cec48d47ee620d54a31e3d05fa0dea841ac41c3503469
 
 pkgname = romi
