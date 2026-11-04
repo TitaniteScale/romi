@@ -224,6 +224,15 @@ struct Api {
     unload_game: unsafe extern "C" fn(),
     get_memory_data: MemoryDataFn,
     get_memory_size: MemorySizeFn,
+    /// None for a core without them, which libretro doesn't allow but costs nothing to survive.
+    states: Option<StateFns>,
+}
+
+#[derive(Clone, Copy)]
+struct StateFns {
+    size: unsafe extern "C" fn() -> usize,
+    save: unsafe extern "C" fn(*mut c_void, usize) -> bool,
+    load: unsafe extern "C" fn(*const c_void, usize) -> bool,
 }
 
 impl Api {
@@ -259,6 +268,11 @@ pub fn button_names() -> Vec<(usize, String)> {
 pub fn button(name: &str) -> Option<u16> {
     BUTTONS.iter().position(|b| b.eq_ignore_ascii_case(name)).map(|i| 1 << i)
 }
+
+/// How many frames a core runs before it's given a save state, which puts back whatever they changed.
+/// Mupen64Plus crashes on a state before it has run a frame, and Dolphin's core on a GameCube state
+/// after one frame (it's fine after 120).
+pub const FRAMES_BEFORE_STATES: u64 = 120;
 
 /// How many players a game can have in romi: one on each of libretro's first four ports.
 pub const PLAYERS: usize = 4;
@@ -934,6 +948,7 @@ impl Core {
                 unload_game: sym!("retro_unload_game", unsafe extern "C" fn()),
                 get_memory_data: sym!("retro_get_memory_data", MemoryDataFn),
                 get_memory_size: sym!("retro_get_memory_size", MemorySizeFn),
+                states: state_fns(&lib),
             };
             let mut info = std::mem::zeroed::<SystemInfo>();
             sym!("retro_get_system_info", unsafe extern "C" fn(*mut SystemInfo))(&mut info);
@@ -1055,15 +1070,10 @@ impl Core {
             s.audio.clear();
             s.max_size
         };
+        if let Err(e) = self.gl_here() {
+            return note(&format!("romi: {e:#}"));
+        }
         if let Some(gl) = &mut self.gl {
-            // The context follows the core to whichever thread runs it.
-            let here = std::thread::current().id();
-            if self.gl_thread != Some(here) {
-                if let Err(e) = gl.make_current() {
-                    return note(&format!("romi: {e:#}"));
-                }
-                self.gl_thread = Some(here);
-            }
             let (w, h) = gl.size();
             if (max_size.0 > w || max_size.1 > h)
                 && let Err(e) = gl.resize((max_size.0.max(w), max_size.1.max(h)))
@@ -1075,6 +1085,50 @@ impl Core {
         unsafe { (self.api.run)() }
         let drawn = shared().hw_frame.take().filter(|&(w, h)| w > 0 && h > 0);
         self.read_frame(drawn);
+    }
+
+    /// Makes a core's GL context current on this thread, as the context follows the core to
+    /// whichever thread runs it.
+    fn gl_here(&mut self) -> Result<()> {
+        if let Some(gl) = &self.gl {
+            let here = std::thread::current().id();
+            if self.gl_thread != Some(here) {
+                gl.make_current()?;
+                self.gl_thread = Some(here);
+            }
+        }
+        Ok(())
+    }
+
+    /// What the core gives for a save state, taken between frames.
+    pub fn save_state(&mut self) -> Result<Vec<u8>> {
+        self.gl_here()?;
+        let Some(fns) = self.api.states else { bail!("{} can't make save states", self.name) };
+        // SAFETY: the game is loaded, only one thread drives a core, and the core writes no more
+        // than the size it said.
+        unsafe {
+            let size = (fns.size)();
+            if size == 0 {
+                bail!("{} can't make a save state here", self.name);
+            }
+            let mut data = vec![0; size];
+            if !(fns.save)(data.as_mut_ptr().cast(), size) {
+                bail!("{} couldn't make a save state", self.name);
+            }
+            Ok(data)
+        }
+    }
+
+    /// Gives the core what it gave for a save state, between frames.
+    pub fn load_state(&mut self, data: &[u8]) -> Result<()> {
+        self.gl_here()?;
+        let Some(fns) = self.api.states else { bail!("{} can't load save states", self.name) };
+        // SAFETY: the game is loaded, only one thread drives a core, and the core reads no more
+        // than the size it's given.
+        if !unsafe { (fns.load)(data.as_ptr().cast(), data.len()) } {
+            bail!("{} couldn't load this save state", self.name);
+        }
+        Ok(())
     }
 
     /// Reads back what a core that draws with the GPU drew, if it drew a frame (`drawn`, its size),
@@ -1127,6 +1181,21 @@ impl Core {
     /// Appends the last frame's sound to `out`, as interleaved left and right samples.
     pub fn audio(&self, out: &mut Vec<i16>) {
         out.extend_from_slice(&shared().audio);
+    }
+}
+
+/// A core's save state functions, if it has them all.
+///
+/// # Safety
+/// `lib` must be a libretro core, whose functions have these signatures if it has them.
+unsafe fn state_fns(lib: &libloading::Library) -> Option<StateFns> {
+    // SAFETY: as the caller promises, and the pointers are copied out of a library that stays loaded.
+    unsafe {
+        Some(StateFns {
+            size: *lib.get(b"retro_serialize_size\0").ok()?,
+            save: *lib.get(b"retro_serialize\0").ok()?,
+            load: *lib.get(b"retro_unserialize\0").ok()?,
+        })
     }
 }
 

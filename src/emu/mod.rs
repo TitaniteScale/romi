@@ -15,6 +15,7 @@ pub mod notice;
 pub mod options;
 pub mod remap;
 pub mod runner;
+pub mod savestate;
 pub mod screen;
 pub mod timing;
 pub mod unlocks;

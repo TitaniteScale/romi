@@ -208,14 +208,24 @@ It's built in steps, and the first one pays off without any of the TUI work:
 4. ✓ **Saves**: in-game saves (the cartridge's battery-backed RAM) go in RetroArch's save folder,
    under the same names, so a save made in romi carries over to RetroArch and back. romi checks
    every second whether the game has saved, and writes the file then and when the game stops. A
-   save that can't be read stops the game from starting, so it's never written over. Save
-   states are still to come.
+   save that can't be read stops the game from starting, so it's never written over.
+   - **Save states**, in progress. `romi run --save-state` and `--load-state` work
+     (`emu/savestate.rs`), in RetroArch's file format: a state from romi loaded in RetroArch 1.22.2,
+     and its compressed state loaded in romi (mGBA, the only core tried both ways). A core gets 120
+     frames before a state, as Mupen64Plus crashed on one before its first frame and Dolphin on a
+     GameCube state after one. With one game per system, a state loaded in a new run against a run
+     that never stopped: pixel for pixel on the 2D systems tried, and the same scene on PlayStation,
+     N64, Dreamcast, GameCube and Wii, some of which don't repeat exactly even without a state.
+     Largest states: Wii 109 MB, GameCube 93 MB, Naomi 68 MB, PS2 51 MB; a core takes at most 58 ms
+     over one. Found wrong: ProSystem (Atari 7800) goes back to its boot logo after a load in a new
+     run, and PPSSPP's picture stays black after one, and it sometimes refuses to save.
+     Still to do: keys, a pad combo and slots while playing; achievements carried in the state; a
+     game's in-game save, which a state can roll back and romi then writes over within a second.
 5. **Scenes**: a PNG frame with a transparent screen area. romi draws each emulated frame into it and
    sends the result as one image. Terminals without graphics get an ASCII-art frame around a half-block
    screen.
 6. **Full screen**: at first, scale the game to fill the terminal. Later, maybe, hand off to RetroArch
-   mid-game through a save state. Whether romi's save states and RetroArch's are compatible still needs
-   checking.
+   mid-game through a save state, as they share a format (see 4).
 7. ✓ **RetroAchievements during play**: rcheevos 12.5.0 (`vendor/rcheevos`, MIT) is compiled in,
    with a little C glue (`src/emu/cheevos.c`) so the Rust side never mirrors its structs.
    `romi achievements login` swaps the password for a login token and keeps only that. A game
@@ -655,6 +665,7 @@ Smaller items that fit between phases.
 - **`romi run` crashes on the way out with some cores**: PPSSPP in `retro_unload_game` (7 of 8 short
   runs on 2026-11-02, Bust-A-Move and Persona), after the game has run and the JSON has been printed,
   so the exit code is wrong for scripts. PPSSPP games stopped from the launcher left it running.
+  It also hides why a run failed, as when PPSSPP refuses a `--save-state`: romi crashes before saying.
   Nestopia exited the same way in its one run, and hasn't been tried in the launcher.
 - **Play with RetroArch when it's not installed**: a core with no RetroArch is still listed as
   `retroarch · mgba` in **Play with**, and `romi play` tries to start it and says it isn't found.

@@ -4,6 +4,7 @@ is checked with a made-up core that draws a blank Game Boy screen."""
 
 import json
 import subprocess
+import zlib
 
 from drive import CONFIG, binary
 from test_play import eventually
@@ -118,6 +119,111 @@ void *retro_get_memory_data(unsigned id) { return 0; }
 unsigned long retro_get_memory_size(unsigned id) { return 0; }
 _Bool retro_load_game(const void *game) { return 1; }
 """
+
+
+# Counts its frames, and writes the count to SEEN after every frame. Its state is the count, and it
+# takes nothing but a state of the right size.
+STATE_CORE = r"""
+#include <stdio.h>
+struct info { const char *name, *version, *extensions; _Bool need_fullpath, block_extract; };
+struct av { unsigned w, h, max_w, max_h; float aspect; double fps, rate; };
+static unsigned frames;
+unsigned retro_api_version(void) { return 1; }
+void retro_get_system_info(struct info *i) { i->name = "Counter"; i->version = "1"; i->extensions = "gba"; i->need_fullpath = 1; }
+void retro_get_system_av_info(struct av *a) { a->w = a->max_w = 240; a->h = a->max_h = 160; a->aspect = 0; a->fps = 60; a->rate = 32768; }
+void retro_set_environment(void *f) {}
+void retro_set_video_refresh(void *f) {}
+void retro_set_audio_sample(void *f) {}
+void retro_set_audio_sample_batch(void *f) {}
+void retro_set_input_poll(void *f) {}
+void retro_set_input_state(void *f) {}
+void retro_init(void) {}
+void retro_deinit(void) {}
+void retro_run(void) {
+    frames++;
+    FILE *f = fopen("SEEN" ".tmp", "w");
+    fprintf(f, "%u\n", frames);
+    fclose(f);
+    rename("SEEN" ".tmp", "SEEN");
+}
+unsigned long retro_serialize_size(void) { return STATE_SIZE; }
+_Bool retro_serialize(void *data, unsigned long size) { *(unsigned *)data = frames; return 1; }
+_Bool retro_unserialize(const void *data, unsigned long size) {
+    if (size != sizeof frames) return 0;
+    frames = *(const unsigned *)data;
+    return 1;
+}
+void retro_unload_game(void) {}
+void *retro_get_memory_data(unsigned id) { return 0; }
+unsigned long retro_get_memory_size(unsigned id) { return 0; }
+_Bool retro_load_game(const void *game) { return 1; }
+"""
+
+
+def counting_core(sandbox, state_size="sizeof frames"):
+    """A made-up core, and how to run it: `run(frames, *args)` returns romi's result and the count."""
+    seen = sandbox.home / "seen.txt"
+    source = sandbox.home / "counter.c"
+    source.write_text(STATE_CORE.replace('"SEEN"', f'"{seen}"').replace("STATE_SIZE", state_size))
+    core = sandbox.home / "counter_libretro.so"
+    subprocess.run(["cc", "-shared", "-fPIC", "-o", str(core), str(source)], check=True)
+
+    def run(frames, *args):
+        out = run_cli(sandbox, "run", "advance wars", "--core", str(core), "--frames", str(frames), *args)
+        return out, int(seen.read_text()) if seen.exists() else None
+
+    return run
+
+
+def test_a_run_carries_on_from_a_state_another_run_saved(sandbox):
+    run = counting_core(sandbox)
+    state = sandbox.home / "states/game.state"
+    out, count = run(10, "--save-state", str(state))
+    assert out.returncode == 0, out.stderr
+    assert count == 10
+    assert "Saved the state" in out.stdout
+    out, count = run(5, "--load-state", str(state))
+    assert out.returncode == 0, out.stderr
+    assert count == 15, "from where it was saved"
+
+
+def test_states_are_in_retroarchs_format_and_its_are_read(sandbox):
+    run = counting_core(sandbox)
+    state = sandbox.home / "game.state"
+    run(7, "--save-state", str(state))
+    count = (7).to_bytes(4, "little")
+    assert state.read_bytes() == b"RASTATE\x01MEM \x04\0\0\0" + count + b"\0\0\0\0END \0\0\0\0"
+
+    held = (100).to_bytes(4, "little")
+    blocks = b"RASTATE\x01MEM \x04\0\0\0" + held + b"\0\0\0\0END \0\0\0\0"
+    packed = zlib.compress(blocks)
+    rzip = b"#RZIPv\x01#" + (131072).to_bytes(4, "little") + len(blocks).to_bytes(8, "little")
+    for file in [held, blocks, rzip + len(packed).to_bytes(4, "little") + packed]:
+        state.write_bytes(file)
+        out, count = run(1, "--load-state", str(state))
+        assert out.returncode == 0, out.stderr
+        assert count == 101, file
+
+
+def test_a_state_that_cant_load_says_why(sandbox):
+    run = counting_core(sandbox)
+    state = sandbox.home / "game.state"
+    out, _ = run(1, "--load-state", str(state))
+    assert out.returncode != 0 and "can't read" in out.stderr, "no file"
+    state.write_bytes(b"not the right size")
+    out, _ = run(1, "--load-state", str(state))
+    assert out.returncode != 0 and "Counter 1 couldn't load this save state" in out.stderr
+    state.write_bytes(b"RASTATE\x01MEM \xFF\0\0\0")
+    out, _ = run(1, "--load-state", str(state))
+    assert out.returncode != 0 and "it's cut short" in out.stderr
+
+
+def test_a_core_with_no_states_says_so_and_leaves_nothing_behind(sandbox):
+    run = counting_core(sandbox, state_size="0")
+    state = sandbox.home / "game.state"
+    out, _ = run(1, "--save-state", str(state))
+    assert out.returncode != 0 and "can't make a save state" in out.stderr
+    assert not state.exists()
 
 
 def test_runs_use_retroarchs_remap_for_the_game(sandbox):

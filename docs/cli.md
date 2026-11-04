@@ -56,7 +56,15 @@ romi run "pokemon pinball" --frames 1200 --input start.txt --screenshot title.pn
 romi run build/game.gba --core /usr/lib/libretro/mgba_libretro.so --screenshot out.png --json
 romi run "pokemon pinball" --frames 3600 --wav title-music.wav
 romi run "metal slug" --frames 1800 --screenshot attract.png
+romi run "pokemon pinball" --frames 1200 --input start.txt --save-state table.state
+romi run "pokemon pinball" --load-state table.state --frames 60 --screenshot table.png
 ```
+
+`--save-state s.state` saves the game's state after the last frame, and `--load-state s.state` starts
+from one, so a run can skip to the part it's testing. States are in RetroArch's format, and RetroArch's
+are read, compressed or not. They belong to the core that made them, and often to its version. Add
+`--screenshot` and the picture is the same as a run that never stopped, for the cores that repeat
+exactly. `"save_state_bytes"` and the time each took are in `--json`.
 
 `--achievements` earns RetroAchievements during the run, as playing in romi does, after
 `romi achievements login`: it waits for the game's achievements to load, then checks them after

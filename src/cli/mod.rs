@@ -184,6 +184,12 @@ pub enum Command {
         /// the frame's pixel X, Y)
         #[arg(long, value_name = "PATH")]
         input: Option<PathBuf>,
+        /// Start from this save state, one made by romi or RetroArch for the same game and core
+        #[arg(long, value_name = "PATH", conflicts_with = "achievements")]
+        load_state: Option<PathBuf>,
+        /// Save the state after the last frame here, in RetroArch's format
+        #[arg(long, value_name = "PATH", conflicts_with = "achievements")]
+        save_state: Option<PathBuf>,
         /// Earn RetroAchievements while it runs, as playing it in romi does (log in first with
         /// `romi achievements login`). Unlocks go to your account, or to ROMI_RA_HOST
         #[arg(long, conflicts_with = "live")]
@@ -193,7 +199,7 @@ pub enum Command {
         json: bool,
         /// Play it in this terminal instead, drawn with Kitty graphics (an experiment: Esc quits,
         /// F1 and F2 switch how frames are sent and scaled, F4 mutes)
-        #[arg(long, conflicts_with_all = ["frames", "screenshot", "wav", "input", "json"])]
+        #[arg(long, conflicts_with_all = ["frames", "screenshot", "wav", "input", "json", "load_state", "save_state"])]
         live: bool,
     },
     /// Find your ROM folders and emulators, and write a config for them
@@ -435,9 +441,31 @@ pub fn run(command: Command, cfg_path: &Path) -> Result<()> {
         Command::Play { game, system, mode, dry_run, json } => {
             play::play(cfg, cfg_path, &game, system.as_deref(), mode, dry_run, json)
         }
-        Command::Run { game, system, core, frames, screenshot, wav, input, achievements, json, live } => {
-            let (screenshot, wav) = (screenshot.as_deref(), wav.as_deref());
-            let run = play::Run { frames, screenshot, wav, input: input.as_deref(), achievements, json, live };
+        Command::Run {
+            game,
+            system,
+            core,
+            frames,
+            screenshot,
+            wav,
+            input,
+            load_state,
+            save_state,
+            achievements,
+            json,
+            live,
+        } => {
+            let run = play::Run {
+                frames,
+                screenshot: screenshot.as_deref(),
+                wav: wav.as_deref(),
+                input: input.as_deref(),
+                load_state: load_state.as_deref(),
+                save_state: save_state.as_deref(),
+                achievements,
+                json,
+                live,
+            };
             play::run_core(cfg, &game, system.as_deref(), core, run)
         }
         Command::Stats { json } => reports::stats(cfg, json),

@@ -156,13 +156,15 @@ pub(super) struct Run<'a> {
     pub screenshot: Option<&'a Path>,
     pub wav: Option<&'a Path>,
     pub input: Option<&'a Path>,
+    pub load_state: Option<&'a Path>,
+    pub save_state: Option<&'a Path>,
     pub achievements: bool,
     pub json: bool,
     pub live: bool,
 }
 
 pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Option<PathBuf>, run: Run) -> Result<()> {
-    let Run { frames, screenshot, wav, input, achievements, json, live } = run;
+    let Run { frames, screenshot, wav, input, load_state, save_state, achievements, json, live } = run;
     // A game in the library plays with the buttons remapped in romi for it, and with the core
     // from another of its emulators if its own isn't one.
     let (name, rom, launch, controls, core_options, other_core, system_id) = match Path::new(query).is_file() {
@@ -252,6 +254,7 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
     let mut samples = Vec::new();
     let mut earned = Vec::new();
     let mut waited = Duration::ZERO;
+    let loaded = load_state.map(|path| start_from_state(&mut emu, path)).transpose()?;
     let started = Instant::now();
     for n in 0..frames {
         emu.run_frame(script.players_at(n));
@@ -276,6 +279,7 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
     let sound_len = sound.map(|s| s.finish()).transpose()?;
     emu.finish_frame();
     let frame = emu.frame();
+    let saved = save_state.map(|path| save_to_state(&mut emu, path)).transpose()?;
     if let Some(path) = screenshot {
         let Some(img) = image::RgbImage::from_raw(frame.width, frame.height, frame.rgb) else {
             bail!("{} hasn't drawn anything after {frames} frames", emu.name);
@@ -299,6 +303,10 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
             "sample_rate": emu.sample_rate,
             "wav": wav,
             "wav_secs": sound_len.map(|d| d.as_secs_f64()),
+            "load_state_secs": loaded.map(|d| d.as_secs_f64()),
+            "save_state": save_state,
+            "save_state_secs": saved.map(|(took, _)| took.as_secs_f64()),
+            "save_state_bytes": saved.map(|(_, bytes)| bytes),
             "achievements": cheevos.is_some().then(|| achievements_json(&earned)),
         });
         println!("{outcome}");
@@ -316,6 +324,10 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
             let rate = emu.sample_rate.round();
             println!("Saved {:.1}s of sound ({rate} Hz) to {}", len.as_secs_f64(), path.display());
         }
+        if let (Some(path), Some((took, bytes))) = (save_state, saved) {
+            let (mb, ms) = (bytes as f64 / 1e6, took.as_secs_f64() * 1e3);
+            println!("Saved the state ({mb:.1} MB, in {ms:.0} ms) to {}", path.display());
+        }
         if cheevos.is_some() {
             for line in achievements_lines(&earned) {
                 println!("{line}");
@@ -323,6 +335,29 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
         }
     }
     Ok(())
+}
+
+/// Loads the state in the file at `path`, once the core can take one, and says how long the core
+/// took over it.
+fn start_from_state(emu: &mut crate::emu::libretro::Core, path: &Path) -> Result<Duration> {
+    let file = std::fs::read(path).with_context(|| format!("can't read {}", path.display()))?;
+    let state = crate::emu::savestate::decode(file).with_context(|| format!("can't load {}", path.display()))?;
+    for _ in 0..crate::emu::libretro::FRAMES_BEFORE_STATES {
+        emu.run_frame(Default::default());
+    }
+    let started = Instant::now();
+    emu.load_state(&state.core).with_context(|| format!("can't load {}", path.display()))?;
+    Ok(started.elapsed())
+}
+
+/// Saves a state to the file at `path`, and says how long the core took over it and how big it is.
+fn save_to_state(emu: &mut crate::emu::libretro::Core, path: &Path) -> Result<(Duration, usize)> {
+    let started = Instant::now();
+    let core = emu.save_state()?;
+    let took = started.elapsed();
+    let file = crate::emu::savestate::encode(&crate::emu::savestate::State { core, achievements: None })?;
+    crate::files::write_atomic(path, &file).with_context(|| format!("can't write {}", path.display()))?;
+    Ok((took, file.len()))
 }
 
 /// A client with the account's login and the game's achievements asked for, for a run to check
