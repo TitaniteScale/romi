@@ -1223,8 +1223,12 @@ impl Drop for Core {
         // SAFETY: the game was loaded and the core initialized in `load`.
         unsafe {
             // The context goes first, as in RetroArch: LRPS2 (PS2) pauses its CPU thread to let go
-            // of it, and waits for that thread for good if unloading has already ended it.
-            if let Some(destroy) = self.hw.and_then(|hw| hw.destroy) {
+            // of it, and waits for that thread for good if unloading has already ended it. Not with
+            // PPSSPP: unloading finishes a boot still under way, which crashed without the context,
+            // and deletes what its `context_destroy` works on, so it's never called.
+            if !self.name.starts_with("PPSSPP")
+                && let Some(destroy) = self.hw.and_then(|hw| hw.destroy)
+            {
                 destroy();
             }
             (self.api.unload_game)();

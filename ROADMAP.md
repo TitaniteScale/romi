@@ -226,7 +226,11 @@ It's built in steps, and the first one pays off without any of the TUI work:
      Largest states: Wii 109 MB, GameCube 93 MB, Naomi 68 MB, PS2 51 MB; a core takes at most 58 ms
      over one. `romi run` loads a state 120 frames in, too soon for ProSystem (Atari 7800, back to its
      boot logo) and PPSSPP (black), which both load while playing, in the picture at least. PPSSPP
-     sometimes refuses to save, which trying again gets past. Played through save, load and undo in
+     sometimes refuses to save, which trying again gets past. PPSSPP boots a game in the background,
+     and unloading while it does finishes the boot, which crashed romi once `context_destroy` had taken
+     the GL context, so stopping a game early took romi down, and so did romi's own one-frame try at
+     a core, as "the core crashed while starting". PPSSPP now keeps its context as it unloads, and
+     `romi run` never unloads (so its exit code and errors are always its own). Played through save, load and undo in
      a pty with mGBA, ProSystem, PPSSPP, Dolphin and LRPS2.
      States go in `~/.local/share/romi/states`, not RetroArch's folder, compressed as RetroArch
      compresses them (a Wii state goes from 109 MB to 4.5 MB in about 0.2 s), on another thread so the
@@ -675,17 +679,9 @@ Smaller items that fit between phases.
   terminal in about 7 ms, so the likely cost is the terminal taking 9 MB frames, 546 MB/s. Ghostty and
   the compositor also keep the GPU about 75% busy at 4K even for an Atari 7800 game. Try sending
   smaller frames. Keyboard lag and what each core costs still need measuring.
-- **`romi run` crashes on the way out with some cores**: PPSSPP in `retro_unload_game` (7 of 8 short
-  runs on 2026-11-02, Bust-A-Move and Persona), after the game has run and the JSON has been printed,
-  so the exit code is wrong for scripts. PPSSPP games stopped from the launcher left it running.
-  It also hides why a run failed, as when PPSSPP refuses a `--save-state`: romi crashes before saying.
-  Nestopia exited the same way in its one run, and hasn't been tried in the launcher.
 - **Play with RetroArch when it's not installed**: a core with no RetroArch is still listed as
   `retroarch · mgba` in **Play with**, and `romi play` tries to start it and says it isn't found.
   `romi play` could play through the core instead.
-- **A PSP game not starting the second time**: in a sandbox on 2026-11-03, a PSP game played in romi,
-  stopped, and started again in a new romi sent no frames in 10 s, with no message and with or without
-  save states. Not looked into, and not yet seen outside that sandbox.
 - **MAME in romi**: its core crashed while starting, before cores got a system and save folder. It
   boots now (MAME 0.289, 2026-11-02, a short headless run) if the ROM set matches its version, but
   hasn't been played; FinalBurn Neo covers most arcade sets.

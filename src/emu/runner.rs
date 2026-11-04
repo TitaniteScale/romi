@@ -193,6 +193,12 @@ pub fn left_running() -> bool {
     LEFT_RUNNING.load(Ordering::SeqCst)
 }
 
+/// Has romi end without the cleanup that would unload what a core runs in, as it does with a game
+/// left running: for a process that won't be unloading its core.
+pub fn end_with_a_core_loaded() {
+    LEFT_RUNNING.store(true, Ordering::SeqCst);
+}
+
 /// What's said of a game that didn't stop (see `Shared::stop_and_wait`).
 pub const STUCK: &str = "the game stopped responding, and is left running until romi quits";
 

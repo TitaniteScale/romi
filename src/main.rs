@@ -70,8 +70,9 @@ fn main() {
 }
 
 /// Ends romi with `code`. With a game left running because it stopped responding (see
-/// `Shared::stop_and_wait`), it ends at once, without the cleanup a program does as it exits:
-/// that unloads what the core is still running in, and romi crashed on its way out.
+/// `Shared::stop_and_wait`), or a core that's staying loaded (`romi run`), it ends at once, without
+/// the cleanup a program does as it exits: that unloads what the core is still running in, and romi
+/// crashed on its way out.
 fn exit(code: i32) -> ! {
     if emu::runner::left_running() {
         use std::io::Write;

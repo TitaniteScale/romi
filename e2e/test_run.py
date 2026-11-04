@@ -226,6 +226,22 @@ def test_a_core_with_no_states_says_so_and_leaves_nothing_behind(sandbox):
     assert not state.exists()
 
 
+def test_a_core_that_crashes_as_it_unloads_doesnt_spoil_a_run_or_starting_it(start, sandbox):
+    # PPSSPP did if it was still booting, which is every run a frame long: romi's own try at a core,
+    # the first time it's played, so games wouldn't start.
+    set_up_a_game_boy_game(sandbox, launch_animation={"enabled": False})
+    source = sandbox.home / "blank.c"
+    source.write_text(DRAWING_CORE.replace("void retro_unload_game(void) {}", "void retro_unload_game(void) { *(volatile int *)0 = 1; }"))
+    core = sandbox.home / "blank_libretro.so"
+    subprocess.run(["cc", "-shared", "-fPIC", "-o", str(core), str(source)], check=True)
+    rom = sandbox.home / "ROMs/gb/Pocket Lantern (USA).gb"
+    out = run_cli(sandbox, "run", str(rom), "--core", str(core), "--frames", "2")
+    assert out.returncode == 0, out.stderr
+    assert "Ran 2 frames" in out.stdout
+    romi = start()
+    play_in_romi(romi)
+
+
 def test_runs_use_retroarchs_remap_for_the_game(sandbox):
     seen = sandbox.home / "seen.txt"
     source = sandbox.home / "pad.c"

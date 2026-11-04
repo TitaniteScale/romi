@@ -249,7 +249,11 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
         shown_height: None,
     };
     let mut cheevos = achievements.then(|| start_achievements(system_id.as_deref(), &rom)).transpose()?;
-    let mut emu = crate::emu::libretro::Core::load(&core, &rom, &dirs)?;
+    let emu = crate::emu::libretro::Core::load(&core, &rom, &dirs)?;
+    // Never unloaded: the process is about to end, its save folder is thrown away, and some cores crash
+    // doing it (PPSSPP if it's still booting), which would hide how the run went.
+    crate::emu::runner::end_with_a_core_loaded();
+    let mut emu = std::mem::ManuallyDrop::new(emu);
     let mut sound = wav.map(|path| crate::emu::audio::Wav::create(path, emu.sample_rate)).transpose()?;
     let mut samples = Vec::new();
     let mut earned = Vec::new();
