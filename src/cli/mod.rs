@@ -185,10 +185,10 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         input: Option<PathBuf>,
         /// Start from this save state, one made by romi or RetroArch for the same game and core
-        #[arg(long, value_name = "PATH", conflicts_with = "achievements")]
+        #[arg(long, value_name = "PATH")]
         load_state: Option<PathBuf>,
         /// Save the state after the last frame here, in RetroArch's format
-        #[arg(long, value_name = "PATH", conflicts_with = "achievements")]
+        #[arg(long, value_name = "PATH")]
         save_state: Option<PathBuf>,
         /// Earn RetroAchievements while it runs, as playing it in romi does (log in first with
         /// `romi achievements login`). Unlocks go to your account, or to ROMI_RA_HOST

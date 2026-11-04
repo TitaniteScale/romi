@@ -30,6 +30,8 @@ pub struct State {
     /// The controllers in player order, player 1's first, from the players screen, by name (see
     /// `emu::controls::pad_names`).
     pub players: Vec<String>,
+    /// The save state slot each game was last on, by game key, when it isn't the first.
+    pub state_slots: HashMap<String, u8>,
 }
 
 impl State {
@@ -199,6 +201,7 @@ mod tests {
             tags: [("backlog".into(), vec!["psx:a (Disc 2).chd".into()])].into(),
             grid: false,
             players: Vec::new(),
+            state_slots: HashMap::new(),
         };
         assert!(s.mentions("psx:a (Disc 2).chd"));
         s.rename_key("psx:a (Disc 2).chd", "psx:a.m3u");

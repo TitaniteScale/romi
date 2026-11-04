@@ -133,6 +133,29 @@ Controllers' sticks and analog triggers reach the core as they are; in games pla
 way. `ROMI_CORE_LOG=file` writes what the core says there, which is the place to look when a game
 won't start.
 
+### Save states
+
+| On a controller | On a keyboard | |
+|---|---|---|
+| Select+R | F2 | Save a state to the slot it's on |
+| Select+L | F4 | Load the state in that slot |
+| Select+Down | F3 | Undo the last load, or undo that undo |
+| Select+Left, Select+Right | F6, F7 | Change slot, which says how long ago it was saved |
+
+Each game has ten slots, 0 to 9, and stays on the one it was last on. On a controller, R, L and the
+d-pad's Left, Right and Down don't reach the game while Select is held, though Select does. A core
+needs a couple of seconds after a game starts before it can save or load.
+
+States go in `~/.local/share/romi/states/<core>/`, away from RetroArch's so neither writes over the
+other, and belong to the core that made them, often to its version too. They're in RetroArch's
+format, named as it names them (`<game>.state`, `<game>.state1`...), so a state can be copied from
+one to the other. They also hold how far along the game's achievements are. If you load a state, the
+game's in-game save goes back with it, as it does in RetroArch, on the cores that keep it in the
+state: romi says when that happened, and keeps the last five saves it replaced, in `saves before
+loading` next to the states.
+
+PPSSPP (PSP) sometimes refuses to save. Trying again usually works.
+
 ### Touching the screen
 
 The mouse touches a game's screen, the DS's lower one say: hold the left button where you'd put

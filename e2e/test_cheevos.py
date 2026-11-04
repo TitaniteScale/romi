@@ -313,6 +313,46 @@ def test_a_headless_run_earns_achievements_with_the_flag(sandbox, server):
     assert len(server.requests) == before
 
 
+# The same, with its memory for a state.
+STATE_CORE = COUNTING_CORE.replace(
+    "void retro_unload_game(void) {}",
+    """
+unsigned long retro_serialize_size(void) { return sizeof ram; }
+_Bool retro_serialize(void *data, unsigned long size) { __builtin_memcpy(data, ram, sizeof ram); return 1; }
+_Bool retro_unserialize(const void *data, unsigned long size) { __builtin_memcpy(ram, data, sizeof ram); return 1; }
+void retro_unload_game(void) {}
+""",
+)
+
+
+def test_a_state_carries_how_far_along_achievements_are(sandbox):
+    # The counter's first byte is 7 on frames 7, 263 and 519: the third time unlocks this.
+    fake = FakeRetroAchievements([(5503, "Seven three times", 5, "0xH0000=7.3.")])
+    try:
+        set_up_an_nes_game(sandbox, fake, core_source=STATE_CORE)
+        log_in(sandbox)
+        rom = str(sandbox.home / "ROMs/nes/Pocket Lantern (USA).nes")
+        state = sandbox.home / "two-hits.state"
+        common = ["run", rom, "--system", "nes", "--achievements", "--json"]
+        out = run_cli(sandbox, *common, "--frames", "300", "--save-state", str(state))
+        assert out.returncode == 0, out.stderr
+        assert not json.loads(out.stdout)["achievements"]["unlocked"], "only twice so far"
+        file = state.read_bytes()
+        assert b"ACHV" in file
+
+        def unlocked_after_load():
+            out = run_cli(sandbox, *common, "--frames", "240", "--load-state", str(state))
+            assert out.returncode == 0, out.stderr
+            return [a["title"] for a in json.loads(out.stdout)["achievements"]["unlocked"]]
+
+        assert unlocked_after_load() == ["Seven three times"], "the third time, from the state's two"
+        # RetroArch's old states have only the core's memory, so the count starts over.
+        state.write_bytes(file[16:16 + 2048])
+        assert unlocked_after_load() == []
+    finally:
+        fake.close()
+
+
 def test_a_headless_run_says_so_when_it_cant_earn_anything(sandbox, server):
     set_up_an_nes_game(sandbox, server)
     rom = sandbox.home / "ROMs/nes/Pocket Lantern (USA).nes"

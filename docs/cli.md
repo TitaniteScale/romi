@@ -64,7 +64,10 @@ romi run "pokemon pinball" --load-state table.state --frames 60 --screenshot tab
 from one, so a run can skip to the part it's testing. States are in RetroArch's format, and RetroArch's
 are read, compressed or not. They belong to the core that made them, and often to its version. Add
 `--screenshot` and the picture is the same as a run that never stopped, for the cores that repeat
-exactly. `"save_state_bytes"` and the time each took are in `--json`.
+exactly. A state is loaded 120 frames in, which is too soon for ProSystem (Atari 7800, back to its boot
+logo) and PPSSPP (a black picture); both load states fine while playing. `"save_state_bytes"` and the
+time each took are in `--json`. With `--achievements`, states carry how
+far along the achievements are, too.
 
 `--achievements` earns RetroAchievements during the run, as playing in romi does, after
 `romi achievements login`: it waits for the game's achievements to load, then checks them after

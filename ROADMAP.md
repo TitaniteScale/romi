@@ -209,7 +209,8 @@ It's built in steps, and the first one pays off without any of the TUI work:
    under the same names, so a save made in romi carries over to RetroArch and back. romi checks
    every second whether the game has saved, and writes the file then and when the game stops. A
    save that can't be read stops the game from starting, so it's never written over.
-   - **Save states**, in progress. `romi run --save-state` and `--load-state` work
+   - ✓ **Save states**: ten slots a game, Select+R, Select+L and Select+Down (undo the last load) on
+     a controller, F2, F4 and F3 on a keyboard, and `romi run --save-state` and `--load-state`
      (`emu/savestate.rs`), in RetroArch's file format: a state from romi loaded in RetroArch 1.22.2,
      and its compressed state loaded in romi (mGBA, the only core tried both ways). A core gets 120
      frames before a state, as Mupen64Plus crashed on one before its first frame and Dolphin on a
@@ -217,10 +218,16 @@ It's built in steps, and the first one pays off without any of the TUI work:
      that never stopped: pixel for pixel on the 2D systems tried, and the same scene on PlayStation,
      N64, Dreamcast, GameCube and Wii, some of which don't repeat exactly even without a state.
      Largest states: Wii 109 MB, GameCube 93 MB, Naomi 68 MB, PS2 51 MB; a core takes at most 58 ms
-     over one. Found wrong: ProSystem (Atari 7800) goes back to its boot logo after a load in a new
-     run, and PPSSPP's picture stays black after one, and it sometimes refuses to save.
-     Still to do: keys, a pad combo and slots while playing; achievements carried in the state; a
-     game's in-game save, which a state can roll back and romi then writes over within a second.
+     over one. `romi run` loads a state 120 frames in, too soon for ProSystem (Atari 7800, back to its
+     boot logo) and PPSSPP (black), which both load while playing, in the picture at least. PPSSPP
+     sometimes refuses to save, which trying again gets past. Played through save, load and undo in
+     a pty with mGBA, ProSystem, PPSSPP, Dolphin and LRPS2.
+     States go in `~/.local/share/romi/states`, not RetroArch's folder, compressed as RetroArch
+     compresses them (a Wii state goes from 109 MB to 4.5 MB in about 0.2 s), on another thread so the
+     game doesn't stop for it. They carry how far along achievements are. A load that takes back the
+     in-game save keeps the last five copies.
+     Still to do: a way to turn the Select combos off for games that use Select as a held button;
+     a picture of each slot; loading RetroArch's states from a menu; `romi run --live`.
 5. **Scenes**: a PNG frame with a transparent screen area. romi draws each emulated frame into it and
    sends the result as one image. Terminals without graphics get an ASCII-art frame around a half-block
    screen.
@@ -670,6 +677,9 @@ Smaller items that fit between phases.
 - **Play with RetroArch when it's not installed**: a core with no RetroArch is still listed as
   `retroarch · mgba` in **Play with**, and `romi play` tries to start it and says it isn't found.
   `romi play` could play through the core instead.
+- **A PSP game not starting the second time**: in a sandbox on 2026-11-03, a PSP game played in romi,
+  stopped, and started again in a new romi sent no frames in 10 s, with no message and with or without
+  save states. Not looked into, and not yet seen outside that sandbox.
 - **MAME in romi**: its core crashed while starting, before cores got a system and save folder. It
   boots now (MAME 0.289, 2026-11-02, a short headless run) if the ROM set matches its version, but
   hasn't been played; FinalBurn Neo covers most arcade sets.

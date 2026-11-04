@@ -3,11 +3,15 @@
 //! A state is what the core hands over (`retro_serialize`), in blocks after an 8-byte header: `MEM `
 //! for the core's data, `ACHV` for how far along the achievements are, and `END `. Each block is its
 //! 4-byte name and its length, then the data, padded to a multiple of 8. Older RetroArch wrote the
-//! core's data alone, and newer RetroArch compresses the file (RZIP). All of those are read; romi
-//! writes blocks, uncompressed.
+//! core's data alone, and newer RetroArch compresses the file (RZIP). All of those are read. Playing,
+//! romi writes compressed blocks, as RetroArch does; `romi run` leaves them uncompressed.
+//!
+//! romi keeps its states in a folder of its own (`Files`), so it never writes over RetroArch's.
 
 use anyhow::{Context, Result, bail};
-use std::io::Read;
+use std::ffi::OsString;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
 
 const HEADER: &[u8; 8] = b"RASTATE\x01";
 const CORE_BLOCK: &[u8; 4] = b"MEM ";
@@ -92,6 +96,27 @@ pub fn decode(file: Vec<u8>) -> Result<State> {
 const RZIP_MAGIC: &[u8] = b"#RZIPv";
 const RZIP_HEADER: usize = 20;
 
+/// How much of a state goes in each chunk of an RZIP file.
+const RZIP_CHUNK: usize = 128 * 1024;
+
+/// The contents of a state file, compressed as RetroArch compresses them. Fast rather than small: a
+/// Wii state is 109 MB, and this runs while the game plays.
+pub fn pack(file: &[u8]) -> Result<Vec<u8>> {
+    let mut out = Vec::with_capacity(file.len() / 4);
+    out.extend_from_slice(RZIP_MAGIC);
+    out.extend_from_slice(&[1, b'#']);
+    out.extend_from_slice(&(RZIP_CHUNK as u32).to_le_bytes());
+    out.extend_from_slice(&(file.len() as u64).to_le_bytes());
+    for chunk in file.chunks(RZIP_CHUNK) {
+        let mut z = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::fast());
+        z.write_all(chunk)?;
+        let z = z.finish()?;
+        out.extend_from_slice(&(z.len() as u32).to_le_bytes());
+        out.extend_from_slice(&z);
+    }
+    Ok(out)
+}
+
 fn unpack(file: &[u8]) -> Result<Vec<u8>> {
     if file.len() < RZIP_HEADER || file[7] != b'#' {
         bail!("it's cut short");
@@ -115,10 +140,74 @@ fn unpack(file: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
+/// How many slots a game has, as in RetroArch's first ten: 0 to 9.
+pub const SLOTS: u8 = 10;
+
+/// How many copies of a game's in-game save to keep from before states took it back.
+const SAVES_KEPT: usize = 5;
+
+/// Where a game's states go in romi's own folder, by the core's name without its version, as states
+/// belong to the core that made them.
+#[derive(Clone, Debug)]
+pub struct Files {
+    dir: PathBuf,
+    stem: OsString,
+}
+
+impl Files {
+    pub fn new(core: &Path, rom: &Path) -> Files {
+        let name = crate::emu::libretro::info(core).map(|info| info.name);
+        let core = name.unwrap_or_else(|| core.file_stem().unwrap_or_default().to_string_lossy().into_owned());
+        Files::in_folder(crate::config::data_dir().join("states").join(core), rom)
+    }
+
+    fn in_folder(dir: PathBuf, rom: &Path) -> Files {
+        Files { dir, stem: rom.file_stem().unwrap_or_default().to_os_string() }
+    }
+
+    /// A slot's file, named as RetroArch names them: `.state`, `.state1`, up to `.state9`.
+    pub fn slot(&self, slot: u8) -> PathBuf {
+        let mut name = self.stem.clone();
+        name.push(if slot == 0 { ".state".to_string() } else { format!(".state{slot}") });
+        self.dir.join(name)
+    }
+
+    /// Keeps a copy of a game's in-game save, as loading a state is about to replace it, along with
+    /// the last few before it. Says where, or None if it has no save file yet.
+    pub fn keep_save(&self, save: &Path, now: u64) -> Result<Option<PathBuf>> {
+        if !save.is_file() {
+            return Ok(None);
+        }
+        let dir = self.dir.join("saves before loading");
+        std::fs::create_dir_all(&dir).with_context(|| format!("can't make {}", dir.display()))?;
+        let mut prefix = self.stem.clone();
+        prefix.push(".srm.");
+        let mut name = prefix.clone();
+        name.push(now.to_string());
+        let kept = dir.join(name);
+        std::fs::copy(save, &kept).with_context(|| format!("can't copy {}", save.display()))?;
+        let prefix = prefix.to_string_lossy().into_owned();
+        // Oldest first, by the time in their names.
+        let mut older: Vec<(u64, PathBuf)> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                Some((name.strip_prefix(&prefix)?.parse().ok()?, entry.path()))
+            })
+            .collect();
+        older.sort();
+        for (_, path) in older.iter().take(older.len().saturating_sub(SAVES_KEPT)) {
+            std::fs::remove_file(path).ok();
+        }
+        Ok(Some(kept))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
 
     fn rzip(data: &[u8], chunk: usize) -> Vec<u8> {
         let mut out = b"#RZIPv\x01#".to_vec();
@@ -159,6 +248,49 @@ mod tests {
         let file = encode(&state).unwrap();
         assert_eq!(decode(rzip(&file, 64)).unwrap(), state, "in several chunks");
         assert_eq!(decode(vec![1, 2, 3]).unwrap(), State { core: vec![1, 2, 3], achievements: None });
+    }
+
+    #[test]
+    fn what_romi_compresses_comes_back_and_is_laid_out_as_rzip() {
+        for size in [0, 5, RZIP_CHUNK, RZIP_CHUNK * 2 + 7] {
+            let state = State { core: (0..size).map(|n| (n % 251) as u8).collect(), achievements: Some(vec![1, 2]) };
+            let file = encode(&state).unwrap();
+            let packed = pack(&file).unwrap();
+            assert_eq!(&packed[..8], b"#RZIPv\x01#");
+            assert_eq!(u32::from_le_bytes(packed[8..12].try_into().unwrap()) as usize, RZIP_CHUNK);
+            assert_eq!(u64::from_le_bytes(packed[12..20].try_into().unwrap()) as usize, file.len());
+            assert_eq!(decode(packed).unwrap(), state, "{size} bytes");
+        }
+    }
+
+    #[test]
+    fn slots_are_named_as_retroarch_names_them() {
+        let files = Files::in_folder(PathBuf::from("/states/mGBA"), Path::new("/roms/Mr. Bones (USA).gba"));
+        assert_eq!(files.slot(0), Path::new("/states/mGBA/Mr. Bones (USA).state"));
+        assert_eq!(files.slot(9), Path::new("/states/mGBA/Mr. Bones (USA).state9"));
+    }
+
+    #[test]
+    fn only_the_last_few_saves_are_kept_and_only_this_games() {
+        let dir = std::env::temp_dir().join(format!("romi-keep-save-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let files = Files::in_folder(dir.join("states"), Path::new("/roms/a.gba"));
+        let save = dir.join("a.srm");
+        assert_eq!(files.keep_save(&save, 1).unwrap(), None, "nothing to keep yet");
+        std::fs::write(&save, b"good").unwrap();
+        let other = Files::in_folder(dir.join("states"), Path::new("/roms/b.gba"));
+        other.keep_save(&save, 1).unwrap();
+        let mut kept = None;
+        for now in 2..=(2 + SAVES_KEPT as u64) {
+            kept = files.keep_save(&save, now).unwrap();
+        }
+        assert_eq!(std::fs::read(kept.unwrap()).unwrap(), b"good");
+        let folder = dir.join("states/saves before loading");
+        let mut names: Vec<_> =
+            std::fs::read_dir(&folder).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        names.sort();
+        assert_eq!(names, ["a.srm.3", "a.srm.4", "a.srm.5", "a.srm.6", "a.srm.7", "b.srm.1"]);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

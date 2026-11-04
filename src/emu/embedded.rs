@@ -11,12 +11,13 @@
 //! animation's goes, so the handover doesn't show.
 
 use crate::emu::cheevos;
-use crate::emu::controls::Controls;
+use crate::emu::controls::{Chord, Controls};
 use crate::emu::crop::Crop;
 use crate::emu::kitty;
 use crate::emu::libretro::{Core, Frame};
 use crate::emu::notice::{self, Toast};
-use crate::emu::runner::Shared;
+use crate::emu::runner::{Shared, StateAsk};
+use crate::emu::savestate::{self, Files};
 use crate::emu::screen::{self, Filter};
 use crate::emu::timing::{self, Recorder};
 use crate::emu::wireframe::{self, Beam, Model, Painter, Picture, Plan, Settings, View};
@@ -107,6 +108,23 @@ impl Intro {
     }
 }
 
+/// What a game starts with.
+pub struct Start {
+    pub game: usize,
+    pub volume: f32,
+    /// The launch animation, if there's one.
+    pub launch: Option<Launch>,
+    pub look: Appearance,
+    /// Its achievements, checked after every frame.
+    pub cheevos: Option<cheevos::Setup>,
+    /// The mouse touches the screen, where it points to the pixel if the terminal tells it in pixels,
+    /// else to the cell.
+    pub pixel_mouse: bool,
+    /// Where its save states go, and the slot it was last on.
+    pub states: Files,
+    pub slot: u8,
+}
+
 pub struct Embedded {
     pub game: usize,
     shared: Arc<Shared>,
@@ -147,25 +165,21 @@ pub struct Embedded {
     pixel_mouse: bool,
     /// Where the left mouse button is touching the game's screen, as a pixel of the core's frame.
     touch: Option<[u16; 2]>,
+    states: Files,
+    /// The save state slot it's on.
+    slot: u8,
+    /// A slot moved to and not yet remembered.
+    slot_moved: Option<u8>,
 }
 
 impl Embedded {
-    /// Starts the game, after the launch animation if there's one, looking as `look` says, and
-    /// its achievements checked with `cheevos`. The mouse touches the screen, where it points to
-    /// the pixel if the terminal tells it in pixels (`pixel_mouse`), else to the cell.
-    pub fn start(
-        game: usize,
-        core: Core,
-        volume: f32,
-        launch: Option<Launch>,
-        look: Appearance,
-        cheevos: Option<cheevos::Setup>,
-        pixel_mouse: bool,
-    ) -> Result<Embedded> {
+    /// Starts the game, after the launch animation if there's one.
+    pub fn start(core: Core, start: Start) -> Result<Embedded> {
+        let Start { game, volume, launch, look, cheevos, pixel_mouse, states, slot } = start;
         let about = format!("{} in the TUI, filter {}, corners {}", core.name, look.filter.name(), look.corners);
         // With the animation, the game's cells are placed before it draws, in the shape it says.
         let shape = if launch.is_some() { core.display_size() } else { (0.0, 0.0) };
-        let (shared, thread) = Shared::start(core, volume, launch.is_some(), cheevos)?;
+        let (shared, thread) = Shared::start(core, volume, launch.is_some(), cheevos, Some(states.clone()))?;
         // Key releases are needed to know when a button is let go.
         let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
         execute!(std::io::stdout(), PushKeyboardEnhancementFlags(flags))?;
@@ -205,6 +219,9 @@ impl Embedded {
             shown: [0; 4],
             pixel_mouse,
             touch: None,
+            states,
+            slot,
+            slot_moved: None,
         })
     }
 
@@ -216,9 +233,55 @@ impl Embedded {
         match &mut self.intro {
             Some(intro) if k.kind == KeyEventKind::Press => intro.skip(),
             Some(_) => {}
-            None => self.controls.key(k),
+            None => match (k.code, k.kind) {
+                // RetroArch's keys, and F3 next to them.
+                (KeyCode::F(2), KeyEventKind::Press) => self.chord(Chord::SaveState),
+                (KeyCode::F(3), KeyEventKind::Press) => self.chord(Chord::UndoLoad),
+                (KeyCode::F(4), KeyEventKind::Press) => self.chord(Chord::LoadState),
+                (KeyCode::F(6), KeyEventKind::Press) => self.chord(Chord::PreviousSlot),
+                (KeyCode::F(7), KeyEventKind::Press) => self.chord(Chord::NextSlot),
+                (KeyCode::F(_), _) => {}
+                _ => self.controls.key(k),
+            },
         }
         true
+    }
+
+    /// Does what a button pressed with Select, or a function key, is for.
+    fn chord(&mut self, chord: Chord) {
+        let ask = match chord {
+            Chord::SaveState => StateAsk::Save(self.slot),
+            Chord::LoadState => StateAsk::Load(self.slot),
+            Chord::UndoLoad => StateAsk::Undo,
+            Chord::NextSlot => return self.move_slot(1),
+            Chord::PreviousSlot => return self.move_slot(savestate::SLOTS - 1),
+        };
+        self.shared.ask_state(ask);
+    }
+
+    fn move_slot(&mut self, by: u8) {
+        self.slot = (self.slot + by) % savestate::SLOTS;
+        self.slot_moved = Some(self.slot);
+        let age = std::fs::metadata(self.states.slot(self.slot))
+            .and_then(|m| m.modified())
+            .ok()
+            .map(|saved| crate::text::ago(saved.elapsed().map_or(0, |d| d.as_secs())));
+        let slot = self.slot;
+        self.shared.say_about_states(Ok(match age {
+            Some(age) => format!("Slot {slot}: saved {age}"),
+            None => format!("Slot {slot}: empty"),
+        }));
+    }
+
+    /// A slot moved to since the last time, to remember for the game.
+    pub fn take_slot_moved(&mut self) -> Option<u8> {
+        self.slot_moved.take()
+    }
+
+    /// What's come of the game's save states since the last time: something to say, or something
+    /// that went wrong.
+    pub fn state_news(&self) -> Vec<Result<String, String>> {
+        self.shared.take_state_news()
     }
 
     /// Takes the mouse: the left button touches the game's screen where it's pressed, and goes on
@@ -258,10 +321,16 @@ impl Embedded {
     pub fn read_pads(&mut self) -> bool {
         let Some(mut players) = self.controls.input() else { return false };
         players[0].touch = self.touch;
+        let chords = self.controls.take_chords();
         match &mut self.intro {
             Some(intro) if players.iter().any(|p| p.buttons != 0) => intro.skip(),
             Some(_) => {}
-            None => self.shared.set_input(players),
+            None => {
+                self.shared.set_input(players);
+                for chord in chords {
+                    self.chord(chord);
+                }
+            }
         }
         true
     }

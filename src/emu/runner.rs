@@ -7,6 +7,7 @@ use crate::emu::audio;
 use crate::emu::cheevos::{self, Event as CheevoEvent};
 use crate::emu::libretro::{Core, Dirs, Frame, Players};
 use crate::emu::remap::{Controls, Remap};
+use crate::emu::savestate::{self, Files, State};
 use crate::emu::timing;
 use crate::emucfg::SharedSaves;
 use crate::library::Library;
@@ -158,6 +159,21 @@ pub struct Shared {
     cheevos: Mutex<Vec<CheevoEvent>>,
     /// When each frame was made, if `ROMI_FRAME_LOG` asks (see `timing`).
     made: Option<Mutex<Vec<timing::Made>>>,
+    /// What's been asked of save states, for between frames.
+    state_ask: Mutex<Option<StateAsk>>,
+    /// What's come of it, not yet shown: something to say, or something that went wrong.
+    state_news: Mutex<Vec<Result<String, String>>>,
+    /// The thread writing the last state saved, which outlives its frame and may be yet to finish.
+    state_writer: Mutex<Option<JoinHandle<()>>>,
+}
+
+/// Something asked of a game's save states.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum StateAsk {
+    Save(u8),
+    Load(u8),
+    /// Goes back to just before the last load, or forward again after an undo.
+    Undo,
 }
 
 const NO_SOUND: u32 = u32::MAX;
@@ -191,6 +207,7 @@ impl Shared {
         volume: f32,
         paused: bool,
         cheevos: Option<cheevos::Setup>,
+        states: Option<Files>,
     ) -> Result<(Arc<Shared>, JoinHandle<()>)> {
         let shared = Arc::new(Shared {
             latest: Mutex::new((0, Frame::default())),
@@ -205,10 +222,13 @@ impl Shared {
             save_error: Mutex::new(None),
             cheevos: Mutex::new(Vec::new()),
             made: timing::path().map(|_| Mutex::new(Vec::new())),
+            state_ask: Mutex::new(None),
+            state_news: Mutex::new(Vec::new()),
+            state_writer: Mutex::new(None),
         });
         let thread = {
             let shared = shared.clone();
-            std::thread::Builder::new().name("core".into()).spawn(move || run_core(core, cheevos, &shared))?
+            std::thread::Builder::new().name("core".into()).spawn(move || run_core(core, cheevos, states, &shared))?
         };
         Ok((shared, thread))
     }
@@ -226,13 +246,38 @@ impl Shared {
         let deadline = Instant::now() + STOP_WAIT;
         while !thread.is_finished() {
             if Instant::now() >= deadline {
+                self.finish_writing_state();
                 LEFT_RUNNING.store(true, Ordering::SeqCst);
                 return false;
             }
             std::thread::sleep(Duration::from_millis(10));
         }
         let _ = thread.join();
+        self.finish_writing_state();
         true
+    }
+
+    /// Asks for something of the game's save states, in place of anything still waiting.
+    pub fn ask_state(&self, ask: StateAsk) {
+        *lock(&self.state_ask) = Some(ask);
+    }
+
+    /// Passes something on with the news of the game's save states.
+    pub fn say_about_states(&self, news: Result<String, String>) {
+        lock(&self.state_news).push(news);
+    }
+
+    /// What's come of the game's save states since the last time, oldest first.
+    pub fn take_state_news(&self) -> Vec<Result<String, String>> {
+        std::mem::take(&mut *lock(&self.state_news))
+    }
+
+    /// Waits for the state being written, if there is one.
+    fn finish_writing_state(&self) {
+        let writer = lock(&self.state_writer).take();
+        if let Some(writer) = writer {
+            let _ = writer.join();
+        }
     }
 
     pub fn resume(&self) {
@@ -321,7 +366,7 @@ fn start_cheevos(setup: cheevos::Setup, shared: &Shared) -> Option<cheevos::Clie
 
 /// Runs the core until told to quit, playing its sound, at the pace its sound sets (or at its
 /// frame rate, without sound).
-fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
+fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, states: Option<Files>, shared: &Arc<Shared>) {
     // The stream lives on this thread, so it's opened here.
     let mut sound = audio::Output::open(core.sample_rate, core.fps)
         .inspect_err(|e| *lock(&shared.sound_error) = Some(format!("{e:#}")))
@@ -334,6 +379,8 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
     let mut warm = WarmUp::default();
     let mut saved = Instant::now();
     let mut cheevos = cheevos.and_then(|setup| start_cheevos(setup, shared));
+    let mut states = states.map(|files| GameStates { files, undo: None });
+    let mut frames_run = 0;
     let tell = |client: &cheevos::Client| {
         let events = client.take_events();
         if !events.is_empty() {
@@ -354,6 +401,7 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
             if !warm.done() {
                 let started = Instant::now();
                 core.run_frame(Players::default());
+                frames_run += 1;
                 warm.ran(started.elapsed(), period);
                 continue;
             }
@@ -365,9 +413,27 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
             next = Instant::now();
             continue;
         }
+        let ask = lock(&shared.state_ask).take();
+        if let (Some(ask), Some(states)) = (ask, &mut states) {
+            let news = match frames_run < crate::emu::libretro::FRAMES_BEFORE_STATES {
+                true => Err("The game has only just started, so try that again in a moment".to_string()),
+                false => states.answer(ask, &mut core, cheevos.as_mut(), shared),
+            };
+            let loaded = news.is_ok() && !matches!(ask, StateAsk::Save(_));
+            // Saving says so once it's written.
+            if !matches!((&news, ask), (Ok(_), StateAsk::Save(_))) {
+                shared.say_about_states(news);
+            }
+            if loaded {
+                // The time that took isn't made up for with a burst of fast frames.
+                next = Instant::now();
+                hold = Duration::ZERO;
+            }
+        }
         let started = Instant::now();
         let input = *lock(&shared.input);
         core.run_frame(input);
+        frames_run += 1;
         let ran = started.elapsed();
         if let Some(client) = &mut cheevos {
             client.frame(&core);
@@ -412,6 +478,130 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, shared: &Shared) {
     save(&mut core);
     // The client reads the core's memory, so it goes first.
     drop(cheevos);
+}
+
+/// A game's save states, on the thread running its core.
+struct GameStates {
+    files: Files,
+    /// What loading last replaced, for going back to.
+    undo: Option<State>,
+}
+
+impl GameStates {
+    /// Does what was asked, and says what to tell the player.
+    fn answer(
+        &mut self,
+        ask: StateAsk,
+        core: &mut Core,
+        mut cheevos: Option<&mut cheevos::Client>,
+        shared: &Arc<Shared>,
+    ) -> Result<String, String> {
+        let done = match ask {
+            StateAsk::Save(slot) => self.save(slot, core, cheevos, shared).map(|()| String::new()),
+            StateAsk::Load(slot) => {
+                // Anything still being written to it should be there to read.
+                shared.finish_writing_state();
+                self.load(slot, core, cheevos.as_deref_mut(), shared)
+            }
+            StateAsk::Undo => match self.undo.take() {
+                Some(state) => self.swap_in(state, core, cheevos, shared).map(|kept| match kept {
+                    Some(note) => format!("Went back to before loading{note}"),
+                    None => "Went back to before loading".to_string(),
+                }),
+                None => Ok("There's no load to undo".to_string()),
+            },
+        };
+        done.map_err(|e| format!("{e:#}"))
+    }
+
+    /// Takes a state and writes it on another thread, as it can take a second, and says when it's
+    /// done. The state is whole in its file or not there, so stopping halfway loses nothing else.
+    fn save(
+        &self,
+        slot: u8,
+        core: &mut Core,
+        cheevos: Option<&mut cheevos::Client>,
+        shared: &Arc<Shared>,
+    ) -> Result<()> {
+        let mut writer = lock(&shared.state_writer);
+        if writer.as_ref().is_some_and(|w| !w.is_finished()) {
+            anyhow::bail!("Still saving the last state");
+        }
+        let state = State { core: core.save_state()?, achievements: cheevos.and_then(|c| c.progress()) };
+        let path = self.files.slot(slot);
+        let told = shared.clone();
+        *writer = Some(std::thread::Builder::new().name("state".into()).spawn(move || {
+            let written = savestate::encode(&state).and_then(|file| savestate::pack(&file)).and_then(|file| {
+                crate::files::write_atomic(&path, &file).with_context(|| format!("can't write {}", path.display()))
+            });
+            told.say_about_states(match written {
+                Ok(()) => Ok(format!("Saved a state to slot {slot}")),
+                Err(e) => Err(format!("{e:#}")),
+            });
+        })?);
+        Ok(())
+    }
+
+    fn load(
+        &mut self,
+        slot: u8,
+        core: &mut Core,
+        cheevos: Option<&mut cheevos::Client>,
+        shared: &Shared,
+    ) -> Result<String> {
+        let path = self.files.slot(slot);
+        let file = match std::fs::read(&path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(format!("Slot {slot} is empty")),
+            Err(e) => return Err(e).with_context(|| format!("can't read {}", path.display())),
+        };
+        let state = savestate::decode(file).with_context(|| format!("can't load slot {slot}"))?;
+        let note = self.swap_in(state, core, cheevos, shared)?;
+        Ok(format!("Loaded slot {slot}{}", note.unwrap_or_default()))
+    }
+
+    /// Replaces the game as it is with `state`, keeping what it replaced to undo. If that took the
+    /// game's in-game save back, a copy of the save is kept first, and it says where.
+    fn swap_in(
+        &mut self,
+        state: State,
+        core: &mut Core,
+        mut cheevos: Option<&mut cheevos::Client>,
+        shared: &Shared,
+    ) -> Result<Option<String>> {
+        // A core that won't make a state now can still load one; there's only nothing to undo.
+        let before = core
+            .save_state()
+            .ok()
+            .map(|core| State { core, achievements: cheevos.as_deref_mut().and_then(|c| c.progress()) });
+        // What the game saved in the last second counts as saved.
+        if let Err(e) = core.save() {
+            *lock(&shared.save_error) = Some(format!("{e:#}"));
+        }
+        if let Err(e) = core.load_state(&state.core) {
+            // A core may have got partway, so the game goes back to where it was.
+            if let Some(before) = &before {
+                let _ = core.load_state(&before.core);
+            }
+            return Err(e);
+        }
+        if let Some(client) = cheevos {
+            client.set_progress(state.achievements.as_deref());
+        }
+        self.undo = before;
+        if !core.save_changed() {
+            return Ok(None);
+        }
+        let Some(save) = core.save_path() else { return Ok(None) };
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        match self.files.keep_save(save, now) {
+            Ok(Some(kept)) => {
+                Ok(Some(format!(", which also took back the game's save (copy in {})", crate::config::tilde(&kept))))
+            }
+            Ok(None) => Ok(None),
+            Err(e) => Ok(Some(format!(", which also took back the game's save, and no copy could be made: {e:#}"))),
+        }
+    }
 }
 
 /// A core's first frames, run while it waits behind the launch animation, muted and unseen. Some

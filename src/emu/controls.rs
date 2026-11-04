@@ -12,6 +12,37 @@ use std::time::{Duration, Instant};
 /// Holding Select and Start together this long quits.
 const QUIT_HOLD: Duration = Duration::from_secs(1);
 
+/// A button pressed while Select is held, on any controller or the keyboard. These buttons don't
+/// reach the game while Select is held, though Select does, as romi can't know it's coming.
+pub const CHORDS: [(&str, Chord); 5] = [
+    ("r", Chord::SaveState),
+    ("l", Chord::LoadState),
+    ("down", Chord::UndoLoad),
+    ("right", Chord::NextSlot),
+    ("left", Chord::PreviousSlot),
+];
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Chord {
+    SaveState,
+    LoadState,
+    UndoLoad,
+    NextSlot,
+    PreviousSlot,
+}
+
+/// Takes the chords' buttons out of what players hold with Select, giving back what they held.
+fn held_chords(players: &mut Players) -> u16 {
+    let select = button("select").unwrap();
+    let chords = CHORDS.iter().fold(0, |bits, (name, _)| bits | button(name).unwrap());
+    let mut held = 0;
+    for player in players.iter_mut().filter(|p| p.buttons & select != 0) {
+        held |= player.buttons & chords;
+        player.buttons &= !chords;
+    }
+    held
+}
+
 pub struct Controls {
     gilrs: Option<Gilrs>,
     /// The controllers, player 1's first, worked out again when one comes or goes.
@@ -21,6 +52,10 @@ pub struct Controls {
     /// Keys held down. Releases only arrive in terminals with the Kitty keyboard protocol.
     keys: HashSet<KeyCode>,
     quit_held_since: Option<Instant>,
+    /// The chords' buttons held as of the last look, so holding one does it once.
+    chords_held: u16,
+    /// Chords pressed and not yet taken.
+    chords: Vec<Chord>,
 }
 
 impl Controls {
@@ -28,7 +63,15 @@ impl Controls {
         let gilrs = Gilrs::new().ok();
         let saved = crate::state::State::load().players;
         let order = gilrs.as_ref().map(|g| player_order(g, &saved)).unwrap_or_default();
-        Controls { gilrs, order, saved, keys: HashSet::new(), quit_held_since: None }
+        Controls {
+            gilrs,
+            order,
+            saved,
+            keys: HashSet::new(),
+            quit_held_since: None,
+            chords_held: 0,
+            chords: Vec::new(),
+        }
     }
 
     /// Notes a key going down or coming up.
@@ -38,6 +81,11 @@ impl Controls {
         } else {
             self.keys.insert(k.code);
         }
+    }
+
+    /// The chords pressed since the last time.
+    pub fn take_chords(&mut self) -> Vec<Chord> {
+        std::mem::take(&mut self.chords)
     }
 
     /// What each player holds, or None once one has held Select and Start together long enough
@@ -60,6 +108,10 @@ impl Controls {
                 merge(player, pad_input(&gilrs.gamepad(id)));
             }
         }
+        let held = held_chords(&mut players);
+        let pressed = held & !self.chords_held;
+        self.chords_held = held;
+        self.chords.extend(CHORDS.iter().filter(|(name, _)| pressed & button(name).unwrap() != 0).map(|(_, c)| *c));
         let quit = button("select").unwrap() | button("start").unwrap();
         if players.iter().any(|p| p.buttons & quit == quit) {
             if self.quit_held_since.get_or_insert_with(Instant::now).elapsed() >= QUIT_HOLD {
@@ -199,5 +251,21 @@ fn pad_input(pad: &gilrs::Gamepad) -> Input {
         sticks: [stick(Axis::LeftStickX, Axis::LeftStickY), stick(Axis::RightStickX, Axis::RightStickY)],
         triggers: [trigger(Button::LeftTrigger2), trigger(Button::RightTrigger2)],
         touch: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chords_buttons_stay_out_of_the_game_only_while_select_is_held() {
+        let bits = |names: &[&str]| names.iter().fold(0, |b, n| b | button(n).unwrap());
+        let mut players = Players::default();
+        players[0].buttons = bits(&["select", "r", "left", "a"]);
+        players[1].buttons = bits(&["r", "left"]);
+        assert_eq!(held_chords(&mut players), bits(&["r", "left"]));
+        assert_eq!(players[0].buttons, bits(&["select", "a"]));
+        assert_eq!(players[1].buttons, bits(&["r", "left"]), "player 2 isn't holding Select");
     }
 }

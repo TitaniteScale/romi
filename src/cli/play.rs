@@ -255,6 +255,8 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
     let mut earned = Vec::new();
     let mut waited = Duration::ZERO;
     let loaded = load_state.map(|path| start_from_state(&mut emu, path)).transpose()?;
+    let (loaded, mut progress) = loaded.unzip();
+    let progress_from_state = progress.is_some();
     let started = Instant::now();
     for n in 0..frames {
         emu.run_frame(script.players_at(n));
@@ -263,6 +265,11 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
             earned.extend(client.take_events());
             if n == 0 {
                 waited = wait_for_achievements(client, &mut earned);
+                // They couldn't take it until now, with the game's achievements loaded.
+                if progress_from_state {
+                    client.set_progress(progress.take().flatten().as_deref());
+                    earned.extend(client.take_events());
+                }
             }
         }
         if let Some(sound) = &mut sound {
@@ -279,7 +286,8 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
     let sound_len = sound.map(|s| s.finish()).transpose()?;
     emu.finish_frame();
     let frame = emu.frame();
-    let saved = save_state.map(|path| save_to_state(&mut emu, path)).transpose()?;
+    let achievements = cheevos.as_mut().and_then(|client| client.progress());
+    let saved = save_state.map(|path| save_to_state(&mut emu, path, achievements)).transpose()?;
     if let Some(path) = screenshot {
         let Some(img) = image::RgbImage::from_raw(frame.width, frame.height, frame.rgb) else {
             bail!("{} hasn't drawn anything after {frames} frames", emu.name);
@@ -337,9 +345,9 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
     Ok(())
 }
 
-/// Loads the state in the file at `path`, once the core can take one, and says how long the core
-/// took over it.
-fn start_from_state(emu: &mut crate::emu::libretro::Core, path: &Path) -> Result<Duration> {
+/// Loads the state in the file at `path`, once the core can take one, and gives back how long the
+/// core took over it and how far along the achievements were, if it says.
+fn start_from_state(emu: &mut crate::emu::libretro::Core, path: &Path) -> Result<(Duration, Option<Vec<u8>>)> {
     let file = std::fs::read(path).with_context(|| format!("can't read {}", path.display()))?;
     let state = crate::emu::savestate::decode(file).with_context(|| format!("can't load {}", path.display()))?;
     for _ in 0..crate::emu::libretro::FRAMES_BEFORE_STATES {
@@ -347,15 +355,19 @@ fn start_from_state(emu: &mut crate::emu::libretro::Core, path: &Path) -> Result
     }
     let started = Instant::now();
     emu.load_state(&state.core).with_context(|| format!("can't load {}", path.display()))?;
-    Ok(started.elapsed())
+    Ok((started.elapsed(), state.achievements))
 }
 
 /// Saves a state to the file at `path`, and says how long the core took over it and how big it is.
-fn save_to_state(emu: &mut crate::emu::libretro::Core, path: &Path) -> Result<(Duration, usize)> {
+fn save_to_state(
+    emu: &mut crate::emu::libretro::Core,
+    path: &Path,
+    achievements: Option<Vec<u8>>,
+) -> Result<(Duration, usize)> {
     let started = Instant::now();
     let core = emu.save_state()?;
     let took = started.elapsed();
-    let file = crate::emu::savestate::encode(&crate::emu::savestate::State { core, achievements: None })?;
+    let file = crate::emu::savestate::encode(&crate::emu::savestate::State { core, achievements })?;
     crate::files::write_atomic(path, &file).with_context(|| format!("can't write {}", path.display()))?;
     Ok((took, file.len()))
 }

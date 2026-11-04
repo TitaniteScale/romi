@@ -71,6 +71,7 @@ A fix to the recipe alone, with no new romi release, bumps `pkgrel` instead.
 | `src/steam.rs`           | installed Steam games from `libraryfolders.vdf` + app manifests                    |
 | `src/launch.rs`          | placeholder expansion, spawning, sanity checks for `romi check`                    |
 | `src/gamepad.rs`         | controller thread: buttons → actions, hold-to-repeat                               |
+| `src/emu/savestate.rs`   | save state files, in RetroArch's format, and where a game's go                     |
 | `src/state.rs`           | favorites, history, play time                                                      |
 | `src/art.rs`             | box art lookup and `romi scrape` (libretro thumbnails, Steam CDN)                  |
 | `src/meta.rs`            | game info: RetroArch databases, Skyscraper, checksums, genres                      |

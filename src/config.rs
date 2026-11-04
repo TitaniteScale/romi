@@ -639,6 +639,11 @@ pub fn cache_dir() -> PathBuf {
     dirs::cache_dir().unwrap_or_else(|| home().join(".cache")).join("romi")
 }
 
+/// Where romi keeps what you'd miss if it were lost, and which isn't settings: save states.
+pub fn data_dir() -> PathBuf {
+    dirs::data_dir().unwrap_or_else(|| home().join(".local/share")).join("romi")
+}
+
 pub fn state_dir() -> PathBuf {
     dirs::state_dir().unwrap_or_else(|| home().join(".local/state")).join("romi")
 }

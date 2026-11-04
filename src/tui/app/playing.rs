@@ -85,11 +85,21 @@ impl App {
         let controls = crate::emu::runner::controls_for(&self.cfg, &self.lib, g);
         let core_options = crate::emu::runner::core_options_for(&self.cfg, &self.lib, g);
         let runs_with = Some(self.lib.games[g].launch.command.as_str());
+        let states = crate::emu::savestate::Files::new(&core, &rom);
+        let slot = self.state.state_slots.get(&self.lib.games[g].key).copied().unwrap_or(0);
+        let start = crate::emu::embedded::Start {
+            game: g,
+            volume,
+            launch,
+            look,
+            cheevos,
+            pixel_mouse: self.pixel_mouse,
+            states,
+            slot,
+        };
         let started =
             crate::emu::runner::load(&self.cfg, &core, &rom, runs_with, &controls, &core_options, self.shown_height())
-                .and_then(|core| {
-                    crate::emu::embedded::Embedded::start(g, core, volume, launch, look, cheevos, self.pixel_mouse)
-                });
+                .and_then(|core| crate::emu::embedded::Embedded::start(core, start));
         match started {
             Ok(e) => self.embedded = Some(e),
             Err(e) => self.set_status(Level::Error, format!("{}: {e:#}", self.lib.games[g].name)),
@@ -190,6 +200,7 @@ impl App {
             return self.set_status(Level::Error, format!("Stopped: {e:#}"));
         }
         let (sound_error, save_error) = (embedded.sound_error(), embedded.save_error());
+        let (state_news, slot_moved, game) = (embedded.state_news(), embedded.take_slot_moved(), embedded.game);
         if let Some(say) = embedded.cheevo_status() {
             self.set_status(Level::Warn, say);
         }
@@ -198,6 +209,22 @@ impl App {
         }
         if let Some(e) = save_error {
             self.set_status(Level::Error, format!("Not saved: {e}"));
+        }
+        for news in state_news {
+            match news {
+                Ok(say) => self.set_status(Level::Info, say),
+                Err(say) => self.set_status(Level::Error, say),
+            }
+        }
+        if let Some(slot) = slot_moved {
+            let key = self.lib.games[game].key.clone();
+            self.state = crate::state::State::update(|s| {
+                if slot == 0 {
+                    s.state_slots.remove(&key);
+                } else {
+                    s.state_slots.insert(key, slot);
+                }
+            });
         }
     }
 

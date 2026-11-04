@@ -1062,6 +1062,17 @@ impl Core {
         Ok(true)
     }
 
+    /// Where the game's in-game save is kept, if it is.
+    pub fn save_path(&self) -> Option<&Path> {
+        self.save_file.as_deref()
+    }
+
+    /// Whether the game's save RAM is no longer what's in its save file.
+    pub fn save_changed(&mut self) -> bool {
+        let ram = self.api.save_ram();
+        !ram.is_empty() && *ram != *self.saved
+    }
+
     /// Runs one frame with what each player holds, before it's remapped.
     pub fn run_frame(&mut self, players: Players) {
         let max_size = {

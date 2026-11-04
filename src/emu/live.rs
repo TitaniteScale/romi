@@ -76,7 +76,7 @@ pub fn play(core: Core, name: &str, volume: f32) -> Result<()> {
     crate::emu::kitty::sweep_stale_shm();
     let fps = core.fps;
     let core_name = core.name.clone();
-    let (shared, emu) = Shared::start(core, volume, false, None)?;
+    let (shared, emu) = Shared::start(core, volume, false, None, None)?;
     let mut view = View::new(name, &core_name, fps);
     let result = Screen::enter().and_then(|_screen| view.run(&shared));
     let stopped = shared.stop_and_wait(emu);

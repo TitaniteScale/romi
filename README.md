@@ -58,11 +58,13 @@ While you play:
   softcore, and on GameCube and Wii an unlock hasn't been seen live yet.
 - **Sharp 3D:** GPU cores draw about as big as they're shown, not at the console's 640×480.
 - **Screen filters:** scanlines, CRT and LCD.
+- **Save states:** ten slots for each game, with Select+R and Select+L on a controller or F2 and F4
+  on a keyboard.
 - **Controls** you can change per game or per system from its menu, with a controller for each
   player.
 
 **A** plays a game in romi when it can, and **Play with** in its menu (`o`) starts its emulator
-instead; Options → A plays turns that round. There are no save states or rewind yet. More in
+instead; Options → A plays turns that round. There's no rewind yet. More in
 [Play in romi](docs/tui.md#play-in-romi) and [achievements](docs/achievements.md).
 
 **PS2** runs on LRPS2, PCSX2's libretro core, which [takes a little setup](docs/ps2.md). romi falls back

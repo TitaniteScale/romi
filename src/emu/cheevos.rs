@@ -79,6 +79,9 @@ unsafe extern "C" {
     ) -> *const c_char;
     fn romi_rc_user_agent_clause(client: *mut RcClient, buffer: *mut c_char, size: usize) -> usize;
     fn rc_client_do_frame(client: *mut RcClient);
+    fn rc_client_progress_size(client: *mut RcClient) -> usize;
+    fn rc_client_serialize_progress_sized(client: *mut RcClient, buffer: *mut u8, size: usize) -> c_int;
+    fn rc_client_deserialize_progress_sized(client: *mut RcClient, data: *const u8, size: usize) -> c_int;
     fn rc_client_idle(client: *mut RcClient);
     fn rc_client_has_rich_presence(client: *mut RcClient) -> c_int;
     fn rc_client_get_rich_presence_message(client: *mut RcClient, buffer: *mut c_char, size: usize) -> usize;
@@ -454,6 +457,27 @@ impl Client {
         unsafe { rc_client_do_frame(self.raw) };
         self.after();
         self.read_presence();
+    }
+
+    /// How far along the achievements are, to keep with a save state. None before they've loaded.
+    pub fn progress(&mut self) -> Option<Vec<u8>> {
+        // SAFETY: the client is alive, this is the thread running the core, and rcheevos writes no
+        // more than the size it's given.
+        unsafe {
+            let size = rc_client_progress_size(self.raw);
+            let mut data = vec![0; size];
+            (size > 0 && rc_client_serialize_progress_sized(self.raw, data.as_mut_ptr(), size) == RC_OK).then_some(data)
+        }
+    }
+
+    /// Puts the achievements back to where they were when a state was made, or starts them over for
+    /// a state that doesn't say, since what they've counted so far no longer happened.
+    pub fn set_progress(&mut self, progress: Option<&[u8]>) {
+        let (data, size) = progress.map_or((std::ptr::null(), 0), |p| (p.as_ptr(), p.len()));
+        // SAFETY: as in `progress`; rcheevos reads no more than the size it's given, and takes a
+        // null pointer to mean start over. It does nothing before the game has loaded.
+        unsafe { rc_client_deserialize_progress_sized(self.raw, data, size) };
+        self.after();
     }
 
     /// Tells what the game's rich presence says, when it has changed since last time.
