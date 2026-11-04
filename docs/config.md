@@ -169,8 +169,8 @@ parentheses.
 ## BIOS checks
 
 List a system's required files under `"bios"`, either one file or a list where any one will do.
-Relative names are looked up in `bios_dirs` (default `~/.config/retroarch/system`) and in the
-system's ROM folder. Absolute paths and `*` wildcards also work, e.g.
+Relative names are looked up in `bios_dirs` (`~/.config/retroarch/system` unless your config says
+otherwise; see [where things go](setup.md#where-things-go)) and in the system's ROM folder. Absolute paths and `*` wildcards also work, e.g.
 `"~/.config/PCSX2/bios/*.bin"`. Missing ones show as `!` in `romi check` and in the TUI.
 
 ## Names

@@ -32,11 +32,28 @@ systems you've set up in `config.json` take priority. The one exception: if your
 with `--roms` somewhere other than `roms_dir` get full paths instead, leaving `roms_dir` as it is.
 `--print` shows the result without writing; `--yes` skips the question.
 
+## Where things go
+
+romi needs somewhere for BIOS files, in-game saves and downloaded cores. When init makes a new config,
+it picks once, and writes the answer in the config, so installing RetroArch later doesn't move them:
+
+| | RetroArch installed, or `~/.config/retroarch` there | Neither |
+|---|---|---|
+| BIOS files, and what cores keep there | `~/.config/retroarch/system` | `~/.local/share/romi/system` |
+| In-game saves | RetroArch's save folder, shared with it | `~/.local/share/romi/saves/<core>` |
+| Downloaded cores | `~/.config/retroarch/cores` | `~/.local/share/romi/cores` |
+
+Save states always go in `~/.local/share/romi/states`, so romi never writes over RetroArch's. Cores
+installed by your distro are found wherever they are, and `~/.local/share/romi/cores` is always looked
+in first. A config that's already there is never changed: to move yours, set `"bios_dirs"` and
+`"saves_dir"` and move the files. A core gets one system folder, the first of `"bios_dirs"` that
+exists, so BIOS files in another folder won't reach it.
+
 ## romi check
 
 `romi check` says which terminal it's in and whether games can show in it (Ghostty and kitty), how
-many libretro cores it found and where, or everywhere it looked if it found none, and whether LRPS2
-is missing its BIOS.
+many libretro cores it found and where, or everywhere it looked if it found none, the folders it uses
+for BIOS files, saves and states, and whether LRPS2 is missing its BIOS.
 
 It uses the same knowledge as init to suggest fixes: a system whose emulator is gone but which
 something else installed can run (with the command to use), folders with games that aren't in your

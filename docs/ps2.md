@@ -22,21 +22,23 @@ You don't need RetroArch for this. On Arch, it's in the AUR, and it builds from 
 yay -S libretro-lrps2-git
 ```
 
-Anywhere else, put libretro's nightly in the cores folder:
+Anywhere else, put libretro's nightly in your cores folder (`~/.config/retroarch/cores` here; without
+RetroArch, `~/.local/share/romi/cores`):
 
 ```
 curl -LO https://buildbot.libretro.com/nightly/linux/x86_64/latest/pcsx2_libretro.so.zip
-unzip pcsx2_libretro.so.zip -d ~/.config/retroarch/cores
+unzip pcsx2_libretro.so.zip -d ~/.local/share/romi/cores
 ```
 
-Then link your BIOS where LRPS2 looks for it. `romi check` says if it isn't there:
+Then link your BIOS where LRPS2 looks for it: `pcsx2/bios` in your BIOS folder, which `romi check`
+shows, and says if it isn't there. Without RetroArch:
 
 ```
-mkdir -p ~/.config/retroarch/system/pcsx2/bios
-ln -s ~/.config/PCSX2/bios/*.bin ~/.config/retroarch/system/pcsx2/bios/
+mkdir -p ~/.local/share/romi/system/pcsx2/bios
+ln -s ~/.config/PCSX2/bios/*.bin ~/.local/share/romi/system/pcsx2/bios/
 ```
 
-If `"vars"` or `"bios_dirs"` in your config point elsewhere, use those folders instead. With no BIOS,
+With RetroArch, that's `~/.config/retroarch/system/pcsx2/bios`. With no BIOS,
 romi's status bar shows LRPS2's own message: `Could not find any valid PS2 BIOS File`. Neither is a
 fixed release, and LRPS2's graphics code changes often, so a new one can behave differently.
 
@@ -126,7 +128,7 @@ Each emulator keeps its own memory cards, so a save made in one doesn't show up 
 
 | | Memory cards |
 |---|---|
-| LRPS2 | `~/.config/retroarch/system/pcsx2/memcards` |
+| LRPS2 | `pcsx2/memcards` in your BIOS folder |
 | Play! | `~/.local/share/Play Data Files/vfs` |
 | PCSX2 | `~/.config/PCSX2/memcards` |
 

@@ -47,7 +47,10 @@ pub fn load(
     });
     let saves = match shared {
         Some(dir) => Some(dir?),
-        None => name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom)),
+        None => match &cfg.saves_dir {
+            Some(dir) => Some(crate::config::expand_path(dir).join(name.as_deref().unwrap_or("core"))),
+            None => name.as_ref().and_then(|name| crate::emucfg::retroarch_save_dir(name, rom)),
+        },
     };
     if let Some(dir) = &saves {
         std::fs::create_dir_all(dir).with_context(|| format!("can't make {}", dir.display()))?;

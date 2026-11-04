@@ -280,3 +280,14 @@ def test_select_and_a_shoulder_button_save_and_load_and_dont_reach_the_game(star
     pad.up("DOWN")
     pad.up("SELECT")
     game.says("Went back to before loading")
+
+
+def test_a_config_can_keep_in_game_saves_out_of_retroarchs_folder(start, sandbox):
+    game = Game(start, sandbox)
+    config = json.loads(sandbox.config_path.read_text())
+    config["saves_dir"] = "~/my-saves"
+    sandbox.write_config(config)
+    game.play()
+    save = sandbox.home / "my-saves/Blank/Pocket Lantern (USA).srm"
+    game.romi.wait_for(save.exists, timeout=10)
+    assert not (sandbox.home / ".config/retroarch").exists()

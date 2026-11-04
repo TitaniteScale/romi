@@ -2,6 +2,7 @@
 
 import json
 import re
+import shutil
 import subprocess
 import types
 
@@ -281,6 +282,69 @@ def test_other_names_for_rom_folders_on_the_built_in_list(machine):
     assert found["atarilynx"]["dir"] == "lynx"
 
 
+def test_a_new_config_without_retroarch_keeps_everything_in_romis_folder(machine):
+    fresh(machine)
+    no_retroarch(machine)
+    shutil.rmtree(machine.home / ".config/retroarch", ignore_errors=True)
+    out = romi(machine, "init", "--no-esde", "--yes")
+    assert out.returncode == 0, out.stderr
+    assert "BIOS files go in ~/.local/share/romi/system, and downloaded cores in ~/.local/share/romi/cores" in out.stdout
+    own = machine.home / ".local/share/romi"
+    assert all((own / name).is_dir() for name in ["system", "saves", "cores"])
+    config = jsonc(machine.config_path.read_text())
+    assert config["bios_dirs"] == ["~/.local/share/romi/system"]
+    assert config["saves_dir"] == "~/.local/share/romi/saves"
+    assert not (machine.home / ".config/retroarch").exists()
+
+    # A core put there is found, as the first place to look.
+    (own / "cores/mgba_libretro.so").touch()
+    out = romi(machine, "init", "--no-esde", "--yes")
+    assert out.returncode == 0, out.stderr
+    assert jsonc((machine.config_path.parent / "init.jsonc").read_text())["vars"]["cores"] == "~/.local/share/romi/cores"
+    shown = check(machine)
+    assert "cores     1 in ~/.local/share/romi/cores" in shown
+    assert "bios      ~/.local/share/romi/system" in shown
+    assert "saves     ~/.local/share/romi/saves" in shown
+    assert "states    ~/.local/share/romi/states" in shown
+
+    # Installing RetroArch later doesn't move anything: the config says where they are.
+    (machine.home / ".config/retroarch/system").mkdir(parents=True)
+    executable(machine.root / "bin/retroarch")
+    assert romi(machine, "init", "--no-esde", "--yes").returncode == 0
+    assert jsonc(machine.config_path.read_text())["saves_dir"] == "~/.local/share/romi/saves"
+    assert "bios      ~/.local/share/romi/system" in check(machine)
+
+
+@pytest.mark.parametrize("left_behind", ["binary", "folder"])
+def test_a_new_config_with_retroarch_keeps_using_its_folders(machine, left_behind):
+    fresh(machine)
+    no_retroarch(machine)
+    shutil.rmtree(machine.home / ".config/retroarch", ignore_errors=True)
+    if left_behind == "binary":
+        executable(machine.root / "bin/retroarch")
+    else:
+        (machine.home / ".config/retroarch").mkdir(parents=True)
+    out = romi(machine, "init", "--no-esde", "--yes")
+    assert out.returncode == 0, out.stderr
+    assert ".local/share/romi" not in out.stdout
+    config = jsonc(machine.config_path.read_text())
+    assert "saves_dir" not in config and "bios_dirs" not in config
+    assert not (machine.home / ".local/share/romi").exists()
+    assert "saves     ~/.config/retroarch/saves" in check(machine)
+
+
+def test_an_existing_config_stays_as_it_is_without_retroarch(machine):
+    with_esde(machine, CONFIG)
+    no_retroarch(machine)
+    shutil.rmtree(machine.home / ".config/retroarch", ignore_errors=True)
+    before = machine.config_path.read_text()
+    romi(machine, "init", "--yes")
+    assert jsonc(machine.config_path.read_text()).get("saves_dir") is None
+    assert "bios_dirs" not in before or jsonc(before)["bios_dirs"] == jsonc(machine.config_path.read_text())["bios_dirs"]
+    assert not (machine.home / ".local/share/romi").exists()
+    assert "bios      ! ~/.config/retroarch/system doesn't exist" in check(machine)
+
+
 def test_bad_esde_folder(machine):
     out = romi(machine, "init", "--esde", str(machine.root), "--print")
     assert out.returncode == 64
@@ -361,7 +425,7 @@ def test_check_says_where_cores_are(machine):
     assert "cores     2 in ~/cores" in check(machine)
     for core in (machine.home / "cores").iterdir():
         core.unlink()
-    assert "cores     ! none found, looked in ~/nowhere, ~/cores" in check(machine)
+    assert "cores     ! none found, looked in ~/.local/share/romi/cores, ~/nowhere, ~/cores" in check(machine)
 
 
 def test_check_says_when_lrps2_has_no_bios(machine):

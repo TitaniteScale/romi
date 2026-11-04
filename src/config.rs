@@ -23,6 +23,9 @@ pub struct Config {
     pub esde_dir: Option<String>,
     /// Where relative `bios` files are looked for, in order.
     pub bios_dirs: Vec<String>,
+    /// Where games played in romi keep their in-game saves, in a folder for each core. Without it,
+    /// they go where RetroArch keeps them.
+    pub saves_dir: Option<String>,
     /// Extra `{placeholders}` usable in any command, cwd or env value.
     pub vars: HashMap<String, String>,
     /// Which game is selected when romi starts.
@@ -216,6 +219,7 @@ impl Default for Config {
             arcade_db: None,
             esde_dir: None,
             bios_dirs: vec!["~/.config/retroarch/system".into()],
+            saves_dir: None,
             vars: HashMap::new(),
             start_on: StartOn::default(),
             region: Region::default(),
@@ -639,7 +643,8 @@ pub fn cache_dir() -> PathBuf {
     dirs::cache_dir().unwrap_or_else(|| home().join(".cache")).join("romi")
 }
 
-/// Where romi keeps what you'd miss if it were lost, and which isn't settings: save states.
+/// romi's own folder, for what you'd miss if it were lost and isn't settings: save states, and BIOS
+/// files, in-game saves and downloaded cores on a machine set up without RetroArch.
 pub fn data_dir() -> PathBuf {
     dirs::data_dir().unwrap_or_else(|| home().join(".local/share")).join("romi")
 }

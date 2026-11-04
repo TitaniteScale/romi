@@ -233,10 +233,15 @@ pub(super) fn init(
             ((edited != *raw).then_some(edited), plan)
         }
         None => {
-            let plan = format!("write {} and a new {}", config::tilde(&include_path), config::tilde(cfg_path));
-            (Some(crate::init::fresh_config(&roms_dir)), plan)
+            let mut plan = format!("write {} and a new {}", config::tilde(&include_path), config::tilde(cfg_path));
+            if !crate::init::retroarch_here() {
+                let folder = config::tilde(&config::data_dir());
+                plan = format!("{plan}, and make {folder} for your BIOS files, saves and cores");
+            }
+            (Some(crate::init::fresh_config(&roms_dir, !crate::init::retroarch_here())), plan)
         }
     };
+    let own_folders = existing.is_none() && !crate::init::retroarch_here();
     if !confirm(&format!("\nThis will {plan}. Go ahead?"), yes)? {
         return Ok(());
     }
@@ -247,6 +252,7 @@ pub(super) fn init(
     if let Some(text) = main {
         std::fs::write(cfg_path, text)?;
     }
+    let folders = own_folders.then(crate::init::make_own_folders).transpose()?;
     // Catch anything that would stop romi from starting now, rather than the next time it does.
     let cfg = load_config(cfg_path)?;
     let lib = Library::load(&cfg);
@@ -255,6 +261,9 @@ pub(super) fn init(
         println!("\nDone: {done}. `romi check` shows what was found, and what could fix anything missing.");
     } else {
         println!("\nDone: {done}. Run `romi` to browse them, or `romi check` for details.");
+    }
+    if let Some(folders) = folders {
+        println!("{folders}");
     }
     Ok(())
 }
@@ -298,6 +307,27 @@ fn where_cores_are(folders: &[(std::path::PathBuf, usize)]) -> String {
     format!("! none found, looked in {}", looked.join(", "))
 }
 
+/// The system folder cores get, or where it should be if there's none.
+fn where_bios_is(cfg: &Config) -> String {
+    match (cfg.system_dir(), cfg.bios_dirs.first()) {
+        (Some(dir), _) => config::tilde(&dir),
+        (None, Some(dir)) => format!("! {dir} doesn't exist, so cores have no system folder"),
+        (None, None) => "! no \"bios_dirs\" set, so cores have no system folder".to_string(),
+    }
+}
+
+/// Where in-game saves go, for games played in romi.
+fn where_saves_are(cfg: &Config) -> String {
+    match &cfg.saves_dir {
+        Some(dir) => dir.clone(),
+        // With no game or core, the folder RetroArch sorts them into.
+        None => match crate::emucfg::retroarch_save_dir("", Path::new("")) {
+            Some(dir) => config::tilde(&dir),
+            None => "next to each game, as RetroArch has them".to_string(),
+        },
+    }
+}
+
 pub(super) fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
     let lib = Library::load_complete(cfg);
     println!("config    {}", config::tilde(cfg_path));
@@ -311,7 +341,10 @@ pub(super) fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
         ),
     }
     let core_folders = crate::init::Catalog::for_config(cfg).core_folders();
-    println!("cores     {}\n", where_cores_are(&core_folders));
+    println!("cores     {}", where_cores_are(&core_folders));
+    println!("bios      {}", where_bios_is(cfg));
+    println!("saves     {}", where_saves_are(cfg));
+    println!("states    {}\n", config::tilde(&config::data_dir().join("states")));
     let roms = config::expand_path(&cfg.roms_dir);
     let width = lib.systems.iter().map(|s| s.name.chars().count()).max().unwrap_or(0).max(24);
     let games = |n: usize| format!("{n:>4} {:<5}", text::plural(n, "game"));

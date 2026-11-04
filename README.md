@@ -48,9 +48,10 @@ opens.
 
 **You don't need RetroArch, only the core.** romi is the frontend: it loads the same `.so` files
 RetroArch does, from your distro's `libretro-*` packages (and on Arch, the AUR's), or
-[libretro's nightly builds](https://buildbot.libretro.com/nightly/linux/x86_64/latest/). Put a
-downloaded core in `~/.config/retroarch/cores`. If you do have RetroArch, romi uses its cores, BIOS
-folder, core options and button remaps, and in-game saves carry on in either one.
+[libretro's nightly builds](https://buildbot.libretro.com/nightly/linux/x86_64/latest/). Without
+RetroArch, romi keeps everything in `~/.local/share/romi`: downloaded cores in `cores`, BIOS files in
+`system`, and saves. If you do have RetroArch, romi uses its cores, BIOS folder, core options and
+button remaps, and in-game saves carry on in either one. `romi check` says which folders it's using.
 
 While you play:
 
