@@ -78,9 +78,9 @@ Built in this order, one commit each:
 - ✓ **A folder of its own**: a new config on a machine with no RetroArch (no `retroarch` on PATH and no
   `~/.config/retroarch`) keeps BIOS files, in-game saves and downloaded cores in `~/.local/share/romi`.
   It's written in the config (`"bios_dirs"`, `"saves_dir"`), so installing RetroArch later doesn't move
-  them, and a config that's already there isn't changed. A Flatpak RetroArch counts as none for now:
-  its cores are found, but its BIOS and saves folders aren't used. On a first run, the line saying
-  where BIOS files go is covered by the launcher as it opens, until you quit; `romi check` says too.
+  them, and a config that's already there isn't changed. A Flatpak RetroArch counts as none for now
+  ([#10](https://github.com/TitaniteScale/romi/issues/10)), and on a first run the launcher covers the line saying where BIOS files go
+  ([#5](https://github.com/TitaniteScale/romi/issues/5)).
 - ✓ **Never overwrite your config.** Generated systems go in `init.jsonc`, which the config includes
   (`"include"` is a general option now). Rerunning init replaces only that file. `--print` writes to
   stdout instead, and `--yes` skips the question.
@@ -225,7 +225,7 @@ It's built in steps, and the first one pays off without any of the TUI work:
      N64, Dreamcast, GameCube and Wii, some of which don't repeat exactly even without a state.
      Largest states: Wii 109 MB, GameCube 93 MB, Naomi 68 MB, PS2 51 MB; a core takes at most 58 ms
      over one. `romi run` loads a state 120 frames in, too soon for ProSystem (Atari 7800, back to its
-     boot logo) and PPSSPP (black), which both load while playing, in the picture at least. PPSSPP
+     boot logo) and PPSSPP (black), which both load while playing, in the picture at least ([#4](https://github.com/TitaniteScale/romi/issues/4)). PPSSPP
      sometimes refuses to save, which trying again gets past. PPSSPP boots a game in the background,
      and unloading while it does finishes the boot, which crashed romi once `context_destroy` had taken
      the GL context, so stopping a game early took romi down, and so did romi's own one-frame try at
@@ -236,8 +236,8 @@ It's built in steps, and the first one pays off without any of the TUI work:
      compresses them (a Wii state goes from 109 MB to 4.5 MB in about 0.2 s), on another thread so the
      game doesn't stop for it. They carry how far along achievements are. A load that takes back the
      in-game save keeps the last five copies.
-     Still to do: a way to turn the Select combos off for games that use Select as a held button;
-     a picture of each slot; loading RetroArch's states from a menu; `romi run --live`.
+     Still to do: [#6](https://github.com/TitaniteScale/romi/issues/6), a way to turn the Select combos off; [#7](https://github.com/TitaniteScale/romi/issues/7), a picture of
+     each slot; [#8](https://github.com/TitaniteScale/romi/issues/8), loading RetroArch's states from a menu; [#9](https://github.com/TitaniteScale/romi/issues/9), `romi run --live`.
 5. **Scenes**: a PNG frame with a transparent screen area. romi draws each emulated frame into it and
    sends the result as one image. Terminals without graphics get an ASCII-art frame around a half-block
    screen.
@@ -339,8 +339,7 @@ It's built in steps, and the first one pays off without any of the TUI work:
      pseudo-terminal so far, with its frames read back from shared memory, so it still needs
      watching in Ghostty and kitty.
 
-The spike settled 60 fps in Ghostty. Still to check: kitty and other terminals, and how much input
-lag there is.
+The spike settled 60 fps in Ghostty. Input lag is [#11](https://github.com/TitaniteScale/romi/issues/11), and other terminals [#12](https://github.com/TitaniteScale/romi/issues/12).
 
 ## 7. Systems that need a GPU
 
@@ -626,7 +625,7 @@ that have no libretro core. In the order they're worth doing:
      same format; LRPS2 keeps its own in `<system>/pcsx2/memcards`), as Dolphin's are; whether
      `.chd` PS2 discs for achievements (rcheevos can't open them by itself); whether Play!'s sound workaround,
      lump pacing and `glewInit` can go, if Play! stops mattering. Also seen: `romi run <path>` without
-     `--system` chose the wrong core (Genesis Plus GX for a Dreamcast `.chd`).
+     `--system` chose the wrong core ([#1](https://github.com/TitaniteScale/romi/issues/1)).
    - Still to do: Guilty Gear played on a real screen, for a while; Super Metroid in
      bsnes-hd runs at 50 fps (PAL), by the core's own rate and sound, likely its region option;
      saves (Play!'s memory cards, in RetroArch's save folder, not
@@ -638,23 +637,13 @@ that have no libretro core. In the order they're worth doing:
 
 ## Filling the gaps, any time
 
-Smaller items that fit between phases.
+Bugs, smaller features and code to tidy are [issues](https://github.com/TitaniteScale/romi/issues), and only what isn't is left here.
 
 - ✓ **Steam game info**: `romi scrape` asks Steam's store (`IStoreBrowseService/GetItems`, the API
   its own pages use, with no key) about every Steam game, in batches of 50. Genres come from the
   tags players voted for most, the year from the first release, and players from the split-screen
   categories and tags. The store also gives the cover's address, under a hashed folder for some
   games, which brought in the four covers the CDN lookup missed.
-- **Import play history**: Steam play time from Steam's local config, and `playcount`/`lastplayed` from
-  ES-DE gamelists, so recently played and the stats include games played outside romi.
-- **Exact matches for disc images**: CHD files store a SHA-1 of their contents, which can be matched
-  against Redump. That gives PlayStation, Saturn, Dreamcast and the other disc systems the exact matches
-  that cartridges already get from checksums.
-- **More descriptions**: Wikipedia's summary API needs no key, but matching titles to articles is
-  hit-or-miss. ScreenScraper and TheGamesDB need keys.
-- **SteamGridDB** (free key) for covers on PC ports and pinball tables.
-- **More of Add art…**, left out of the first version on purpose: an `https://` image, title screens
-  and screenshots, and art for a whole system.
 - **Tests that play leave frames behind**: `e2e/drive.py` ends romi with SIGKILL, and pyte never
   reads the frames, so each test that plays in romi leaves up to 30 in `/dev/shm` (about 150 MB
   for a whole run, until they're deleted or the machine restarts). Stopping romi with Esc, or a
@@ -663,35 +652,3 @@ Smaller items that fit between phases.
   builds with `makepkg -si`.
 - **A waybar module**, if it turns out to be wanted: games usually run full screen, hiding the bar, so
   it's not planned. `romi status --json` already has what one needs.
-- **7z ROMs in romi**: zips are unpacked for cores that can't open them, 7z files aren't. Only cores
-  that open 7z themselves (FinalBurn Neo) can play them.
-- **Terminals other than Ghostty and kitty**: A starts the emulator in them, going by the terminal's name
-  (`kitty::terminal`), since terminals don't report Unicode placeholder support. foot, Alacritty, Konsole
-  and WezTerm were tried on 2026-11-02. Over SSH, a kitty or Ghostty `TERM` still claims it can show games.
-- **Steam games full screen**: on by default, off from Options or per game in its menu. romi only asks
-  Steam to start a game, and Wayland doesn't let one app make another's window full screen, so romi
-  would wait for the game's window and ask the compositor: Hyprland first, then sway, and a message
-  elsewhere. The hard part is telling the game's window from its launcher or splash screen, and never
-  touching anything else. Proton games have the class `steam_app_<id>`, but native ones often don't.
-- **Input lag at 4K**: press to composited picture, on a test core that responds at once, against
-  RetroArch's 40 ms: about 50 ms for 2D and 63 ms for 3D at 1080p, but 74 and 96 ms on a 4K panel
-  (2026-11-02, one laptop, with wide variation between runs at 4K). A core's frame reaches the
-  terminal in about 7 ms, so the likely cost is the terminal taking 9 MB frames, 546 MB/s. Ghostty and
-  the compositor also keep the GPU about 75% busy at 4K even for an Atari 7800 game. Try sending
-  smaller frames. Keyboard lag and what each core costs still need measuring.
-- **Play with RetroArch when it's not installed**: a core with no RetroArch is still listed as
-  `retroarch · mgba` in **Play with**, and `romi play` tries to start it and says it isn't found.
-  `romi play` could play through the core instead.
-- **MAME in romi**: its core crashed while starting, before cores got a system and save folder. It
-  boots now (MAME 0.289, 2026-11-02, a short headless run) if the ROM set matches its version, but
-  hasn't been played; FinalBurn Neo covers most arcade sets.
-
-Code to tidy, when it gets in the way:
-
-- **One controller reader**: the TUI's thread (`gamepad.rs`) and each game played in romi
-  (`emu/controls.rs`) open their own `Gilrs`, so starting a game reopens the controllers. It works;
-  sharing one would mean handing the devices between the two.
-- **One place for which screen is open**: `on_key`, `on_pad` and `draw` each check about 10 `Option`
-  fields in their own order, so a new screen means changing all of them. An enum for the full-screen
-  panels would help, but some overlays stack (the keyboard over the menu) and it changes behaviour.
-  Do it separately, when next adding a screen.
