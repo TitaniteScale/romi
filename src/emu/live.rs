@@ -203,7 +203,8 @@ impl View {
             show_status: true,
             layout: None,
             laid_out_for: (0, 0, 0),
-            controls: Controls::new(),
+            // No states here yet, so every button is the game's.
+            controls: Controls::new(crate::config::StateButton::Off),
             sent: 0,
             pending: VecDeque::new(),
             unread: 0,

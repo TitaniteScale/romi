@@ -138,14 +138,20 @@ won't start.
 
 | On a controller | On a keyboard | |
 |---|---|---|
-| Select+R | F2 | Save a state to the slot it's on |
-| Select+L | F4 | Load the state in that slot |
-| Select+Down | F3 | Undo the last load, or undo that undo |
-| Select+Left, Select+Right | F6, F7 | Change slot, which says how long ago it was saved |
+| Guide+R | F2 | Save a state to the slot it's on |
+| Guide+L | F4 | Load the state in that slot |
+| Guide+Down | F3 | Undo the last load, or undo that undo |
+| Guide+Left, Guide+Right | F6, F7 | Change slot, which says how long ago it was saved |
 
-Each game has ten slots, 0 to 9, and stays on the one it was last on. On a controller, R, L and the
-d-pad's Left, Right and Down don't reach the game while Select is held, though Select does. A core
-needs a couple of seconds after a game starts before it can save or load.
+Each game has ten slots, 0 to 9, and stays on the one it was last on. A core needs a couple of seconds
+after a game starts before it can save or load.
+
+Games never see the Guide button, and R, L and those directions don't reach them while it's held, so
+nothing is taken from a game. While a game plays in romi, Guide belongs to this, and
+[`romi guide`](couch.md) leaves it alone. A controller without a Guide button uses Select. Options →
+Save state button, or `"state_button"`, picks `guide`, `select` or `off`, which leaves only the
+keyboard's keys. With Select, the game sees Select too, which a game that holds it will notice. Some
+programs, like Steam's overlay, also react to Guide.
 
 States go in `~/.local/share/romi/states/<core>/`, away from RetroArch's so neither writes over the
 other, and belong to the core that made them, often to its version too. They're in RetroArch's

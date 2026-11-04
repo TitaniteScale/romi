@@ -98,6 +98,7 @@ impl App {
             pixel_mouse: self.pixel_mouse,
             states,
             slot,
+            state_button: self.cfg.state_button,
         };
         let started =
             crate::emu::runner::load(&self.cfg, &core, &rom, runs_with, &controls, &core_options, self.shown_height())

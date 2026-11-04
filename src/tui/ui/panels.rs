@@ -433,12 +433,12 @@ pub(super) fn draw_embedded(f: &mut Frame, app: &mut App, theme: &Theme, area: R
         }
     }
     let stop = "Esc, or hold Select+Start, to stop";
-    let states = "Select+R saves · Select+L loads";
     // What the game says the player is doing goes before it, and how to save after it, when they fit.
     let presence = embedded.presence();
     let with_presence = format!("{presence} · {stop}");
-    let with_states = format!("{stop} · {states}");
-    let text = [format!("{presence} · {stop} · {states}"), with_presence, with_states]
+    let states = app.cfg.state_button.hint().map_or(String::new(), |states| format!(" · {states}"));
+    let with_states = format!("{stop}{states}");
+    let text = [format!("{presence} · {stop}{states}"), with_presence, with_states]
         .into_iter()
         .enumerate()
         .find(|(i, text)| (*i == 2 || !presence.is_empty()) && text.chars().count() <= hint.width as usize)

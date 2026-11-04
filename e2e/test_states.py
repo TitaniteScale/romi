@@ -236,13 +236,20 @@ def test_a_state_being_written_is_finished_when_the_game_stops(start, sandbox):
 def test_the_line_under_the_game_says_how_to_save_when_it_fits(start, sandbox):
     game = Game(start, sandbox, cols=160)
     romi = game.play()
-    game.says("Select+R saves")
+    game.says("Guide+R saves")
 
 
-def test_select_and_a_shoulder_button_save_and_load_and_dont_reach_the_game(start, sandbox, pad):
-    game = Game(start, sandbox, pad=pad)
+def use_state_button(sandbox, name):
+    config = json.loads(sandbox.config_path.read_text())
+    config["state_button"] = name
+    sandbox.write_config(config)
     # The virtual controller first, ahead of any real one plugged into the machine.
     sandbox.write_state({"players": ["romi test pad"]})
+
+
+def test_the_state_button_can_be_select(start, sandbox, pad):
+    game = Game(start, sandbox, pad=pad)
+    use_state_button(sandbox, "select")
     romi = game.play()
     saved_at = game.wait_until_frame(150)
     pad.down("SELECT")
@@ -291,3 +298,41 @@ def test_a_config_can_keep_in_game_saves_out_of_retroarchs_folder(start, sandbox
     save = sandbox.home / "my-saves/Blank/Pocket Lantern (USA).srm"
     game.romi.wait_for(save.exists, timeout=10)
     assert not (sandbox.home / ".config/retroarch").exists()
+
+
+def test_guide_and_a_shoulder_button_save_and_leave_select_to_the_game(start, sandbox, guide_pad):
+    pad = guide_pad
+    game = Game(start, sandbox, pad=pad)
+    use_state_button(sandbox, "guide")
+    romi = game.play()
+    game.wait_until_frame(150)
+    pad.down("MODE")
+    romi.pump(0.1)
+    pad.down("TR")
+    romi.pump(0.2)
+    assert not game.read()[1] & BUTTON_R, "the game doesn't see R"
+    pad.up("TR")
+    pad.up("MODE")
+    game.says("Saved a state to slot 0")
+    # Select and R together are the game's, now.
+    pad.down("SELECT")
+    pad.down("TR")
+    romi.wait_for(lambda: game.read()[1] & BUTTON_R, timeout=2)
+    pad.up("TR")
+    pad.up("SELECT")
+
+
+def test_the_state_button_can_be_off_which_leaves_the_keyboard(start, sandbox, pad):
+    game = Game(start, sandbox, pad=pad, cols=160)
+    use_state_button(sandbox, "off")
+    romi = game.play()
+    game.wait_until_frame(150)
+    assert "saves" not in romi.text(), "the line under the game doesn't offer it"
+    pad.down("SELECT")
+    pad.down("TR")
+    romi.wait_for(lambda: game.read()[1] & BUTTON_R, timeout=2)
+    pad.up("TR")
+    pad.up("SELECT")
+    assert not game.states.exists()
+    romi.send(F2)
+    game.says("Saved a state to slot 0")

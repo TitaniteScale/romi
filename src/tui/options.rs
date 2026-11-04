@@ -20,10 +20,11 @@ pub enum Setting {
     Accent,
     Borders,
     Confirm,
+    StateButton,
     TitleScreen,
 }
 
-pub const SETTINGS: [Setting; 13] = [
+pub const SETTINGS: [Setting; 14] = [
     Setting::PlayInRomi,
     Setting::Volume,
     Setting::Corners,
@@ -36,6 +37,7 @@ pub const SETTINGS: [Setting; 13] = [
     Setting::Accent,
     Setting::Borders,
     Setting::Confirm,
+    Setting::StateButton,
     Setting::TitleScreen,
 ];
 
@@ -57,6 +59,7 @@ impl Setting {
             Setting::Accent => "Accent color",
             Setting::Borders => "Borders",
             Setting::Confirm => "Confirm button",
+            Setting::StateButton => "Save state button",
             Setting::TitleScreen => "Title screen at start",
         }
     }
@@ -76,6 +79,7 @@ impl Setting {
             Setting::Accent => &["theme", "accent"],
             Setting::Borders => &["theme", "borders"],
             Setting::Confirm => &["controller", "swap_confirm"],
+            Setting::StateButton => &["state_button"],
             Setting::TitleScreen => &["title_screen"],
         }
     }
@@ -95,6 +99,7 @@ impl Setting {
             Setting::Accent => json!(cfg.theme.accent),
             Setting::Borders => json!(cfg.theme.borders),
             Setting::Confirm => json!(cfg.controller.swap_confirm),
+            Setting::StateButton => json!(cfg.state_button.name()),
             Setting::TitleScreen => json!(cfg.title_screen),
         }
     }
@@ -107,6 +112,7 @@ impl Setting {
             Setting::Filter => Filter::ALL.map(|f| json!(f.name())).to_vec(),
             Setting::Accent => ACCENTS.map(|a| json!(a)).to_vec(),
             Setting::Borders => BORDERS.map(|b| json!(b)).to_vec(),
+            Setting::StateButton => crate::config::StateButton::ALL.map(|b| json!(b.name())).to_vec(),
             Setting::PlayInRomi
             | Setting::Crop
             | Setting::Sharp
@@ -155,6 +161,11 @@ impl Setting {
             Setting::Borders => cfg.theme.borders.clone(),
             Setting::Confirm if cfg.controller.swap_confirm => "B (A goes back)".into(),
             Setting::Confirm => "A (B goes back)".into(),
+            Setting::StateButton => match cfg.state_button {
+                crate::config::StateButton::Guide => "Guide (or Select without one)".into(),
+                crate::config::StateButton::Select => "Select".into(),
+                crate::config::StateButton::Off => "off, keyboard only".into(),
+            },
             Setting::TitleScreen => on(cfg.title_screen),
         }
     }

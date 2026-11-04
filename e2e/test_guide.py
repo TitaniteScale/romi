@@ -24,7 +24,8 @@ def presses(path):
     return len(path.read_text().splitlines()) if path.exists() else 0
 
 
-def test_guide_runs_the_command_outside_games(sandbox, pad):
+def test_guide_runs_the_command_outside_games(sandbox, guide_pad):
+    pad = guide_pad
     out = sandbox.root / "presses.txt"
     guide = subprocess.Popen(
         [binary(), "guide", "--", "sh", "-c", f"echo pressed >> '{out}'"],

@@ -18,8 +18,9 @@ anywhere. The pieces are in [`examples/couch`](../examples/couch):
 - **`romi guide`** makes the controller's Guide button do the same. It watches every controller
   the way romi does, without taking it from romi or your games, and runs a command on Guide:
   `romi guide -- hyprctl eval 'romi_couch()'`, started with your desktop (the example does that).
-  While a game started from romi is running, Guide is left to the game (and Steam's overlay). In
-  romi itself, Guide still opens the menu.
+  While a game started from romi is running, Guide is left to the game (and Steam's overlay), and
+  a game playing in romi uses it for [save states](tui.md#save-states). In romi itself, Guide still
+  opens the menu.
 
 [Hooks](config.md#hooks) fit in here too: `"on_launch": "playerctl pause"` stops the music while you
 play, and `"start_on": "last_played"` picks up where you left off.

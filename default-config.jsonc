@@ -96,6 +96,11 @@
   // setting for it is left as it is.
   "sharp_3d": true,
 
+  // The controller button held to save and load states while a game plays in romi, with R, L and the
+  // d-pad: "guide", which games never see (a controller without one uses Select), "select", or "off"
+  // for the keyboard's keys alone.
+  "state_button": "guide",
+
   // Show the title screen, with the logo, each time romi opens, until something's pressed. A first
   // run shows it either way.
   "title_screen": false,

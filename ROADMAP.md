@@ -220,8 +220,9 @@ It's built in steps, and the first one pays off without any of the TUI work:
    under the same names, so a save made in romi carries over to RetroArch and back. romi checks
    every second whether the game has saved, and writes the file then and when the game stops. A
    save that can't be read stops the game from starting, so it's never written over.
-   - ✓ **Save states**: ten slots a game, Select+R, Select+L and Select+Down (undo the last load) on
-     a controller, F2, F4 and F3 on a keyboard, and `romi run --save-state` and `--load-state`
+   - ✓ **Save states**: ten slots a game, Guide+R, Guide+L and Guide+Down (undo the last load) on a
+     controller (`"state_button"` picks Select or off, and a controller without Guide uses Select), F2,
+     F4 and F3 on a keyboard, and `romi run --save-state` and `--load-state`
      (`emu/savestate.rs`), in RetroArch's file format: a state from romi loaded in RetroArch 1.22.2,
      and its compressed state loaded in romi (mGBA, the only core tried both ways). A core gets 120
      frames before a state, as Mupen64Plus crashed on one before its first frame and Dolphin on a
@@ -241,7 +242,7 @@ It's built in steps, and the first one pays off without any of the TUI work:
      compresses them (a Wii state goes from 109 MB to 4.5 MB in about 0.2 s), on another thread so the
      game doesn't stop for it. They carry how far along achievements are. A load that takes back the
      in-game save keeps the last five copies.
-     Still to do: [#6](https://github.com/TitaniteScale/romi/issues/6), a way to turn the Select combos off; [#7](https://github.com/TitaniteScale/romi/issues/7), a picture of
+     Still to do: [#7](https://github.com/TitaniteScale/romi/issues/7), a picture of
      each slot; [#8](https://github.com/TitaniteScale/romi/issues/8), loading RetroArch's states from a menu; [#9](https://github.com/TitaniteScale/romi/issues/9), `romi run --live`.
 5. **Scenes**: a PNG frame with a transparent screen area. romi draws each emulated frame into it and
    sends the result as one image. Terminals without graphics get an ASCII-art frame around a half-block

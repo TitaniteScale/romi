@@ -3,6 +3,7 @@
 //! then in the order romi finds them; the keyboard plays as player 1 too. Holding Select and Start
 //! together quits, from any of them.
 
+use crate::config::StateButton;
 use crate::emu::libretro::{Input, PLAYERS, Players, button};
 use gilrs::{Axis, Button, EventType, GamepadId, Gilrs};
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind};
@@ -12,8 +13,9 @@ use std::time::{Duration, Instant};
 /// Holding Select and Start together this long quits.
 const QUIT_HOLD: Duration = Duration::from_secs(1);
 
-/// A button pressed while Select is held, on any controller or the keyboard. These buttons don't
-/// reach the game while Select is held, though Select does, as romi can't know it's coming.
+/// A button pressed while the state button is held (`config::StateButton`), on any controller. These
+/// buttons don't reach the game meanwhile. Guide never does; Select does, as romi can't know what's
+/// coming.
 pub const CHORDS: [(&str, Chord); 5] = [
     ("r", Chord::SaveState),
     ("l", Chord::LoadState),
@@ -31,16 +33,26 @@ pub enum Chord {
     PreviousSlot,
 }
 
-/// Takes the chords' buttons out of what players hold with Select, giving back what they held.
-fn held_chords(players: &mut Players) -> u16 {
-    let select = button("select").unwrap();
+/// Takes the chords' buttons out of what the players holding the state button hold (`holding`, by
+/// player), giving back what they held.
+fn held_chords(players: &mut Players, holding: [bool; PLAYERS]) -> u16 {
     let chords = CHORDS.iter().fold(0, |bits, (name, _)| bits | button(name).unwrap());
     let mut held = 0;
-    for player in players.iter_mut().filter(|p| p.buttons & select != 0) {
+    for (player, _) in players.iter_mut().zip(holding).filter(|(_, holding)| *holding) {
         held |= player.buttons & chords;
         player.buttons &= !chords;
     }
     held
+}
+
+/// Whether a player is holding the state button, with `guide` for whether their controller has a Guide
+/// button and it's held, as None without one, and whether they hold Select. The keyboard has no Guide.
+fn holds_state_button(setting: StateButton, guide: Option<bool>, select: bool) -> bool {
+    match (setting, guide) {
+        (StateButton::Off, _) => false,
+        (StateButton::Guide, Some(held)) => held,
+        (StateButton::Guide, None) | (StateButton::Select, _) => select,
+    }
 }
 
 pub struct Controls {
@@ -56,10 +68,11 @@ pub struct Controls {
     chords_held: u16,
     /// Chords pressed and not yet taken.
     chords: Vec<Chord>,
+    state_button: StateButton,
 }
 
 impl Controls {
-    pub fn new() -> Controls {
+    pub fn new(state_button: StateButton) -> Controls {
         let gilrs = Gilrs::new().ok();
         let saved = crate::state::State::load().players;
         let order = gilrs.as_ref().map(|g| player_order(g, &saved)).unwrap_or_default();
@@ -71,6 +84,7 @@ impl Controls {
             quit_held_since: None,
             chords_held: 0,
             chords: Vec::new(),
+            state_button,
         }
     }
 
@@ -108,7 +122,21 @@ impl Controls {
                 merge(player, pad_input(&gilrs.gamepad(id)));
             }
         }
-        let held = held_chords(&mut players);
+        let select = button("select").unwrap();
+        // The keyboard is player 1. Its Backspace is Select, and it has no Guide to hold, but it
+        // has its own keys for all of this.
+        let keys_select = self.keys.iter().any(|&k| key_button(k).is_some_and(|b| b & select != 0));
+        let mut holding = [false; PLAYERS];
+        holding[0] = self.state_button == StateButton::Select && keys_select;
+        if let Some(gilrs) = &self.gilrs {
+            for (i, &id) in self.order.iter().enumerate().take(PLAYERS) {
+                let pad = gilrs.gamepad(id);
+                let guide = pad.button_code(Button::Mode).map(|_| pad.is_pressed(Button::Mode));
+                let select = pad.is_pressed(Button::Select);
+                holding[i] |= holds_state_button(self.state_button, guide, select);
+            }
+        }
+        let held = held_chords(&mut players, holding);
         let pressed = held & !self.chords_held;
         self.chords_held = held;
         self.chords.extend(CHORDS.iter().filter(|(name, _)| pressed & button(name).unwrap() != 0).map(|(_, c)| *c));
@@ -259,13 +287,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chords_buttons_stay_out_of_the_game_only_while_select_is_held() {
+    fn chords_buttons_stay_out_of_the_game_only_while_the_state_button_is_held() {
         let bits = |names: &[&str]| names.iter().fold(0, |b, n| b | button(n).unwrap());
         let mut players = Players::default();
         players[0].buttons = bits(&["select", "r", "left", "a"]);
         players[1].buttons = bits(&["r", "left"]);
-        assert_eq!(held_chords(&mut players), bits(&["r", "left"]));
+        assert_eq!(held_chords(&mut players, [true, false, false, false]), bits(&["r", "left"]));
         assert_eq!(players[0].buttons, bits(&["select", "a"]));
-        assert_eq!(players[1].buttons, bits(&["r", "left"]), "player 2 isn't holding Select");
+        assert_eq!(players[1].buttons, bits(&["r", "left"]), "player 2 isn't holding it");
+    }
+
+    #[test]
+    fn the_state_button_is_guide_or_select_and_can_be_off() {
+        use StateButton::{Guide, Off, Select};
+        assert!(holds_state_button(Guide, Some(true), false));
+        assert!(!holds_state_button(Guide, Some(false), true), "Select is the game's, with a Guide to hold");
+        assert!(holds_state_button(Guide, None, true), "without a Guide, Select does");
+        assert!(!holds_state_button(Guide, None, false));
+        assert!(holds_state_button(Select, Some(false), true));
+        assert!(!holds_state_button(Select, Some(true), false));
+        assert!(!holds_state_button(Off, Some(true), true));
     }
 }

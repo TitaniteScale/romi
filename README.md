@@ -59,8 +59,8 @@ While you play:
   softcore, and on GameCube and Wii an unlock hasn't been seen live yet.
 - **Sharp 3D:** GPU cores draw about as big as they're shown, not at the console's 640×480.
 - **Screen filters:** scanlines, CRT and LCD.
-- **Save states:** ten slots for each game, with Select+R and Select+L on a controller or F2 and F4
-  on a keyboard.
+- **Save states:** ten slots for each game, with Guide+R and Guide+L on a controller or F2 and F4 on
+  a keyboard.
 - **Controls** you can change per game or per system from its menu, with a controller for each
   player.
 

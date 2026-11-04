@@ -59,6 +59,8 @@ pub struct Config {
     /// Games that draw with the GPU draw about as big as they're shown, rather than at the
     /// console's size, so 3D looks sharp (see `emu::options`).
     pub sharp_3d: bool,
+    /// The controller button held to save and load states while a game plays in romi.
+    pub state_button: StateButton,
     /// Show the title screen each time romi opens, until something's pressed.
     pub title_screen: bool,
     pub systems: Vec<SystemConfig>,
@@ -235,6 +237,7 @@ impl Default for Config {
             screen_filter: crate::emu::screen::Filter::None,
             crop_borders: true,
             sharp_3d: true,
+            state_button: StateButton::default(),
             title_screen: false,
             play_in_romi: true,
             systems: Vec::new(),
@@ -644,6 +647,39 @@ pub fn config_path() -> PathBuf {
 
 pub fn cache_dir() -> PathBuf {
     dirs::cache_dir().unwrap_or_else(|| home().join(".cache")).join("romi")
+}
+
+/// The controller button held to save and load states while a game plays in romi.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum StateButton {
+    /// Games never see Guide, so nothing else is taken from them. A controller without one uses Select.
+    #[default]
+    Guide,
+    Select,
+    /// Only the keyboard's keys, so every button is the game's.
+    Off,
+}
+
+impl StateButton {
+    pub const ALL: [StateButton; 3] = [StateButton::Guide, StateButton::Select, StateButton::Off];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            StateButton::Guide => "guide",
+            StateButton::Select => "select",
+            StateButton::Off => "off",
+        }
+    }
+
+    /// What to say under the game about how to save.
+    pub fn hint(self) -> Option<&'static str> {
+        match self {
+            StateButton::Guide => Some("Guide+R saves · Guide+L loads"),
+            StateButton::Select => Some("Select+R saves · Select+L loads"),
+            StateButton::Off => None,
+        }
+    }
 }
 
 /// romi's own folder, for what you'd miss if it were lost and isn't settings: save states, and BIOS

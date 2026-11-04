@@ -120,9 +120,10 @@ pub struct Start {
     /// The mouse touches the screen, where it points to the pixel if the terminal tells it in pixels,
     /// else to the cell.
     pub pixel_mouse: bool,
-    /// Where its save states go, and the slot it was last on.
+    /// Where its save states go, the slot it was last on, and the controller button that saves them.
     pub states: Files,
     pub slot: u8,
+    pub state_button: crate::config::StateButton,
 }
 
 pub struct Embedded {
@@ -175,7 +176,7 @@ pub struct Embedded {
 impl Embedded {
     /// Starts the game, after the launch animation if there's one.
     pub fn start(core: Core, start: Start) -> Result<Embedded> {
-        let Start { game, volume, launch, look, cheevos, pixel_mouse, states, slot } = start;
+        let Start { game, volume, launch, look, cheevos, pixel_mouse, states, slot, state_button } = start;
         let about = format!("{} in the TUI, filter {}, corners {}", core.name, look.filter.name(), look.corners);
         // With the animation, the game's cells are placed before it draws, in the shape it says.
         let shape = if launch.is_some() { core.display_size() } else { (0.0, 0.0) };
@@ -202,7 +203,7 @@ impl Embedded {
             seen: 0,
             shape,
             cells: None,
-            controls: Controls::new(),
+            controls: Controls::new(state_button),
             sent: 0,
             pending: VecDeque::new(),
             intro_shown: intro.is_some(),
