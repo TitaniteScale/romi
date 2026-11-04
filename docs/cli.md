@@ -34,7 +34,10 @@ counts as a few seconds.
 (600 by default, 10 seconds of most consoles) and saves the last frame with `--screenshot out.png`.
 It loads the libretro core from the game's `retroarch -L` command (for a game in the library, from
 another of its emulators if its own isn't RetroArch), or the one given with `--core`, and takes a
-game name or a ROM file, so it works on a build fresh out of a ROM hack or decomp.
+game name or a ROM file, so it works on a build fresh out of a ROM hack or decomp. A ROM file belongs to
+the system whose ROM folder it's in, or a folder named after a system, or the only system that takes
+its extension. If several could take it, as with `.chd`, romi lists them (exit 65) and `--system` says
+which.
 `--input` holds buttons from a script of `<frame> <buttons...>` lines, each held until the next
 line (`300 start`, then `306` to let go). Buttons are player 1's, or another player's after `p2:`
 (up to `p4:`), as in `300 start p2:a`. `touch:XxY` touches the screen at pixel X, Y of the frame,

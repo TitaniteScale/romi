@@ -242,6 +242,66 @@ def test_a_core_that_crashes_as_it_unloads_doesnt_spoil_a_run_or_starting_it(sta
     play_in_romi(romi)
 
 
+def discs(sandbox):
+    """Two systems that take .chd files, each with a game in its folder, and a core for each."""
+    source = sandbox.home / "blank.c"
+    source.write_text(DRAWING_CORE)
+    cores = {}
+    for name in ["first", "second"]:
+        cores[name] = sandbox.home / f"{name}_libretro.so"
+        subprocess.run(["cc", "-shared", "-fPIC", "-o", str(cores[name]), str(source)], check=True)
+    for folder in ["alpha", "beta/nested"]:
+        (sandbox.home / "ROMs" / folder).mkdir(parents=True)
+        (sandbox.home / "ROMs" / folder / "game.chd").touch()
+    config = json.loads(json.dumps(CONFIG))
+    config["systems"] = [
+        {"id": "alpha", "name": "Alpha", "extensions": ["chd"], "command": f"true -L {cores['first']} {{rom}}"},
+        {"id": "beta", "name": "Beta", "extensions": ["chd"], "command": f"true -L {cores['second']} {{rom}}"},
+    ]
+    sandbox.write_config(config)
+    return cores
+
+
+def core_used(out):
+    assert out.returncode == 0, out.stderr
+    return json.loads(out.stdout)["core"]
+
+
+def test_a_rom_file_in_a_systems_folder_runs_with_that_systems_core(sandbox):
+    cores = discs(sandbox)
+    run = lambda path, *args: run_cli(sandbox, "run", str(path), "--frames", "1", "--json", *args)  # noqa: E731
+    assert core_used(run(sandbox.home / "ROMs/alpha/game.chd")) == str(cores["first"])
+    assert core_used(run(sandbox.home / "ROMs/beta/nested/game.chd")) == str(cores["second"]), "not the first system"
+    # A link into the folder counts too.
+    (sandbox.home / "link").symlink_to(sandbox.home / "ROMs/beta")
+    assert core_used(run(sandbox.home / "link/nested/game.chd")) == str(cores["second"])
+
+
+def test_a_rom_file_elsewhere_goes_by_its_folders_name_or_asks(sandbox):
+    cores = discs(sandbox)
+    run = lambda path, *args: run_cli(sandbox, "run", str(path), "--frames", "1", "--json", *args)  # noqa: E731
+    named = sandbox.home / "elsewhere/beta/game.chd"
+    named.parent.mkdir(parents=True)
+    named.touch()
+    assert core_used(run(named)) == str(cores["second"])
+
+    loose = sandbox.home / "elsewhere/game.chd"
+    loose.touch()
+    out = run(loose)
+    assert out.returncode == 65
+    assert ".chd files could be for alpha, beta; say which with --system" in out.stderr
+    assert core_used(run(loose, "--system", "beta")) == str(cores["second"])
+    assert core_used(run(loose, "--core", str(cores["second"]))) == str(cores["second"])
+
+
+def test_a_rom_file_only_one_system_takes_needs_no_folder(sandbox):
+    set_up_a_game_boy_game(sandbox)
+    loose = sandbox.home / "build.gb"
+    loose.touch()
+    out = run_cli(sandbox, "run", str(loose), "--frames", "1", "--json")
+    assert core_used(out).endswith("blank_libretro.so")
+
+
 def test_runs_use_retroarchs_remap_for_the_game(sandbox):
     seen = sandbox.home / "seen.txt"
     source = sandbox.home / "pad.c"

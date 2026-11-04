@@ -1,6 +1,7 @@
 //! `romi play`, which launches a game as the TUI does, and `romi run`, which plays one inside romi.
 
 use super::*;
+use crate::config::SystemConfig;
 
 pub(super) fn play(
     cfg: &Config,
@@ -169,7 +170,7 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
     // from another of its emulators if its own isn't one.
     let (name, rom, launch, controls, core_options, other_core, system_id) = match Path::new(query).is_file() {
         true => {
-            let (name, rom, launch, system_id) = rom_file(cfg, Path::new(query), system)?;
+            let (name, rom, launch, system_id) = rom_file(cfg, Path::new(query), system, core.as_deref())?;
             let core_options = system_id.iter().filter_map(|id| cfg.core_options.get(id)).cloned().collect();
             (name, rom, launch, Vec::new(), core_options, None, system_id)
         }
@@ -463,19 +464,61 @@ fn achievements_json(events: &[crate::emu::cheevos::Event]) -> serde_json::Value
     serde_json::json!({ "game": game, "unlocked": unlocked, "mastered": mastered, "problems": problems })
 }
 
-/// A ROM given by path runs with the command of the first system that lists its extension.
+/// The system a ROM file given by path belongs to, for running with its command. The system whose
+/// ROM folder it's in, of the ones that list its extension, which says more than the extension can:
+/// `.chd` and `.iso` are on most disc systems' lists. Failing that, a folder of the same name
+/// elsewhere, or the only system that lists the extension. Told the core, a system that runs that core,
+/// or none, since all a system adds then is its options and achievements. Otherwise it asks.
+fn system_of_file<'a>(cfg: &'a Config, rom: &Path, core: Option<&Path>) -> Result<Option<&'a SystemConfig>> {
+    let ext = rom.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
+    let takes = |s: &&SystemConfig| s.extensions.iter().any(|e| e.trim_start_matches('.').eq_ignore_ascii_case(&ext));
+    let candidates: Vec<&SystemConfig> = cfg.systems.iter().filter(takes).collect();
+    let real = rom.canonicalize().unwrap_or_else(|_| rom.to_path_buf());
+    let folder = |s: &SystemConfig| {
+        let dir = config::expand_path(&cfg.roms_dir).join(config::expand_path(s.dir.as_deref().unwrap_or(&s.id)));
+        dir.canonicalize().unwrap_or(dir)
+    };
+    // The deepest, if one system's folder is inside another's.
+    let in_folder = candidates.iter().copied().filter(|s| real.starts_with(folder(s)));
+    if let Some(sys) = in_folder.max_by_key(|s| folder(s).components().count()) {
+        return Ok(Some(sys));
+    }
+    let named = |s: &SystemConfig| {
+        let parent = rom.parent().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned());
+        parent
+            .is_some_and(|p| p.eq_ignore_ascii_case(s.dir.as_deref().unwrap_or(&s.id)) || p.eq_ignore_ascii_case(&s.id))
+    };
+    if let Some(sys) = candidates.iter().copied().find(|s| named(s)) {
+        return Ok(Some(sys));
+    }
+    if let [only] = candidates[..] {
+        return Ok(Some(only));
+    }
+    if let Some(core) = core {
+        let file = core.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        return Ok(candidates.iter().copied().find(|s| !file.is_empty() && s.command.contains(&file)));
+    }
+    if candidates.is_empty() {
+        return Ok(None);
+    }
+    let ids: Vec<&str> = candidates.iter().map(|s| s.id.as_str()).collect();
+    let msg = format!(".{ext} files could be for {}; say which with --system, or use --core", ids.join(", "));
+    fail(exit::AMBIGUOUS, msg)
+}
+
+/// A ROM given by path runs with the command of its system (see `system_of_file`).
 fn rom_file(
     cfg: &Config,
     rom: &Path,
     system: Option<&str>,
+    core: Option<&Path>,
 ) -> Result<(String, PathBuf, Option<crate::launch::Launch>, Option<String>)> {
-    let ext = rom.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
     let sys = match system {
         Some(want) => cfg
             .systems
             .iter()
             .find(|s| s.id.eq_ignore_ascii_case(want) || cfg.system_name(s).eq_ignore_ascii_case(want)),
-        None => cfg.system_for_extension(&ext),
+        None => system_of_file(cfg, rom, core)?,
     };
     let name = rom.file_stem().unwrap_or(rom.as_os_str()).to_string_lossy().into_owned();
     let launch = sys.map(|s| {
