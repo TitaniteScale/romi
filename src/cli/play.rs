@@ -388,9 +388,11 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
 fn start_from_state(emu: &mut crate::emu::libretro::Core, path: &Path) -> Result<(Duration, Option<Vec<u8>>)> {
     let file = std::fs::read(path).with_context(|| format!("can't read {}", path.display()))?;
     let state = crate::emu::savestate::decode(file).with_context(|| format!("can't load {}", path.display()))?;
+    let booted = Instant::now();
     for _ in 0..crate::emu::libretro::FRAMES_BEFORE_STATES {
         emu.run_frame(Default::default());
     }
+    std::thread::sleep(crate::emu::libretro::time_before_states(&emu.name).saturating_sub(booted.elapsed()));
     let started = Instant::now();
     emu.load_state(&state.core).with_context(|| format!("can't load {}", path.display()))?;
     Ok((started.elapsed(), state.achievements))

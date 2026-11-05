@@ -72,7 +72,8 @@ romi run "pokemon pinball" --load-state table.state --frames 60 --screenshot tab
 
 `--save-state s.state` saves the game's state after the last frame, and `--load-state s.state` starts
 from one, so a run can skip to the part it's testing. States are in RetroArch's format, and RetroArch's
-are read, compressed or not. They belong to the core that made them, and often to its version. Add
+are read, compressed or not. They belong to the core that made them, and often to its version. A core runs
+120 frames before it's given one, and PPSSPP waits two seconds as well. Add
 `--screenshot` and the picture is the same as a run that never stopped, for the cores that repeat
 exactly. A state is loaded 120 frames in, which is too soon for ProSystem (Atari 7800, back to its boot
 logo) and PPSSPP (a black picture); both load states fine while playing. `"save_state_bytes"` and the

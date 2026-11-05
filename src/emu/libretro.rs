@@ -274,6 +274,17 @@ pub fn button(name: &str) -> Option<u16> {
 /// after one frame (it's fine after 120).
 pub const FRAMES_BEFORE_STATES: u64 = 120;
 
+/// How long a core needs by the clock before a state as well, for runs that don't keep to the game's
+/// speed. PPSSPP's game carries on starting up as time passes, and `romi run`'s frames are over in a
+/// moment: a state given to it then left Bust-A-Move black for hundreds of frames, in most runs.
+/// Two seconds is what those frames take while playing, which has always worked.
+pub fn time_before_states(core: &str) -> std::time::Duration {
+    match core.starts_with("PPSSPP") {
+        true => std::time::Duration::from_secs(2),
+        false => std::time::Duration::ZERO,
+    }
+}
+
 /// How many players a game can have in romi: one on each of libretro's first four ports.
 pub const PLAYERS: usize = 4;
 

@@ -230,8 +230,8 @@ It's built in steps, and the first one pays off without any of the TUI work:
      that never stopped: pixel for pixel on the 2D systems tried, and the same scene on PlayStation,
      N64, Dreamcast, GameCube and Wii, some of which don't repeat exactly even without a state.
      Largest states: Wii 109 MB, GameCube 93 MB, Naomi 68 MB, PS2 51 MB; a core takes at most 58 ms
-     over one. `romi run` loads a state 120 frames in, too soon for ProSystem (Atari 7800, back to its
-     boot logo) and PPSSPP (black), which both load while playing, in the picture at least ([#4](https://github.com/TitaniteScale/romi/issues/4)). PPSSPP
+     over one. `romi run` loads a state 120 frames in, and PPSSPP two seconds in, as it needs the time
+     as well as the frames: Bust-A-Move stayed black for hundreds of frames without it. PPSSPP
      sometimes refuses to save, which trying again gets past. PPSSPP boots a game in the background,
      and unloading while it does finishes the boot, which crashed romi once `context_destroy` had taken
      the GL context, so stopping a game early took romi down, and so did romi's own one-frame try at
