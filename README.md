@@ -207,6 +207,7 @@ sorting, filters, tags, hiding games and picking another emulator.
 - [Couch mode](docs/couch.md): for a PC plugged into a TV, open romi full screen from the
   controller's Guide button
 - [Roadmap](ROADMAP.md): what's done and what's next
+- [How it works](docs/how-it-works.md): how games play in a terminal, and what each system took
 - [Issues](https://github.com/TitaniteScale/romi/issues): known bugs and smaller things to do
 - [Working on romi](CONTRIBUTING.md): tests, releasing, and a map of the code
 - [Credits](CREDITS.md): other people's work in this repository: the logo and mascot, by Andrea Reyes,
