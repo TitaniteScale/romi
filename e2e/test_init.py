@@ -800,6 +800,72 @@ def test_check_has_nothing_to_add_after_init_on_a_messy_tree(machine):
     assert "romi init" not in out.stdout + out.stderr, out.stdout + out.stderr
 
 
+LOGIN = ".local/state/romi/retroachievements-login.json"
+
+
+def first_run_with_retroarchs_login(machine):
+    (machine.home / ".config/retroarch").mkdir(parents=True, exist_ok=True)
+    (machine.home / ".config/retroarch/retroarch.cfg").write_text('cheevos_username = "Lantern"\ncheevos_token = "T0KEN"\n')
+    romi = first_run(machine)
+    romi.wait_for("Press any key to get started")
+    romi.keys(" ")
+    romi.wait_for("Where are your ROMs?")
+    romi.keys("\r")
+    romi.wait_for("Where should romi keep BIOS files and saves?")
+    romi.keys("\r")
+    romi.wait_for("Use your RetroAchievements account here too?")
+    assert "RetroArch is logged in to RetroAchievements as Lantern" in romi.text()
+    assert "› Use Lantern" in romi.text()
+    assert "softcore" in romi.text()
+    return romi
+
+
+def test_first_run_can_use_retroarchs_retroachievements_login(machine):
+    romi = first_run_with_retroarchs_login(machine)
+    try:
+        assert not (machine.home / LOGIN).exists(), "nothing's written yet"
+        romi.keys("\r")
+        romi.wait_for("Here's what romi found")
+        romi.keys("\x1b")
+        romi.wait_for("Use your RetroAchievements account here too?")
+        romi.keys("\r")
+        romi.wait_for("Here's what romi found")
+        romi.keys("\r")
+        romi.wait_for("Systems")
+        assert json.loads((machine.home / LOGIN).read_text()) == {"username": "Lantern", "token": "T0KEN"}
+        assert (machine.home / LOGIN).stat().st_mode & 0o077 == 0, "readable only by you"
+    finally:
+        romi.close()
+
+
+def test_first_run_can_leave_retroarchs_login_alone(machine):
+    romi = first_run_with_retroarchs_login(machine)
+    try:
+        romi.send(b"\x1b[B")
+        romi.wait_for("› Not now")
+        romi.keys("\r")
+        romi.wait_for("Here's what romi found")
+        romi.keys("\r")
+        romi.wait_for("Systems")
+        assert not (machine.home / LOGIN).exists()
+    finally:
+        romi.close()
+
+
+def test_first_run_doesnt_ask_about_an_account_without_retroarchs_login(machine):
+    romi = first_run(machine)
+    try:
+        romi.wait_for("Press any key to get started")
+        romi.keys(" ")
+        romi.wait_for("Where are your ROMs?")
+        romi.keys("\r")
+        romi.wait_for("Where should romi keep BIOS files and saves?")
+        romi.keys("\r")
+        romi.wait_for("Here's what romi found")
+    finally:
+        romi.close()
+
+
 def test_check_warns_about_ghosttys_blur(sandbox):
     sandbox.extra_env.update(TERM="xterm-ghostty", TERM_PROGRAM="ghostty")
     warning = "background-blur in Ghostty's config adds lag to games"

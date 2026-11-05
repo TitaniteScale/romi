@@ -21,12 +21,16 @@ turned on and your login. `romi check` tells you which aren't set up.
 ## Earning them in romi
 
 Games played in romi (**Play in romi** in a game's menu) earn achievements themselves, once you've
-logged in:
+logged in. **RetroAchievements** at the bottom of Options logs in and out, on the on-screen keyboard
+from a controller, or from a terminal:
 
 ```sh
 romi achievements login        # asks for your password; or pipe it in
 romi achievements logout
 ```
+
+If RetroArch is logged in, romi offers to use its login, on a first run and in Options, with no
+password to type. Otherwise a hint after your first game says where to log in.
 
 The web API key can only read, so earning needs your password, once: romi swaps it for the login
 token the server gives, the way RetroArch does, and keeps only the token, in

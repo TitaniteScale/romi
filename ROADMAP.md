@@ -276,6 +276,10 @@ It's built in steps, and the first one pays off without any of the TUI work:
      the rest, each with its badge when every one is here and the picture is tall enough (titles
      only otherwise). It yields to the progress box if they'd overlap on a narrow picture. Badge
      images are one Kitty image per slot (`notice::SLOT_*`), the unlock notice's first.
+   - ✓ **Logging in from inside romi**: **RetroAchievements** in Options logs in and out, with an
+     on-screen keyboard that has capitals and symbols, for a controller. RetroArch's login can be used
+     as it is, in Options and on a first run, as its token is the same one the server gives romi for
+     the password. Anyone else gets a hint after their first game. None of it asks a new user for a password.
    - **Leaderboards are blocked on hardcore** (found 2026-11-01): rcheevos 12.5.0 only evaluates
      them when hardcore is on (`rc_client.c`, `client->state.hardcore ||
      allow_leaderboards_in_softcore`, and that field is internal, with no setter), so a softcore

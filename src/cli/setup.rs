@@ -125,8 +125,11 @@ pub fn first_run(cfg_path: &Path) -> Result<bool> {
     }
     let found = crate::init::find_roms_dir(None, None);
     let usual = crate::init::usual_roms_dirs();
+    // Only asked about if there isn't a login already.
+    let account = crate::emucfg::retroarch_login().filter(|_| crate::emu::cheevos::saved_login().is_none());
+    let name = account.as_ref().map(|l| l.username.as_str());
     let welcome =
-        crate::tui::welcome::first_run(found.as_deref(), &usual, crate::init::retroarch_here(), |roms, own| {
+        crate::tui::welcome::first_run(found.as_deref(), &usual, crate::init::retroarch_here(), name, |roms, own| {
             crate::init::first_look(roms, own)
         });
     let Some(answers) = welcome? else {
@@ -134,6 +137,12 @@ pub fn first_run(cfg_path: &Path) -> Result<bool> {
     };
     let first_run = FirstRun { own_folders: answers.own_folders };
     init(cfg_path, answers.roms, false, true, None, false, Some(first_run))?;
+    if let Some(login) = account.filter(|_| answers.use_account) {
+        // Not worth stopping for: it can be done again from Options.
+        if let Err(e) = crate::emu::cheevos::save_login(&login) {
+            eprintln!("romi: couldn't save the RetroAchievements login: {e:#}");
+        }
+    }
     Ok(cfg_path.exists())
 }
 

@@ -5,8 +5,8 @@ mod panels;
 
 use crate::tui::app::{App, Level, PadState};
 use overlays::{
-    draw_art_prompt, draw_cheevos, draw_controls, draw_filter, draw_menu, draw_options, draw_osk, draw_players,
-    draw_stats,
+    draw_art_prompt, draw_cheevos, draw_controls, draw_filter, draw_login, draw_menu, draw_options, draw_osk,
+    draw_players, draw_stats,
 };
 use panels::{draw_details, draw_embedded, draw_empty, draw_games, draw_grid, draw_playing, draw_systems};
 use ratatui::Frame;
@@ -129,7 +129,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         draw_menu(f, app, &theme, body);
     }
     // After the menu, since naming a tag brings it up over the menu.
-    if let (Some(area), Some(_)) = (osk_area, app.osk) {
+    if let (Some(area), Some(_), None) = (osk_area, app.osk, &app.login) {
         draw_osk(f, app, &theme, area);
     }
     if app.art_prompt.is_some() {
@@ -138,8 +138,12 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     if app.filter_panel.is_some() {
         draw_filter(f, app, &theme, body);
     }
-    if app.options.is_some() {
+    // The login takes over from the panel it was opened from.
+    if app.options.is_some() && app.login.is_none() {
         draw_options(f, app, &theme, body);
+    }
+    if app.login.is_some() {
+        draw_login(f, app, &theme, body);
     }
     if app.controls.is_some() {
         draw_controls(f, app, &theme, body);
@@ -250,6 +254,16 @@ fn draw_footer(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
             (false, false) => {
                 hints(&[("enter", "change"), ("↑/↓", "button"), ("←/→", "game or system"), ("esc", "done")])
             }
+        };
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
+    if let Some(screen) = &app.login {
+        let line = match (screen.typing(), pad) {
+            (true, true) => hints(&[(ok, "type"), ("X", "delete"), ("Y", "space"), ("✓", "go on"), (back, "back")]),
+            (true, false) => hints(&[("enter", "go on"), ("esc", "back")]),
+            (false, true) => hints(&[("↑/↓", "pick"), (ok, "choose"), (back, "cancel")]),
+            (false, false) => hints(&[("↑/↓", "pick"), ("enter", "choose"), ("esc", "cancel")]),
         };
         f.render_widget(Paragraph::new(line), area);
         return;

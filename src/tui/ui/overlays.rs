@@ -3,7 +3,7 @@
 use super::{Theme, centered};
 use crate::filter::ROWS as FILTER_ROWS;
 use crate::text;
-use crate::tui::app::{App, Level, OSK, PadState};
+use crate::tui::app::{App, Level, PadState};
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Style, Stylize};
@@ -37,9 +37,9 @@ pub(super) fn draw_filter(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
 
 /// The options: each setting and what it's set to, changed in place with left and right.
 pub(super) fn draw_options(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
-    use crate::tui::options::SETTINGS;
+    use crate::tui::options::{ACCOUNT_ROW, SETTINGS};
     let Some(sel) = app.options else { return };
-    let lines: Vec<Line> = SETTINGS
+    let mut lines: Vec<Line> = SETTINGS
         .iter()
         .enumerate()
         .map(|(i, &setting)| {
@@ -50,6 +50,12 @@ pub(super) fn draw_options(f: &mut Frame, app: &App, theme: &Theme, area: Rect) 
             ])
         })
         .collect();
+    let style = if sel == ACCOUNT_ROW { theme.selected(true) } else { Style::new() };
+    let account = text::truncate(app.account.as_deref().unwrap_or("log in…"), 19);
+    lines.push(Line::from(vec![
+        Span::styled(format!("  {:<18}", "RetroAchievements"), style.patch(Style::new().dim())),
+        Span::styled(format!("  {account:<22}"), style),
+    ]));
     let rect = centered(area, 46, lines.len() as u16 + 4);
     f.render_widget(Clear, rect);
     // What saving says, since the status line is hidden under the panel's hints.
@@ -65,6 +71,52 @@ pub(super) fn draw_options(f: &mut Frame, app: &App, theme: &Theme, area: Rect) 
     };
     let block = theme.block(" Options ", true).title_bottom(saved.right_aligned()).padding(Padding::vertical(1));
     f.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+/// The RetroAchievements login, and the on-screen keyboard while something's being typed.
+pub(super) fn draw_login(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
+    use crate::tui::login::Step;
+    let Some(screen) = &app.login else { return };
+    let note = "Unlocks in romi are softcore, and romi keeps a login token, not your password.";
+    let option = |picked: bool, name: String| {
+        let style = if picked { theme.selected(true) } else { Style::new() };
+        Line::from(Span::styled(format!(" {} {name} ", if picked { "›" } else { " " }), style))
+    };
+    let two = |first: String, second: &str| {
+        vec![option(screen.choice == 0, first), option(screen.choice == 1, second.to_string())]
+    };
+    let mut lines = match screen.step {
+        Step::Found => {
+            let name = screen.retroarch.as_ref().map_or("", |l| l.username.as_str());
+            let mut lines = vec![Line::raw(format!("RetroArch is logged in as {name}.")), Line::raw("")];
+            lines.extend(two(format!("Use {name} here too"), "Log in with another account"));
+            lines.extend([Line::raw(""), Line::from(Span::styled(note, Style::new().dim()))]);
+            lines
+        }
+        Step::Username | Step::Password => vec![Line::from(Span::styled(note, Style::new().dim()))],
+        Step::Waiting => vec![Line::raw(format!("Logging in as {}…", screen.username))],
+        Step::LogOut => {
+            let mut lines = vec![Line::raw(format!("Logged in as {}.", screen.username)), Line::raw("")];
+            lines.extend(two("Stay logged in".to_string(), "Log out"));
+            lines
+        }
+    };
+    if let Some(problem) = &screen.problem {
+        lines.extend([Line::raw(""), Line::from(Span::styled(problem.clone(), Style::new().fg(Color::Red)))]);
+    }
+    const WIDTH: u16 = 60;
+    let height = lines.iter().map(|l| (l.width() as u16).div_ceil(WIDTH - 4).max(1)).sum::<u16>() + 4;
+    let mut rect = centered(area, WIDTH, height);
+    if screen.typing() {
+        // Above the keyboard.
+        rect.y = area.y + 1;
+    }
+    f.render_widget(Clear, rect);
+    let block = theme.block(" RetroAchievements ", true).padding(Padding::new(1, 1, 1, 0));
+    f.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).block(block), rect);
+    if screen.typing() {
+        draw_osk(f, app, theme, area);
+    }
 }
 
 /// The controls screen: each of the game's buttons, and the one on the pad that sends it.
@@ -225,28 +277,36 @@ pub(super) fn draw_art_prompt(f: &mut Frame, app: &App, theme: &Theme, area: Rec
 /// The on-screen keyboard, docked at the bottom of the games pane so results stay visible above.
 pub(super) fn draw_osk(f: &mut Frame, app: &App, theme: &Theme, area: Rect) {
     let Some((row, col)) = app.osk else { return };
-    let (title, prompt, query) = match (&app.tag_name, &app.cheevos) {
-        (Some(name), _) => (" New tag ", " # ", name.as_str()),
-        (None, Some(screen)) if screen.typing => (" Search ", " / ", screen.query.as_str()),
-        _ => (" Search ", " / ", app.search.as_ref().map(|s| s.query.as_str()).unwrap_or_default()),
+    let (title, prompt, query) = match (&app.login, &app.tag_name, &app.cheevos) {
+        (Some(l), ..) if l.step == crate::tui::login::Step::Password => {
+            (" Password ", " > ", "•".repeat(l.password.chars().count()))
+        }
+        (Some(l), ..) => (" Username ", " > ", l.username.clone()),
+        (_, Some(name), _) => (" New tag ", " # ", name.clone()),
+        (_, None, Some(screen)) if screen.typing => (" Search ", " / ", screen.query.clone()),
+        _ => (" Search ", " / ", app.search.as_ref().map(|s| s.query.clone()).unwrap_or_default()),
     };
+    let capitals = app.login.as_ref().is_some_and(|l| l.shift);
+    let keys = app.osk_keys();
     let mut lines = vec![
         Line::from(vec![
             Span::styled(prompt, Style::new().fg(theme.accent).bold()),
-            Span::raw(query.to_string()),
+            Span::raw(query),
             Span::styled("█", Style::new().fg(theme.accent)),
         ]),
         Line::raw(""),
     ];
-    for (r, keys) in OSK.iter().enumerate() {
-        let spans = keys.iter().enumerate().map(|(c, k)| {
+    for (r, row_keys) in keys.iter().enumerate() {
+        let spans = row_keys.iter().enumerate().map(|(c, k)| {
             let style = if (r, c) == (row, col) { theme.selected(true) } else { Style::new() };
+            let k = if capitals { k.to_ascii_uppercase() } else { k.to_string() };
+            let k = if k.is_empty() { " ".to_string() } else { k };
             Span::styled(format!(" {k} "), style)
         });
         lines.push(Line::from(spans.collect::<Vec<_>>()).centered());
     }
     let h = lines.len() as u16 + 2;
-    let w = (OSK[0].len() as u16 * 3 + 4).min(area.width);
+    let w = (keys[0].len() as u16 * 3 + 4).min(area.width);
     let rect = Rect::new(area.x + (area.width - w) / 2, (area.y + area.height).saturating_sub(h + 1).max(area.y), w, h);
     f.render_widget(Clear, rect);
     f.render_widget(Paragraph::new(lines).block(theme.block(title, true)), rect);

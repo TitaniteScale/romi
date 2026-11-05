@@ -2,13 +2,13 @@
 //! the files below this one, starting with `input`.
 
 mod input;
+mod login;
 mod menu;
 mod playing;
 mod screens;
 mod search;
 
 pub use menu::{ArtPrompt, Menu};
-pub use search::OSK;
 
 use crate::config::{self, Config};
 use crate::emulators::Emulators;
@@ -185,6 +185,10 @@ pub struct App {
     emulators: Emulators,
     /// Cursor (row, column) while the on-screen keyboard is open.
     pub osk: Option<(usize, usize)>,
+    /// The RetroAchievements login screen, while it's open.
+    pub login: Option<crate::tui::login::LoginScreen>,
+    /// Who's logged in to RetroAchievements, as the options panel shows it.
+    pub account: Option<String>,
     /// Letter (or year) shown briefly after jumping to it.
     flash: Option<(String, Instant)>,
     pub filter: Filter,
@@ -272,6 +276,8 @@ impl App {
             art_prompt: None,
             emulators: Emulators::default(),
             osk: None,
+            login: None,
+            account: None,
             flash: None,
             metadata: None,
             filter: Filter::default(),
@@ -579,6 +585,7 @@ impl App {
         if self.embedded.is_none() && self.running.is_none() && self.watched.changed() {
             self.reload_as("Config changed, reloaded");
         }
+        self.poll_login();
         if let Some(screen) = &mut self.cheevos {
             screen.poll();
         }

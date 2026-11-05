@@ -522,7 +522,7 @@ impl Client {
                 (DONE_LOGIN, Some(e)) => {
                     login_failed = true;
                     events.push(Event::Problem(format!(
-                        "RetroAchievements login failed ({e}); log in again with `romi achievements login`"
+                        "RetroAchievements login failed ({e}); log in again from Options"
                     )));
                 }
                 // A load that waited on a failed login says so again; once is enough.

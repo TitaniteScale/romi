@@ -90,6 +90,9 @@ impl App {
 
     /// Whether keys go to a text field `edit_query` knows, as in `on_key`.
     fn typing(&self) -> bool {
+        if self.login.as_ref().is_some_and(|l| l.typing()) {
+            return true;
+        }
         if self.tag_name.is_some() {
             return true;
         }
@@ -130,6 +133,9 @@ impl App {
                 _ => {}
             }
             return;
+        }
+        if self.login.is_some() {
+            return self.login_key(k, ctrl);
         }
         if let Some(name) = &mut self.tag_name {
             match k.code {
@@ -375,6 +381,9 @@ impl App {
                 self.art_prompt = None;
             }
             return;
+        }
+        if self.login.is_some() {
+            return self.login_op(op);
         }
         // The on-screen keyboard is up while a tag is named, over the game's tags.
         if self.tag_name.is_some() {

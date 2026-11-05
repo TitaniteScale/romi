@@ -192,6 +192,10 @@ impl App {
                 let (_, state, _hooks) = session.end(None);
                 self.state = state;
             }
+            if !self.state.told_about_achievements && crate::emu::cheevos::saved_login().is_none() {
+                self.state = crate::state::State::update(|s| s.told_about_achievements = true);
+                self.set_status(Level::Info, "To earn achievements as you play, log in from Options");
+            }
             match embedded.write_timings() {
                 Some(Ok(path)) => self.set_status(Level::Info, format!("Frame timings in {}", config::tilde(&path))),
                 Some(Err(e)) => self.set_status(Level::Warn, format!("{e:#}")),

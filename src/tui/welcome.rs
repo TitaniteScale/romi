@@ -41,6 +41,8 @@ enum Step {
     Roms,
     /// Only with RetroArch here: without it, there's only romi's own folder.
     Folders,
+    /// Only with RetroArch logged in to RetroAchievements: nobody else is asked about an account.
+    Account,
     Found,
 }
 
@@ -223,6 +225,27 @@ pub struct Answers {
     pub roms: Option<PathBuf>,
     /// BIOS files and saves go in romi's own folder, not RetroArch's.
     pub own_folders: bool,
+    /// Use RetroArch's RetroAchievements login.
+    pub use_account: bool,
+}
+
+/// The question of whether to use RetroArch's RetroAchievements login, `name`.
+fn account_lines(name: &str, yes: bool) -> Vec<Line<'static>> {
+    let option = |picked: bool, text: String| {
+        let style = if picked { Style::new().fg(ACCENT).bold() } else { Style::new() };
+        Line::from(Span::styled(format!("{} {text}", if picked { "  ›" } else { "   " }), style))
+    };
+    let about = |text: &str| Line::from(Span::styled(format!("     {text}"), Style::new().dim()));
+    vec![
+        Line::raw(format!("RetroArch is logged in to RetroAchievements as {name}.")),
+        Line::raw(""),
+        option(yes, format!("Use {name}")),
+        about("Games played in romi earn achievements, with no password to type."),
+        about("They count as softcore, even if RetroArch has hardcore on."),
+        Line::raw(""),
+        option(!yes, "Not now".to_string()),
+        about("You can log in later from Options."),
+    ]
 }
 
 /// The question of where BIOS files and saves go, with `own` as the one picked.
@@ -308,10 +331,11 @@ pub fn first_run(
     found: Option<&Path>,
     usual: &str,
     retroarch: bool,
+    account: Option<&str>,
     preview: impl Fn(Option<&Path>, bool) -> String,
 ) -> Result<Option<Answers>> {
     let mut terminal = ratatui::init();
-    let answers = ask(&mut terminal, found, usual, retroarch, preview);
+    let answers = ask(&mut terminal, found, usual, retroarch, account, preview);
     let _ = execute!(stdout(), DisableBracketedPaste);
     ratatui::restore();
     answers
@@ -322,6 +346,7 @@ fn ask(
     found: Option<&Path>,
     usual: &str,
     retroarch: bool,
+    account: Option<&str>,
     preview: impl Fn(Option<&Path>, bool) -> String,
 ) -> Result<Option<Answers>> {
     let (tx, pads) = mpsc::channel();
@@ -338,6 +363,7 @@ fn ask(
     let mut roms: Option<PathBuf> = None;
     // RetroArch's, if it's here, so nothing changes for anyone who only presses on.
     let mut own_folders = !retroarch;
+    let mut use_account = account.is_some();
     let mut findings = String::new();
     let mut scroll = 0u16;
     let mut pasted = String::new();
@@ -351,6 +377,13 @@ fn ask(
                 f,
                 "Where should romi keep BIOS files and saves?",
                 folders_lines(own_folders),
+                0,
+                "↑↓ picks  ·  Enter goes on  ·  Esc goes back",
+            ),
+            Step::Account => draw_page(
+                f,
+                "Use your RetroAchievements account here too?",
+                account_lines(account.unwrap_or_default(), use_account),
                 0,
                 "↑↓ picks  ·  Enter goes on  ·  Esc goes back",
             ),
@@ -382,9 +415,10 @@ fn ask(
             (Step::Roms, Input::Confirm) => {
                 if let Some(answer) = question.answer() {
                     roms = answer;
-                    step = match retroarch {
-                        true => Step::Folders,
-                        false => go_on(&roms, own_folders, &mut findings, &mut scroll),
+                    step = match (retroarch, account) {
+                        (true, _) => Step::Folders,
+                        (false, Some(_)) => Step::Account,
+                        (false, None) => go_on(&roms, own_folders, &mut findings, &mut scroll),
                     };
                 }
             }
@@ -403,9 +437,19 @@ fn ask(
             }
             (Step::Folders, Input::Up | Input::Down) => own_folders = !own_folders,
             (Step::Folders, Input::Back) => step = Step::Roms,
+            (Step::Folders, Input::Confirm) if account.is_some() => step = Step::Account,
             (Step::Folders, Input::Confirm) => step = go_on(&roms, own_folders, &mut findings, &mut scroll),
-            (Step::Found, Input::Back) => step = if retroarch { Step::Folders } else { Step::Roms },
-            (Step::Found, Input::Confirm) => return Ok(Some(Answers { roms, own_folders })),
+            (Step::Account, Input::Up | Input::Down) => use_account = !use_account,
+            (Step::Account, Input::Back) => step = if retroarch { Step::Folders } else { Step::Roms },
+            (Step::Account, Input::Confirm) => step = go_on(&roms, own_folders, &mut findings, &mut scroll),
+            (Step::Found, Input::Back) => {
+                step = match (account, retroarch) {
+                    (Some(_), _) => Step::Account,
+                    (None, true) => Step::Folders,
+                    (None, false) => Step::Roms,
+                }
+            }
+            (Step::Found, Input::Confirm) => return Ok(Some(Answers { roms, own_folders, use_account })),
             (Step::Found, Input::Up) => scroll = scroll.saturating_sub(1),
             (Step::Found, Input::Down) => scroll = scroll.saturating_add(1),
             _ => {}

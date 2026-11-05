@@ -36,6 +36,8 @@ with `--roms` somewhere other than `roms_dir` get full paths instead, leaving `r
 
 With no config, `romi` opens on its title screen. Then it asks where your ROMs are, with the folder
 filled in if it found one, and, if RetroArch is here, whether to share its folders or keep to romi's own.
+If RetroArch is logged in to RetroAchievements, it asks whether to use that account in romi too, with no
+password to type.
 It shows what it found before writing anything. Saying yes does what
 `romi init` does, and the launcher opens. Esc goes back a screen, and from the title screen it leaves
 with nothing written. A controller works too, though it can only take the folder offered, not type one.

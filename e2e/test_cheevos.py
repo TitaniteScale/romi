@@ -412,3 +412,145 @@ def test_without_a_login_games_play_without_achievements(start, sandbox, server)
     romi.wait_for(lambda: b"i=%d," % 0x726F6D in romi.output, timeout=10)
     romi.pump(1)
     assert server.requests == []
+
+
+# ---- logging in from inside romi ----
+
+RETROARCH = f'cheevos_username = "{USER}"\ncheevos_token = "{TOKEN}"\n'
+
+
+def open_account_row(romi):
+    """The options panel, on the row past the settings, the last one."""
+    romi.keys("m")
+    romi.wait_for("Options…")
+    romi.choose("Options…")
+    romi.wait_for("RetroAchievements")
+    romi.keys("k")
+
+
+def test_logging_in_and_out_from_options(start, sandbox, server):
+    sandbox.extra_env["ROMI_RA_HOST"] = server.url
+    romi = start()
+    open_account_row(romi)
+    romi.wait_for("log in…")
+    romi.keys("\r")
+    romi.wait_for(" Username ")
+    assert "not your password" in romi.text()
+    romi.keys(USER + "\r")
+    romi.wait_for(" Password ")
+    romi.keys("wrong")
+    romi.wait_for("•••••")
+    assert "wrong" not in romi.text(), "the password never shows"
+    assert romi.text().count("⌫") == 1, "one keyboard"
+    assert "Launch animation" not in romi.text(), "with the options panel out of its way"
+    romi.keys("\r")
+    romi.wait_for("Invalid User/Password", timeout=10)
+    assert not (sandbox.home / LOGIN).exists()
+    romi.keys(PASSWORD + "\r")
+    romi.wait_for(lambda: (sandbox.home / LOGIN).exists(), timeout=10)
+    assert json.loads((sandbox.home / LOGIN).read_text()) == {"username": USER, "token": TOKEN}
+    assert PASSWORD not in (sandbox.home / LOGIN).read_text()
+    romi.wait_for(USER)
+
+    romi.keys("\r")
+    romi.wait_for(f"Logged in as {USER}")
+    assert "› Stay logged in" in romi.text(), "a stray press doesn't log anyone out"
+    romi.keys("\r")
+    romi.pump(0.3)
+    assert (sandbox.home / LOGIN).exists()
+    romi.keys("\r")
+    romi.wait_for(f"Logged in as {USER}")
+    romi.keys("j\r")
+    romi.wait_for("log in…")
+    assert not (sandbox.home / LOGIN).exists()
+
+
+def test_options_can_use_retroarchs_login(start, sandbox, server):
+    sandbox.extra_env["ROMI_RA_HOST"] = server.url
+    (sandbox.home / ".config/retroarch").mkdir(parents=True)
+    (sandbox.home / ".config/retroarch/retroarch.cfg").write_text(RETROARCH)
+    romi = start()
+    open_account_row(romi)
+    romi.keys("\r")
+    romi.wait_for(f"RetroArch is logged in as {USER}")
+    assert f"› Use {USER} here too" in romi.text()
+    assert "softcore" in romi.text()
+    romi.keys("\r")
+    romi.wait_for(lambda: (sandbox.home / LOGIN).exists())
+    assert json.loads((sandbox.home / LOGIN).read_text()) == {"username": USER, "token": TOKEN}
+    assert server.requests == [], "nothing to ask the server until a game starts"
+
+
+def test_options_can_log_in_to_another_account_than_retroarchs(start, sandbox, server):
+    sandbox.extra_env["ROMI_RA_HOST"] = server.url
+    (sandbox.home / ".config/retroarch").mkdir(parents=True)
+    (sandbox.home / ".config/retroarch/retroarch.cfg").write_text('cheevos_username = "Other"\ncheevos_token = "abc"\n')
+    romi = start()
+    open_account_row(romi)
+    romi.keys("\r")
+    romi.wait_for("RetroArch is logged in as Other")
+    romi.keys("j\r")
+    romi.wait_for(" Username ")
+    romi.keys("\x7f" * 5 + USER + "\r" + PASSWORD + "\r")
+    romi.wait_for(lambda: (sandbox.home / LOGIN).exists(), timeout=10)
+    assert json.loads((sandbox.home / LOGIN).read_text())["username"] == USER
+
+
+def test_a_controller_can_type_a_password_with_capitals_and_symbols(start, sandbox, server, pad):
+    sandbox.extra_env["ROMI_RA_HOST"] = server.url
+    sandbox.write_config(dict(CONFIG, controller={"enabled": True}))
+    romi = start(pad=pad)
+    open_account_row(romi)
+    romi.press("SOUTH")
+    romi.wait_for(" Username ")
+    romi.press("SOUTH")  # a
+    romi.wait_for(" > a")
+    for button in ["LEFT", "UP", "UP", "UP"]:  # round to ⇧ at the end of its row, past the blank row
+        romi.press(button)
+    romi.press("SOUTH")
+    romi.wait_for(" A ")
+    for button in ["DOWN", "DOWN", "DOWN", "RIGHT"]:  # back to A
+        romi.press(button)
+    romi.press("SOUTH")
+    romi.wait_for(" > aA")
+    romi.press("WEST")  # X deletes
+    romi.wait_for(lambda: " > aA" not in romi.text() and " > a" in romi.text())
+    romi.press("EAST")  # B goes back, out of the keyboard
+    romi.wait_for(lambda: " Username " not in romi.text())
+    assert "log in…" in romi.text()
+
+
+def test_a_first_game_says_where_to_log_in_once(start, sandbox, server):
+    set_up_an_nes_game(sandbox, server)
+    romi = start()
+    hint = "To earn achievements as you play, log in from Options"
+    for _ in range(2):
+        seen = len(romi.output)
+        romi.keys("o")
+        romi.wait_for("Play in romi")
+        romi.keys("\r")
+        romi.wait_for(lambda: b"i=%d," % 0x726F6D in romi.output[seen:], timeout=10)
+        romi.keys("\x1b")
+        romi.wait_for(lambda: b"a=d,d=I,i=%d" % 0x726F6D in romi.output[seen:])
+        romi.pump(0.5)
+        if _ == 0:
+            romi.wait_for(hint)
+            assert sandbox.state()["told_about_achievements"] is True
+            romi.pump(1)
+        else:
+            assert hint not in romi.text()
+
+
+def test_a_first_game_says_nothing_about_logging_in_with_a_login(start, sandbox, server):
+    set_up_an_nes_game(sandbox, server)
+    log_in(sandbox)
+    romi = start()
+    seen = len(romi.output)
+    romi.keys("o")
+    romi.wait_for("Play in romi")
+    romi.keys("\r")
+    romi.wait_for(lambda: b"i=%d," % 0x726F6D in romi.output[seen:], timeout=10)
+    romi.keys("\x1b")
+    romi.wait_for(lambda: b"a=d,d=I,i=%d" % 0x726F6D in romi.output[seen:])
+    romi.pump(0.5)
+    assert "log in from Options" not in romi.text()

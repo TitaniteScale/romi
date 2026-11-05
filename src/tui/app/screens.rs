@@ -61,13 +61,15 @@ impl App {
     /// The options panel: up/down picks a setting, left/right (or A) changes it, saving it into
     /// the config straight away.
     pub(super) fn options_op(&mut self, op: Op) {
-        use crate::tui::options::SETTINGS;
+        use crate::tui::options::{ACCOUNT_ROW, SETTINGS};
         let Some(row) = self.options else { return };
-        let n = SETTINGS.len();
+        let n = ACCOUNT_ROW + 1;
         match op {
             Op::Up => self.options = Some((row + n - 1) % n),
             Op::Down => self.options = Some((row + 1) % n),
             Op::Back | Op::Menu => self.options = None,
+            Op::Confirm if row == ACCOUNT_ROW => self.open_login(),
+            _ if row == ACCOUNT_ROW => {}
             Op::Left => self.change_setting(SETTINGS[row], false),
             Op::Right | Op::Confirm => self.change_setting(SETTINGS[row], true),
             _ => {}

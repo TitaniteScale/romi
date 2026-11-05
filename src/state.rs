@@ -32,6 +32,8 @@ pub struct State {
     pub players: Vec<String>,
     /// The save state slot each game was last on, by game key, when it isn't the first.
     pub state_slots: HashMap<String, u8>,
+    /// Whether the player's been told where to log in to RetroAchievements, after a first game.
+    pub told_about_achievements: bool,
 }
 
 impl State {
@@ -202,6 +204,7 @@ mod tests {
             grid: false,
             players: Vec::new(),
             state_slots: HashMap::new(),
+            told_about_achievements: false,
         };
         assert!(s.mentions("psx:a (Disc 2).chd"));
         s.rename_key("psx:a (Disc 2).chd", "psx:a.m3u");

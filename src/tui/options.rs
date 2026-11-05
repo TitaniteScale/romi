@@ -41,6 +41,9 @@ pub const SETTINGS: [Setting; 14] = [
     Setting::TitleScreen,
 ];
 
+/// The row after the settings: logging in to RetroAchievements, which isn't kept in the config.
+pub const ACCOUNT_ROW: usize = SETTINGS.len();
+
 const ACCENTS: [&str; 7] = ["blue", "cyan", "green", "yellow", "magenta", "red", "white"];
 const BORDERS: [&str; 5] = ["rounded", "plain", "thick", "double", "none"];
 

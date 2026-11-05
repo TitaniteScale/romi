@@ -234,6 +234,14 @@ pub fn retroarch_flatpak_here() -> bool {
     Emulator::RetroArch.config_dir(true).is_dir() || installed.into_iter().any(|d| d.join("app").join(id).is_dir())
 }
 
+/// RetroArch's RetroAchievements login, if it has one. The token works for any client, so romi can
+/// use it without asking for the password.
+pub fn retroarch_login() -> Option<crate::emu::cheevos::Login> {
+    let ini = Ini::read(&retroarch_dir().join("retroarch.cfg"));
+    let get = |key| ini.get("", key).filter(|v| !v.is_empty()).map(str::to_string);
+    Some(crate::emu::cheevos::Login { username: get("cheevos_username")?, token: get("cheevos_token")? })
+}
+
 /// Whether Ghostty's config asks for `background-blur`, which adds a lot of lag to games.
 pub fn ghostty_blur() -> bool {
     let dir = dirs::config_dir().unwrap_or_else(|| expand_path("~/.config")).join("ghostty");

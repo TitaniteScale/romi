@@ -13,6 +13,16 @@ pub const OSK: [[&str; 13]; 3] = [
     ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "␣", "⌫", "✓"],
 ];
 
+/// The keyboard for a login, as a password can have anything in it. ⇧ switches the letters to capitals.
+pub const LOGIN_OSK: [[&str; 13]; 6] = [
+    ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m"],
+    ["n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z"],
+    ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "␣", "⌫", "✓"],
+    ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")", "-", "_", "⇧"],
+    ["+", "=", "[", "]", "{", "}", ";", ":", "'", "\"", ",", ".", "?"],
+    ["/", "\\", "|", "~", "`", "<", ">", "", "", "", "", "", ""],
+];
+
 impl App {
     pub(super) fn filter_op(&mut self, op: Op) {
         let Some(row) = self.filter_panel else { return };
@@ -49,7 +59,8 @@ impl App {
     /// (the results stay, ready to browse).
     pub(super) fn osk_op(&mut self, op: Op) {
         let Some((row, col)) = self.osk else { return };
-        let (rows, cols) = (OSK.len(), OSK[0].len());
+        let keys = self.osk_keys();
+        let (rows, cols) = (keys.len(), keys[0].len());
         match op {
             Op::Up => self.osk = Some(((row + rows - 1) % rows, col)),
             Op::Down => self.osk = Some(((row + 1) % rows, col)),
@@ -57,21 +68,41 @@ impl App {
             Op::Right => self.osk = Some((row, (col + 1) % cols)),
             Op::Random => self.edit_query(None),
             Op::Favorite => self.edit_query(Some(' ')),
+            Op::Back | Op::Menu | Op::Search if self.login.is_some() => self.login_back(),
             Op::Back | Op::Menu | Op::Search if self.tag_name.is_some() => self.cancel_tag_name(),
             Op::Back | Op::Menu | Op::Search => self.close_osk(),
-            Op::Confirm => match OSK[row][col] {
+            Op::Confirm => match keys[row][col] {
+                "" => {}
                 "␣" => self.edit_query(Some(' ')),
                 "⌫" => self.edit_query(None),
+                "⇧" => {
+                    if let Some(screen) = &mut self.login {
+                        screen.shift = !screen.shift;
+                    }
+                }
+                "✓" if self.login.is_some() => self.login_next(),
                 "✓" if self.tag_name.is_some() => self.save_tag_name(),
                 "✓" => self.close_osk(),
-                key => self.edit_query(key.chars().next().map(|c| c.to_ascii_lowercase())),
+                key => {
+                    let capital = self.login.as_ref().is_some_and(|l| l.shift);
+                    let c = key.chars().next().map(|c| if capital { c.to_ascii_uppercase() } else { c });
+                    self.edit_query(c.map(|c| if self.login.is_some() { c } else { c.to_ascii_lowercase() }));
+                }
             },
             _ => {}
         }
     }
 
+    /// The keys the on-screen keyboard has just now.
+    pub fn osk_keys(&self) -> &'static [[&'static str; 13]] {
+        if self.login.is_some() { &LOGIN_OSK } else { &OSK }
+    }
+
     /// Types a character into the search (or a new tag's name), or deletes one with `None`.
     pub(super) fn edit_query(&mut self, c: Option<char>) {
+        if let Some(screen) = &mut self.login {
+            return screen.edit(c);
+        }
         if let Some(screen) = self.cheevos.as_mut().filter(|s| s.typing) {
             match c {
                 Some(c) => screen.query.push(c),

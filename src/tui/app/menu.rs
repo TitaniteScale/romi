@@ -433,7 +433,10 @@ impl App {
                         self.show_hidden = !self.show_hidden;
                         self.rebuild_keeping_selection();
                     }
-                    MenuItem::Options => self.options = Some(0),
+                    MenuItem::Options => {
+                        self.account = crate::emu::cheevos::saved_login().map(|l| l.username);
+                        self.options = Some(0);
+                    }
                     MenuItem::Players => self.players = Some(crate::tui::players::Screen::default()),
                     MenuItem::Reload => self.reload(),
                     MenuItem::Quit => self.quit = true,

@@ -5,6 +5,7 @@ pub mod app;
 pub mod cheevos;
 pub mod controls;
 pub mod cover;
+pub mod login;
 pub mod options;
 pub mod players;
 pub mod ui;
