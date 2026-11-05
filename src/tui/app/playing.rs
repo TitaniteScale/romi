@@ -192,6 +192,8 @@ impl App {
                 let (_, state, _hooks) = session.end(None);
                 self.state = state;
             }
+            // What was just earned should show when you look.
+            self.load_achievements();
             if !self.state.told_about_achievements && crate::emu::cheevos::saved_login().is_none() {
                 self.state = crate::state::State::update(|s| s.told_about_achievements = true);
                 self.set_status(Level::Info, "To earn achievements as you play, log in from Options");
@@ -299,6 +301,8 @@ impl App {
     /// been recorded.
     pub fn finish(&mut self, g: usize, played: Duration, code: Option<Option<i32>>) {
         let name = self.lib.games[g].name.clone();
+        // What was just earned should show when you look.
+        self.load_achievements();
         // Whatever window had focus is gone; assume we're back in front.
         self.term_focused = true;
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);

@@ -105,7 +105,7 @@ const EVENT_DISCONNECTED: u32 = 17;
 const EVENT_RECONNECTED: u32 = 18;
 
 /// A RetroAchievements server other than the real one, for tests (`http://127.0.0.1:8080`).
-const HOST_VAR: &str = "ROMI_RA_HOST";
+pub(crate) const HOST_VAR: &str = "ROMI_RA_HOST";
 
 // ---- what happens ----
 

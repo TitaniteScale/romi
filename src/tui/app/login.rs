@@ -181,5 +181,6 @@ impl App {
         self.set_status(Level::Info, format!("Logged in to RetroAchievements as {}", login.username));
         self.account = Some(login.username);
         self.close_login();
+        self.load_achievements();
     }
 }

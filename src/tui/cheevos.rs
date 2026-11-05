@@ -136,7 +136,7 @@ impl Screen {
         let (cheevos, rx) = match info.source {
             Source::RetroAchievements => {
                 let cfg = cfg.clone();
-                let rx = crate::ra::credentials(&cfg).map(|_| spawn(Box::new(move || crate::ra::fetch_game(&cfg, id))));
+                let rx = crate::ra::set_up(&cfg).then(|| spawn(Box::new(move || crate::ra::fetch_game(&cfg, id))));
                 (crate::ra::cached_game(id), rx)
             }
             // Steam's own cache has everything but how rare each is, which comes after.

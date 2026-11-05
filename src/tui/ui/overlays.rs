@@ -425,8 +425,14 @@ pub(super) fn draw_cheevos(f: &mut Frame, app: &mut App, theme: &Theme, area: Re
             }
             notes.extend(c.kind.as_ref().map(|k| k.replace('_', " ")));
             if let Some(when) = earned {
-                let mode = if c.earned_hardcore.is_some() { "hardcore, " } else { "" };
-                notes.push(format!("earned {mode}{}", when.split(' ').next().unwrap_or(when)));
+                // A login doesn't get the date.
+                let date = when.split(' ').next().unwrap_or(when);
+                notes.push(match (c.earned_hardcore.is_some(), date.is_empty()) {
+                    (false, true) => "earned".to_string(),
+                    (false, false) => format!("earned {date}"),
+                    (true, true) => "earned hardcore".to_string(),
+                    (true, false) => format!("earned hardcore, {date}"),
+                });
             }
             let title = if earned.is_some() { accent.bold() } else { Style::new().bold() };
             lines.push(Line::from(vec![

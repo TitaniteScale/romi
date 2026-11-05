@@ -478,7 +478,8 @@ def test_options_can_use_retroarchs_login(start, sandbox, server):
     romi.keys("\r")
     romi.wait_for(lambda: (sandbox.home / LOGIN).exists())
     assert json.loads((sandbox.home / LOGIN).read_text()) == {"username": USER, "token": TOKEN}
-    assert server.requests == [], "nothing to ask the server until a game starts"
+    # Its token is good as it is, and no game has started: only your progress is read.
+    assert not server.calls("login2") and not server.calls("startsession")
 
 
 def test_options_can_log_in_to_another_account_than_retroarchs(start, sandbox, server):

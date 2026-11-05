@@ -36,6 +36,8 @@ class FakeRetroAchievements:
         self.unlocked = set()
         # Answer unlocks as a server that's busy does, so they have to wait.
         self.fail_awards = False
+        # Add the stand-in achievement the real server warns unknown emulators with.
+        self.warn_unknown_emulator = False
         fake = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -77,6 +79,11 @@ class FakeRetroAchievements:
     def answer(self, p):
         r = p.get("r")
         signed_in = p.get("u") == USER and p.get("t") == TOKEN
+        if r == "systemgames":
+            games = [{"ID": self.game_id, "Title": self.title, "NumAchievements": len(self.achievements),
+                      "Points": sum(a[2] for a in self.achievements), "SupportedHashes": sorted(self.known_hashes or [])},
+                     {"ID": 99, "Title": "Nothing To Earn", "NumAchievements": 0, "Points": 0, "SupportedHashes": []}]
+            return 200, {"Success": True, "Response": games if int(p["s"]) == self.console else []}
         if r == "login2":
             if p.get("u") == USER and (p.get("p") == PASSWORD or p.get("t") == TOKEN):
                 return 200, {"Success": True, "User": USER, "Token": TOKEN, "Score": 0, "SoftcoreScore": 0,
@@ -86,20 +93,39 @@ class FakeRetroAchievements:
         if not signed_in:
             return 401, {"Success": False, "Error": "Invalid user/token", "Code": "invalid_credentials"}
         if r == "achievementsets":
-            if self.known_hashes is not None and p.get("m") not in self.known_hashes:
+            by_id = p.get("g") == str(self.game_id)
+            if not by_id and self.known_hashes is not None and p.get("m") not in self.known_hashes:
                 return 200, {"Success": True, "GameId": 0, "Title": "Unknown Game", "ConsoleId": 0, "ImageIconUrl": "", "RichPresenceGameId": 0, "RichPresencePatch": "", "Sets": []}
             achievements = [
                 {"ID": i, "Title": t, "Description": f"Do {t.lower()}", "Flags": 3, "Points": pts, "MemAddr": cond,
                  "Author": "Tester", "BadgeName": f"{i}", "BadgeURL": f"{self.url}/Badge/{i}.png",
-                 "BadgeLockedURL": f"{self.url}/Badge/{i}_lock.png", "Created": 1700000000, "Modified": 1700000000}
+                 "BadgeLockedURL": f"{self.url}/Badge/{i}_lock.png", "Created": 1700000000, "Modified": 1700000000,
+                 "Type": None, "Rarity": 25.0, "RarityHardcore": 10.0}
                 for i, t, pts, cond in self.achievements
             ]
+            if self.warn_unknown_emulator:
+                achievements.append(
+                    {"ID": 101000001, "Title": "Warning: Unknown Emulator", "Flags": 3, "Points": 0, "MemAddr": "0=1",
+                     "Description": "Hardcore unlocks cannot be earned using this emulator.", "Author": "",
+                     "BadgeName": "00000", "BadgeURL": "", "BadgeLockedURL": "", "Created": 1700000000,
+                     "Modified": 1700000000, "Type": None, "Rarity": 0, "RarityHardcore": 0})
             return 200, {"Success": True, "GameId": self.game_id, "Title": self.title, "ConsoleId": self.console,
                          "ImageIconUrl": f"{self.url}/Images/000001.png", "RichPresenceGameId": self.game_id,
                          "RichPresencePatch": self.rich_presence, "Sets": [{
                              "AchievementSetId": 1, "GameId": self.game_id, "Title": None, "Type": "core",
                              "ImageIconUrl": f"{self.url}/Images/000001.png",
                              "Achievements": achievements, "Leaderboards": []}]}
+        if r == "allprogress":
+            # As PHP sends an empty map: a list.
+            if int(p["c"]) != self.console:
+                return 200, {"Success": True, "Response": []}
+            entry = {"Achievements": len(self.achievements)}
+            if self.unlocked:
+                entry["Unlocked"] = len(self.unlocked)
+            return 200, {"Success": True, "Response": {str(self.game_id): entry}}
+        if r == "unlocks":
+            return 200, {"Success": True, "GameID": self.game_id, "HardcoreMode": p.get("h") == "1",
+                         "UserUnlocks": [] if p.get("h") == "1" else sorted(self.unlocked)}
         if r == "startsession":
             return 200, {"Success": True, "Unlocks": [{"ID": i, "When": 1700000000} for i in sorted(self.unlocked)],
                          "HardcoreUnlocks": [], "ServerNow": 1700000000}

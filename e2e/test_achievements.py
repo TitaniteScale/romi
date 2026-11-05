@@ -4,7 +4,14 @@ import json
 import os
 import subprocess
 
+import pytest
+
 from drive import CONFIG, binary
+from fake_ra import TOKEN, USER, FakeRetroAchievements
+
+# The fake server answers on a thread of this process, which Python warns about when the pty is
+# forked; the child only execs romi, so it's safe.
+pytestmark = pytest.mark.filterwarnings("ignore:This process .* is multi-threaded:DeprecationWarning")
 
 AW = "gba:Advance Wars (USA).gba"
 EMPTY_MD5 = "d41d8cd98f00b204e9800998ecf8427e"  # the sandbox's ROMs are empty files
@@ -59,8 +66,55 @@ def test_by_title_before_hashing(sandbox):
 
 def test_not_set_up(sandbox):
     out = run_cli(sandbox, "achievements")
-    assert out.returncode == 78 and "retroachievements" in out.stderr and "RA_API_KEY" in out.stderr
+    assert out.returncode == 78 and "romi achievements login" in out.stderr
     assert achievements(sandbox) is None
+
+
+def logged_in(sandbox, token=TOKEN):
+    """Logged in and nothing else: no username in the config, no web API key."""
+    server = FakeRetroAchievements(
+        [(1, "First Strike", 5, "0xH0000=1"), (2, "Perfect Campaign", 50, "0xH0000=2")],
+        game_id=506, title="Advance Wars", console=5, known_hashes={EMPTY_MD5})
+    server.unlocked = {1}
+    server.warn_unknown_emulator = True
+    login = sandbox.home / ".local/state/romi/retroachievements-login.json"
+    login.parent.mkdir(parents=True, exist_ok=True)
+    login.write_text(json.dumps({"username": USER, "token": token}))
+    sandbox.extra_env["ROMI_RA_HOST"] = server.url
+    return server
+
+
+def test_a_login_is_enough_to_see_progress(sandbox):
+    server = logged_in(sandbox)
+    out = run_cli(sandbox, "achievements")
+    assert out.returncode == 0, out.stderr
+    assert "1/2 achievements · 55 points" in out.stdout
+    assert achievements(sandbox)["id"] == 506
+    # A game with nothing to earn isn't listed, and a server's list for an empty system doesn't break it.
+    assert "Nothing To Earn" not in out.stdout and server.calls("allprogress")
+
+
+def test_a_login_opens_a_game(start, sandbox):
+    logged_in(sandbox)
+    romi = start()
+    romi.wait_for(lambda: (sandbox.home / ".cache/romi/ra/progress.json").exists())
+    romi.keys("A")
+    romi.wait_for("Advance Wars")
+    romi.keys("\r")
+    romi.wait_for("✓ First Strike")
+    text = romi.text()
+    assert "· Perfect Campaign  50 points · 25% of players" in text
+    assert "5 points · 25% of players · earned" in text
+    # The server's warning about unknown emulators isn't one of the game's achievements.
+    assert "Unknown Emulator" not in text
+
+
+def test_a_refused_login_says_so(sandbox):
+    logged_in(sandbox, token="stale")
+    (sandbox.home / ".cache/romi/ra").mkdir(parents=True, exist_ok=True)
+    # Lists need no login, and are fetched first.
+    out = run_cli(sandbox, "achievements")
+    assert out.returncode != 0 and "log in again" in out.stderr and "stale" not in out.stderr
 
 
 def test_details_pane(start, sandbox):

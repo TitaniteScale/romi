@@ -72,18 +72,16 @@ fn read_password(prompt: &str) -> Result<String> {
 pub(super) fn achievements(cfg: &Config, json: bool) -> Result<()> {
     let lib = Library::load(cfg);
     // Without RetroAchievements, Steam's own cache may still have something.
-    let ach = if crate::ra::credentials(cfg).is_some() {
+    let ach = if crate::ra::set_up(cfg) {
         crate::ra::Achievements::refresh(cfg, &lib).or_else(|e| fail(exit::UNAVAILABLE, format!("{e:#}")))?
     } else {
         crate::ra::Achievements::cached(cfg, &lib)
     };
-    if ach.games.is_empty() && crate::ra::credentials(cfg).is_none() {
-        let msg = format!(
-            "RetroAchievements isn't set up: add \"retroachievements\": {{ \"username\": \"...\" }} to the config, \
-             and put your web API key (retroachievements.org → Settings) in {} or RA_API_KEY",
-            cfg.retroachievements.key_file
+    if ach.games.is_empty() && !crate::ra::set_up(cfg) {
+        return fail(
+            exit::CONFIG,
+            "RetroAchievements isn't set up: log in with `romi achievements login`, or in Options",
         );
-        return fail(exit::CONFIG, msg);
     }
     // Games you've started first, furthest along first; then the rest by system and name.
     let mut games: Vec<(usize, &crate::ra::Info)> = lib

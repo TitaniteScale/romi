@@ -2,18 +2,22 @@
 
 ## RetroAchievements
 
-With your username in the config and your web API key (from Settings on retroachievements.org) in
-a file of its own, romi shows each game's achievements in the details pane: how many there are,
-what they're worth, how many you've earned, and your best award.
+Once you've [logged in](#earning-them-in-romi), romi shows each game's achievements in the details
+pane: how many there are, what they're worth, and how many you've earned. Your account on
+retroachievements.org is what's true; what romi keeps in `~/.cache/romi/ra` is a copy. The TUI
+refreshes it when it starts, after a game, and when you log in, and `romi achievements` refreshes it
+and lists your games that have achievements.
 
-```jsonc
-"retroachievements": { "username": "you" }
+A login can't see your awards (mastered, beaten) or when you earned things. For those, add your web
+API key, from Settings on retroachievements.org:
+
+```sh
+install -m 600 /dev/stdin ~/.config/romi/retroachievements.key   # paste it, then ctrl-d
 ```
 
-The key goes in `~/.config/romi/retroachievements.key` (`chmod 600` it), or `"key_file"` says
-where; `RA_API_KEY` in the environment beats both. Keeping it out of `config.json` keeps it out of
-your dotfiles. The TUI refreshes your progress when it starts, and `romi achievements` refreshes it
-and lists your games that have achievements.
+`"retroachievements": { "key_file": "..." }` says where else it is, and `RA_API_KEY` in the
+environment beats both. Keeping it out of `config.json` keeps it out of your dotfiles. Without a
+login, the key also needs `"retroachievements": { "username": "you" }`.
 
 Games played in another emulator earn achievements there, so each one needs RetroAchievements
 turned on and your login. `romi check` tells you which aren't set up.
@@ -32,7 +36,7 @@ romi achievements logout
 If RetroArch is logged in, romi offers to use its login, on a first run and in Options, with no
 password to type. Otherwise a hint after your first game says where to log in.
 
-The web API key can only read, so earning needs your password, once: romi swaps it for the login
+Earning needs your password, once, as a web API key can only read: romi swaps it for the login
 token the server gives, the way RetroArch does, and keeps only the token, in
 `~/.local/state/romi/retroachievements-login.json` (readable only by you). When a game starts, a
 notice over it says how many of its achievements you have; each unlock gets one of its own, with
@@ -71,7 +75,7 @@ core didn't give.
 `A`, Start → Achievements, or Achievements… in a game's menu lists your games that have
 achievements with your progress in each. ←/→ (or LB/RB) narrow it to a system, Tab (or X) to a
 status (in progress, not started, finished, or needing another dump), and `/` (or Select) searches
-by name. Opening a game lists its achievements: which you've earned and when, their points, how
+by name. Opening a game lists its achievements: which you've earned (and when, with a web API key), their points, how
 rare they are, and which are progression, win conditions or missable. They're fetched when you open
 the game and cached, so they show at once next time.
 

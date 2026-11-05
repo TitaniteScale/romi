@@ -276,6 +276,8 @@ It's built in steps, and the first one pays off without any of the TUI work:
      the rest, each with its badge when every one is here and the picture is tall enough (titles
      only otherwise). It yields to the progress box if they'd overlap on a narrow picture. Badge
      images are one Kitty image per slot (`notice::SLOT_*`), the unlock notice's first.
+   - ✓ **Logging in is enough to see achievements**: the details pane and the achievements screen read
+     your progress with the login token, and a web API key only adds awards and dates.
    - ✓ **Logging in from inside romi**: **RetroAchievements** in Options logs in and out, with an
      on-screen keyboard that has capitals and symbols, for a controller. RetroArch's login can be used
      as it is, in Options and on a first run, as its token is the same one the server gives romi for

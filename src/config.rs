@@ -599,10 +599,11 @@ impl SystemConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct RetroAchievementsConfig {
-    /// Your username on retroachievements.org. Without it, romi leaves achievements out.
+    /// Your username on retroachievements.org, for a web API key. Logging in doesn't need it.
     pub username: Option<String>,
     /// A file holding your web API key (retroachievements.org → Settings → Keys), kept out of
-    /// this file so the config can be shared. `RA_API_KEY` in the environment overrides it.
+    /// this file so the config can be shared. `RA_API_KEY` in the environment overrides it. It's
+    /// optional: it adds your awards and the dates you earned things to what a login shows.
     pub key_file: String,
     /// Show an achievement's badge in the notice when it unlocks in a game played in romi.
     pub badges: bool,

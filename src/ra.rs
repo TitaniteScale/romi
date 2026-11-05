@@ -1,5 +1,10 @@
 //! RetroAchievements: which games have achievements, and your progress in them, from
-//! retroachievements.org's web API (a free key, from Settings on the site).
+//! retroachievements.org. Your account there is what's true; everything here is a copy of it.
+//!
+//! Logging in is enough: the login token reads the API emulators use (`dorequest.php`), and needs
+//! no setup. That API only says how many achievements you've earned and which, so a web API key (a
+//! free one, from Settings on the site), when there is one, is used instead for your awards and the
+//! dates you earned them.
 //!
 //! Games are matched to RetroAchievements' the way RetroArch does it, by a hash of the ROM, for
 //! arcade sets and cartridges: so a game only shows achievements if that dump can earn them.
@@ -9,19 +14,26 @@
 //! starts; so does `romi achievements`).
 
 use crate::config::{self, Config, expand_path};
+use crate::emu::cheevos::Login;
 use crate::files::StampCache;
 use crate::library::Library;
 use crate::titles::TitleIndex;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const API: &str = "https://retroachievements.org/API";
+const SERVER: &str = "https://retroachievements.org";
 const LIST_MAX_AGE: Duration = Duration::from_secs(7 * 24 * 3600);
 /// Your progress comes back in pages of at most this many games.
 const PAGE: usize = 500;
+/// The stand-in achievement the server adds to a game for emulators it doesn't recognise, to warn
+/// that hardcore unlocks can't be earned. rcheevos knows it by this id too.
+const WARNING_ACHIEVEMENT: u64 = 101_000_001;
+/// `Flags` of an achievement that's in the game's official set, as opposed to an unofficial one.
+const OFFICIAL: u32 = 3;
 
 /// Where a game's achievements come from.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -90,8 +102,9 @@ struct Listed {
     id: u64,
     num_achievements: u32,
     points: u32,
-    /// MD5s of the dumps it supports (lowercase hex).
-    #[serde(default)]
+    /// MD5s of the dumps it supports (lowercase hex). Lists cached before `systemgames` was used
+    /// call them `Hashes`.
+    #[serde(default, alias = "SupportedHashes")]
     hashes: Vec<String>,
 }
 
@@ -113,15 +126,170 @@ struct ProgressPage {
     results: Vec<Progress>,
 }
 
-/// Your username and key, if both are set up: the key from `RA_API_KEY`, or else the key file.
-pub fn credentials(cfg: &Config) -> Option<(String, String)> {
-    let user = cfg.retroachievements.username.clone().filter(|u| !u.trim().is_empty())?;
+/// How your progress is read.
+enum Account {
+    /// A web API key, which also gets your awards and the dates you earned things.
+    Key { user: String, key: String },
+    /// The saved login, which is all most people have.
+    Login(Login),
+}
+
+/// A web API key if there's one and a username to go with it (the config's, or the login's), or
+/// else the saved login. The key comes from `RA_API_KEY`, or else the key file.
+fn account(cfg: &Config) -> Option<Account> {
+    let login = crate::emu::cheevos::saved_login();
     let key = std::env::var("RA_API_KEY")
         .ok()
         .or_else(|| std::fs::read_to_string(expand_path(&cfg.retroachievements.key_file)).ok())
         .map(|k| k.trim().to_string())
-        .filter(|k| !k.is_empty())?;
-    Some((user, key))
+        .filter(|k| !k.is_empty());
+    let user = cfg
+        .retroachievements
+        .username
+        .clone()
+        .filter(|u| !u.trim().is_empty())
+        .or_else(|| login.as_ref().map(|l| l.username.clone()));
+    match (key, user) {
+        (Some(key), Some(user)) => Some(Account::Key { user, key }),
+        _ => login.map(Account::Login),
+    }
+}
+
+/// Whether your progress can be read: you're logged in, or have a web API key.
+pub fn set_up(cfg: &Config) -> bool {
+    account(cfg).is_some()
+}
+
+/// Asks the API emulators use. The login token goes in the body, so it can't end up in an error.
+fn ask(agent: &ureq::Agent, params: &[(&str, &str)]) -> Result<Vec<u8>> {
+    let host = std::env::var(crate::emu::cheevos::HOST_VAR).unwrap_or_else(|_| SERVER.to_string());
+    let url = format!("{host}/dorequest.php");
+    let attempt = || -> Result<Vec<u8>, ureq::Error> {
+        agent.post(&url).send_form(params.iter().copied())?.body_mut().with_config().limit(32 << 20).read_to_vec()
+    };
+    let mut result = attempt();
+    if matches!(&result, Err(e) if !matches!(e, ureq::Error::StatusCode(_))) {
+        std::thread::sleep(Duration::from_secs(2));
+        result = attempt();
+    }
+    match result {
+        Ok(bytes) => Ok(bytes),
+        Err(ureq::Error::StatusCode(401 | 403)) => bail!("retroachievements.org refused your login: log in again"),
+        Err(e) => Err(anyhow!("retroachievements.org: {e:#}")),
+    }
+}
+
+/// One system's games, as `API_GetGameList` gives them but with no key needed.
+fn fetch_list(agent: &ureq::Agent, console: u32) -> Result<serde_json::Value> {
+    let bytes = ask(agent, &[("r", "systemgames"), ("s", &console.to_string())])?;
+    let mut answer: serde_json::Value =
+        serde_json::from_slice(&bytes).context("retroachievements.org: unexpected game list")?;
+    let list = answer.get_mut("Response").map(serde_json::Value::take).unwrap_or_default();
+    serde_json::from_value::<Vec<Listed>>(list.clone()).context("retroachievements.org: unexpected game list")?;
+    Ok(list)
+}
+
+/// Your progress on these systems, from the login. Games you haven't started are left out.
+fn login_progress(agent: &ureq::Agent, login: &Login, consoles: &[u32]) -> Result<Vec<Progress>> {
+    #[derive(Default, Deserialize)]
+    #[serde(rename_all = "PascalCase", default)]
+    struct Entry {
+        unlocked: u32,
+        unlocked_hardcore: u32,
+    }
+    let mut progress = Vec::new();
+    for c in consoles {
+        let params = [("r", "allprogress"), ("u", &*login.username), ("t", &*login.token), ("c", &*c.to_string())];
+        let answer: serde_json::Value =
+            serde_json::from_slice(&ask(agent, &params)?).context("retroachievements.org: unexpected progress")?;
+        // A system you have nothing on can come back as an empty list.
+        let Some(games) = answer.get("Response").and_then(|r| r.as_object()) else { continue };
+        for (id, entry) in games {
+            let Ok(game_id) = id.parse() else { continue };
+            let entry: Entry = serde_json::from_value(entry.clone()).unwrap_or_default();
+            if entry.unlocked > 0 || entry.unlocked_hardcore > 0 {
+                progress.push(Progress {
+                    game_id,
+                    // Hardcore unlocks count in either mode.
+                    num_awarded: entry.unlocked.max(entry.unlocked_hardcore),
+                    num_awarded_hardcore: entry.unlocked_hardcore,
+                    highest_award_kind: None,
+                });
+            }
+        }
+    }
+    Ok(progress)
+}
+
+/// A game's achievements and which you've earned, from the login.
+fn login_game(agent: &ureq::Agent, login: &Login, id: u64) -> Result<Vec<Cheevo>> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Answer {
+        #[serde(default)]
+        sets: Vec<Set>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Set {
+        game_id: u64,
+        #[serde(default)]
+        achievements: Vec<Achievement>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Achievement {
+        #[serde(rename = "ID")]
+        id: u64,
+        title: String,
+        description: String,
+        points: u32,
+        flags: u32,
+        #[serde(rename = "Type")]
+        kind: Option<String>,
+        /// A percentage.
+        rarity: Option<f32>,
+    }
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Unlocks {
+        #[serde(default)]
+        user_unlocks: Vec<u64>,
+    }
+    let game = id.to_string();
+    let (user, token) = (&*login.username, &*login.token);
+    let params = [("r", "achievementsets"), ("u", user), ("t", token), ("g", &*game)];
+    let answer: Answer =
+        serde_json::from_slice(&ask(agent, &params)?).context("retroachievements.org: unexpected game info")?;
+    let unlocks = |hardcore: &str| -> Result<Vec<u64>> {
+        let params = [("r", "unlocks"), ("u", user), ("t", token), ("g", &*game), ("h", hardcore)];
+        let answer: Unlocks =
+            serde_json::from_slice(&ask(agent, &params)?).context("retroachievements.org: unexpected unlocks")?;
+        Ok(answer.user_unlocks)
+    };
+    let (softcore, hardcore) = (unlocks("0")?, unlocks("1")?);
+    // The answer also holds the game's subsets, which are games of their own.
+    let cheevos = answer
+        .sets
+        .into_iter()
+        .filter(|s| s.game_id == id)
+        .flat_map(|s| s.achievements)
+        .filter(|a| a.flags == OFFICIAL && a.id != WARNING_ACHIEVEMENT)
+        .map(|a| {
+            let in_hardcore = hardcore.contains(&a.id);
+            Cheevo {
+                key: a.id.to_string(),
+                title: a.title,
+                description: a.description,
+                points: a.points,
+                kind: a.kind.filter(|k| !k.is_empty()),
+                earned: (in_hardcore || softcore.contains(&a.id)).then(String::new),
+                earned_hardcore: in_hardcore.then(String::new),
+                rarity: a.rarity.map_or(-1.0, |r| (r / 100.0).min(1.0)),
+            }
+        })
+        .collect();
+    Ok(cheevos)
 }
 
 /// One achievement of a game, as the achievements screen shows it.
@@ -135,7 +303,8 @@ pub struct Cheevo {
     pub points: u32,
     /// "progression", "win_condition", "missable", or none.
     pub kind: Option<String>,
-    /// When you earned it ("2026-10-24 12:00:00"), in either mode and in hardcore.
+    /// When you earned it ("2026-10-24 12:00:00"), in either mode and in hardcore. Empty when you
+    /// have it but the date isn't known: a login doesn't get dates.
     pub earned: Option<String>,
     pub earned_hardcore: Option<String>,
     /// The share of the game's players who have it, 0 to 1; negative when it isn't known.
@@ -149,6 +318,17 @@ pub fn cached_game(id: u64) -> Option<Vec<Cheevo>> {
 
 /// Fetches a game's achievements and your progress in them, and caches them.
 pub fn fetch_game(cfg: &Config, id: u64) -> Result<Vec<Cheevo>> {
+    let cheevos = match account(cfg).context("RetroAchievements isn't set up")? {
+        Account::Key { user, key } => key_game(&user, &key, id)?,
+        Account::Login(login) => login_game(&crate::art::agent(), &login, id)?,
+    };
+    std::fs::create_dir_all(cache_dir())?;
+    std::fs::write(cache_dir().join(format!("game-{id}.json")), serde_json::to_vec(&cheevos)?)?;
+    Ok(cheevos)
+}
+
+/// A game's achievements and your progress in them, from a web API key.
+fn key_game(user: &str, key: &str, id: u64) -> Result<Vec<Cheevo>> {
     #[derive(Deserialize)]
     #[serde(rename_all = "PascalCase")]
     struct Game {
@@ -171,16 +351,15 @@ pub fn fetch_game(cfg: &Config, id: u64) -> Result<Vec<Cheevo>> {
         date_earned: Option<String>,
         date_earned_hardcore: Option<String>,
     }
-    let (user, key) = credentials(cfg).context("RetroAchievements isn't set up")?;
-    let url = format!("{API}/API_GetGameInfoAndUserProgress.php?g={id}&u={}&y={key}", crate::art::encode(&user));
+    let url = format!("{API}/API_GetGameInfoAndUserProgress.php?g={id}&u={}&y={key}", crate::art::encode(user));
     let bytes = crate::art::get(&crate::art::agent(), &url, 32 << 20)
-        .map_err(|e| anyhow!("retroachievements.org: {}", format!("{e:#}").replace(&key, "…")))?
+        .map_err(|e| anyhow!("retroachievements.org: {}", format!("{e:#}").replace(key, "…")))?
         .context("retroachievements.org: no such game")?;
     let game: Game = serde_json::from_slice(&bytes).context("retroachievements.org: unexpected game info")?;
     let players = game.num_distinct_players.unwrap_or(0).max(1) as f32;
     let mut list: Vec<Achievement> = game.achievements.into_values().collect();
     list.sort_by_key(|a| (a.display_order, a.id));
-    let cheevos: Vec<Cheevo> = list
+    Ok(list
         .into_iter()
         .map(|a| Cheevo {
             key: a.id.to_string(),
@@ -192,10 +371,7 @@ pub fn fetch_game(cfg: &Config, id: u64) -> Result<Vec<Cheevo>> {
             earned_hardcore: a.date_earned_hardcore,
             rarity: (a.num_awarded as f32 / players).min(1.0),
         })
-        .collect();
-    std::fs::create_dir_all(cache_dir())?;
-    std::fs::write(cache_dir().join(format!("game-{id}.json")), serde_json::to_vec(&cheevos)?)?;
-    Ok(cheevos)
+        .collect())
 }
 
 /// RetroAchievements' console id for an ES-DE (or romi) system id.
@@ -296,14 +472,8 @@ impl Achievements {
 
     /// Fetches the game lists that are more than a week old, and your progress, then matches.
     pub fn refresh(cfg: &Config, lib: &Library) -> Result<Achievements> {
-        let (user, key) = credentials(cfg).context("RetroAchievements isn't set up")?;
+        let account = account(cfg).context("RetroAchievements isn't set up")?;
         let agent = crate::art::agent();
-        let fetch = |url: String| -> Result<Vec<u8>> {
-            // Errors mustn't carry the URL: it has the key in it.
-            crate::art::get(&agent, &url, 32 << 20)
-                .map_err(|e| anyhow!("retroachievements.org: {}", format!("{e:#}").replace(&key, "…")))?
-                .context("retroachievements.org: not found")
-        };
         std::fs::create_dir_all(cache_dir())?;
 
         let mut lists = HashMap::new();
@@ -312,30 +482,17 @@ impl Achievements {
                 .and_then(|m| m.modified())
                 .is_ok_and(|t| t.elapsed().unwrap_or(LIST_MAX_AGE) < LIST_MAX_AGE);
             if !fresh {
-                let bytes = fetch(format!("{API}/API_GetGameList.php?i={c}&f=1&h=1&y={key}"))?;
-                serde_json::from_slice::<Vec<Listed>>(&bytes).context("retroachievements.org: unexpected game list")?;
-                std::fs::write(list_path(c), &bytes)?;
+                std::fs::write(list_path(c), serde_json::to_vec(&fetch_list(&agent, c)?)?)?;
             }
             if let Some(list) = read_list(c) {
                 lists.insert(c, list);
             }
         }
 
-        let mut progress = Vec::new();
-        loop {
-            let url = format!(
-                "{API}/API_GetUserCompletionProgress.php?u={}&c={PAGE}&o={}&y={key}",
-                crate::art::encode(&user),
-                progress.len()
-            );
-            let page: ProgressPage =
-                serde_json::from_slice(&fetch(url)?).context("retroachievements.org: unexpected progress")?;
-            let done = page.results.is_empty() || progress.len() + page.results.len() >= page.total;
-            progress.extend(page.results);
-            if done {
-                break;
-            }
-        }
+        let progress = match &account {
+            Account::Key { user, key } => key_progress(&agent, user, key)?,
+            Account::Login(login) => login_progress(&agent, login, &consoles(lib))?,
+        };
         std::fs::write(progress_path(), serde_json::to_vec(&progress)?)?;
 
         let mut hashes = Hashes::load();
@@ -406,6 +563,29 @@ impl Achievements {
             }
         }
         Achievements { games }
+    }
+}
+
+/// Your progress in everything you've started, with your awards, from a web API key.
+fn key_progress(agent: &ureq::Agent, user: &str, key: &str) -> Result<Vec<Progress>> {
+    let mut progress = Vec::new();
+    loop {
+        let url = format!(
+            "{API}/API_GetUserCompletionProgress.php?u={}&c={PAGE}&o={}&y={key}",
+            crate::art::encode(user),
+            progress.len()
+        );
+        // Errors mustn't carry the URL: it has the key in it.
+        let bytes = crate::art::get(agent, &url, 32 << 20)
+            .map_err(|e| anyhow!("retroachievements.org: {}", format!("{e:#}").replace(key, "…")))?
+            .context("retroachievements.org: not found")?;
+        let page: ProgressPage =
+            serde_json::from_slice(&bytes).context("retroachievements.org: unexpected progress")?;
+        let done = page.results.is_empty() || progress.len() + page.results.len() >= page.total;
+        progress.extend(page.results);
+        if done {
+            return Ok(progress);
+        }
     }
 }
 
@@ -612,8 +792,11 @@ fn consoles(lib: &Library) -> Vec<u32> {
     c
 }
 
+/// A system's games that have achievements, as last fetched.
 fn read_list(console: u32) -> Option<Vec<Listed>> {
-    serde_json::from_slice(&std::fs::read(list_path(console)).ok()?).ok()
+    let mut list: Vec<Listed> = serde_json::from_slice(&std::fs::read(list_path(console)).ok()?).ok()?;
+    list.retain(|l| l.num_achievements > 0);
+    Some(list)
 }
 
 /// RetroAchievements marks hacks, homebrew and the like with a `~Tag~` before the title. Turned
