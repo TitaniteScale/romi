@@ -189,7 +189,7 @@ class Romi:
         # The start of a graphics command, until the rest of it comes.
         self.partial = b""
         env = sandbox.env if sandbox else dict(os.environ)
-        for name in ("TERM_PROGRAM", "KITTY_WINDOW_ID", "KONSOLE_VERSION", "TMUX", "ZELLIJ"):
+        for name in ("TERM_PROGRAM", "KITTY_WINDOW_ID", "KONSOLE_VERSION", "TMUX", "ZELLIJ", "SSH_CONNECTION"):
             env.pop(name, None)
         env["TERM"] = term
         argv = [binary(), *args]

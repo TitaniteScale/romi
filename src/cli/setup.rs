@@ -368,7 +368,7 @@ pub(super) fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
     match terminal.shows_games {
         true => println!("terminal  {}: games play inside romi", terminal.name),
         false => println!(
-            "terminal  ! {}: games only show inside romi in Ghostty or kitty, so A starts their emulators",
+            "terminal  ! {}: games only show inside romi in Ghostty or kitty on this machine, so A starts their emulators",
             terminal.name
         ),
     }

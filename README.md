@@ -93,7 +93,7 @@ recommended. PCSX2 is still there for anything else, in its own window.
   placeholders, and it doesn't work in foot, Alacritty, Konsole or WezTerm, the others it's been
   tried in. Cores marked GPU above draw with OpenGL and need libEGL; Vulkan-only renderers won't
   start. They've been tested on one laptop so far: a Radeon 890M with Mesa, and an RTX 4060 for PS2.
-- **In other terminals,** you still get the library, and A starts games in their emulators and says
+- **In other terminals, and over SSH,** you still get the library, and A starts games in their emulators and says
   why. If yours can show them, **Play in romi** in a game's menu will still try. Box art is drawn with Kitty graphics, Sixel or iTerm2 images, or colored half-blocks where there
   are none.
 

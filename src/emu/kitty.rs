@@ -36,6 +36,10 @@ fn terminal_from(var: impl Fn(&str) -> Option<String>) -> Terminal {
     if var("ZELLIJ").is_some() {
         return is("zellij", false);
     }
+    // The terminal's on another machine, and frames go through shared memory on this one.
+    if var("SSH_CONNECTION").is_some() {
+        return is("SSH", false);
+    }
     if term == "xterm-ghostty" || program == "ghostty" {
         return is("Ghostty", true);
     }
@@ -480,6 +484,8 @@ mod tests {
         assert_eq!(in_env(&[]), named("this terminal", false));
         let in_tmux = [("TERM", "xterm-kitty"), ("KITTY_WINDOW_ID", "1"), ("TMUX", "/tmp/tmux,1,0")];
         assert_eq!(in_env(&in_tmux), named("tmux", false));
+        let over_ssh = [("TERM", "xterm-ghostty"), ("SSH_CONNECTION", "10.0.0.2 50000 10.0.0.3 22")];
+        assert_eq!(in_env(&over_ssh), named("SSH", false));
     }
 
     #[test]
