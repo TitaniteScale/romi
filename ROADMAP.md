@@ -345,7 +345,11 @@ It's built in steps, and the first one pays off without any of the TUI work:
      pseudo-terminal so far, with its frames read back from shared memory, so it still needs
      watching in Ghostty and kitty.
 
-The spike settled 60 fps in Ghostty. Input lag is [#11](https://github.com/TitaniteScale/romi/issues/11), and other terminals [#12](https://github.com/TitaniteScale/romi/issues/12).
+The spike settled 60 fps in Ghostty. Input lag was measured on 2026-11-04, press to composited picture at
+4K on a Radeon 890M. Frame size doesn't matter (a quarter-size frame was no better). Ghostty's
+`background-blur` is what costs: 2D is 57 ms in RetroArch, 60 in Ghostty without blur and 106 with it,
+and `romi check` warns about it. 3D is 58, 82 and 147, so about 24 ms of it is still romi's
+([#11](https://github.com/TitaniteScale/romi/issues/11)). Other terminals are [#12](https://github.com/TitaniteScale/romi/issues/12).
 
 ## 7. Systems that need a GPU
 

@@ -372,6 +372,9 @@ pub(super) fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
             terminal.name
         ),
     }
+    if terminal.name == "Ghostty" && crate::emucfg::ghostty_blur() {
+        println!("          ! background-blur in Ghostty's config adds lag to games: about 45 ms measured at 4K");
+    }
     let core_folders = crate::init::Catalog::for_config(cfg).core_folders();
     println!("cores     {}", where_cores_are(&core_folders));
     println!("bios      {}", where_bios_is(cfg));

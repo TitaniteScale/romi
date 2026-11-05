@@ -7,7 +7,8 @@ anywhere. The pieces are in [`examples/couch`](../examples/couch):
 
 - **`romi-couch`** starts romi in a Ghostty window of its own: full screen, no decorations, a big
   font (`ROMI_FONT_SIZE`, 18 by default, which leaves room for box art on a 1920-pixel-wide screen),
-  and the class `romi.couch` so the compositor can tell it apart. Put it on your PATH:
+  and the class `romi.couch` so the compositor can tell it apart. It turns off Ghostty's
+  `background-blur`, which adds lag to games (see the README). Put it on your PATH:
   `install -m755 examples/couch/romi-couch ~/.local/bin/`.
 - **`hyprland.lua`** (Hyprland 0.55+'s Lua config) gives that window a workspace of its own named
   `romi`, which status bars show by name, and binds SUPER+SHIFT+G to go there, starting romi if it

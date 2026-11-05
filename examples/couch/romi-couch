@@ -5,5 +5,5 @@
 # art from 110 columns, which 18 gives on a 1920-pixel-wide screen.
 exec ghostty --class=romi.couch --title=romi \
   --font-size="${ROMI_FONT_SIZE:-18}" --fullscreen=true --window-decoration=none \
-  --background-opacity=1 --confirm-close-surface=false \
+  --background-opacity=1 --background-blur=false --confirm-close-surface=false \
   -e romi "$@"

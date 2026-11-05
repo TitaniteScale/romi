@@ -234,6 +234,35 @@ pub fn retroarch_flatpak_here() -> bool {
     Emulator::RetroArch.config_dir(true).is_dir() || installed.into_iter().any(|d| d.join("app").join(id).is_dir())
 }
 
+/// Whether Ghostty's config asks for `background-blur`, which adds a lot of lag to games.
+pub fn ghostty_blur() -> bool {
+    let dir = dirs::config_dir().unwrap_or_else(|| expand_path("~/.config")).join("ghostty");
+    let mut blur = false;
+    for name in ["config", "config.ghostty"] {
+        read_ghostty_config(&dir.join(name), &mut blur, 0);
+    }
+    blur
+}
+
+/// Goes through one of Ghostty's config files for `background-blur`, the last line winning. The files
+/// a `config-file` line names come after the rest of the file, as Ghostty takes them.
+fn read_ghostty_config(path: &Path, blur: &mut bool, depth: u8) {
+    let Ok(text) = std::fs::read_to_string(path) else { return };
+    let mut others = Vec::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.starts_with('#')) {
+        let Some((key, value)) = line.split_once('=') else { continue };
+        let value = value.trim().trim_matches('"');
+        match key.trim() {
+            "background-blur" => *blur = !matches!(value, "" | "false" | "0"),
+            "config-file" if depth < 8 => others.push(expand_path(value.trim_start_matches('?'))),
+            _ => {}
+        }
+    }
+    for other in others {
+        read_ghostty_config(&path.parent().unwrap_or(Path::new(".")).join(other), blur, depth + 1);
+    }
+}
+
 /// Where RetroArch keeps its settings: the Flatpak's folder when that's the only RetroArch here, so
 /// one on the machine itself always wins.
 fn retroarch_dir() -> PathBuf {
@@ -653,6 +682,29 @@ mod tests {
         assert_eq!(Emulator::of("flatpak run org.DolphinEmu.dolphin-emu -b -e {rom}"), Some((Emulator::Dolphin, true)));
         assert_eq!(Emulator::of("melonDS -f {rom}"), Some((Emulator::MelonDs, false)));
         assert_eq!(Emulator::of("mednafen {rom}"), None);
+    }
+
+    #[test]
+    fn ghostty_blur_is_the_last_line_with_other_files_after() {
+        let dir = std::env::temp_dir().join(format!("romi-ghostty-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let blurred = |text: &str, other: &str| {
+            std::fs::write(dir.join("config"), text).unwrap();
+            std::fs::write(dir.join("other"), other).unwrap();
+            let mut blur = false;
+            read_ghostty_config(&dir.join("config"), &mut blur, 0);
+            blur
+        };
+        assert!(!blurred("background-opacity = .8\n", ""));
+        assert!(blurred("background-blur = 20\n", ""));
+        assert!(blurred("background-blur = true\n", ""));
+        assert!(!blurred("background-blur = 20\nbackground-blur = false\n", ""));
+        assert!(!blurred("background-blur = 0\n", ""));
+        assert!(!blurred("# background-blur = 20\n", ""), "a comment");
+        assert!(blurred("config-file = other\nbackground-blur = false\n", "background-blur = 20\n"), "after");
+        assert!(!blurred("config-file = ?missing\n", ""));
+        assert!(!blurred("config-file = config\n", ""), "a file that includes itself ends");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

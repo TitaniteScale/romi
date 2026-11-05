@@ -798,3 +798,14 @@ def test_check_has_nothing_to_add_after_init_on_a_messy_tree(machine):
     assert init(machine, "--roms", str(roms), "--yes").returncode == 0
     out = romi(machine, "check")
     assert "romi init" not in out.stdout + out.stderr, out.stdout + out.stderr
+
+
+def test_check_warns_about_ghosttys_blur(sandbox):
+    sandbox.extra_env.update(TERM="xterm-ghostty", TERM_PROGRAM="ghostty")
+    warning = "background-blur in Ghostty's config adds lag to games"
+    assert warning not in check(sandbox)
+    (sandbox.home / ".config/ghostty").mkdir(parents=True)
+    (sandbox.home / ".config/ghostty/config").write_text("background-blur = 20\n")
+    assert warning in check(sandbox)
+    (sandbox.home / ".config/ghostty/config").write_text("background-blur = false\n")
+    assert warning not in check(sandbox)
