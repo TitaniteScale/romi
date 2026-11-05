@@ -75,11 +75,11 @@ Built in this order, one commit each:
   generated file. Without ES-DE, the systems in romi's default config stand in.
 - ✓ **BIOS**: `"bios"` is filled in for the systems that need it, so `romi check` reports what's
   missing.
-- ✓ **A folder of its own**: a new config on a machine with no RetroArch (no `retroarch` on PATH and no
-  `~/.config/retroarch`) keeps BIOS files, in-game saves and downloaded cores in `~/.local/share/romi`.
+- ✓ **A folder of its own**: a new config on a machine with no RetroArch (no `retroarch` on PATH, no
+  `~/.config/retroarch`, and no Flatpak of it) keeps BIOS files, in-game saves and downloaded cores in `~/.local/share/romi`.
   It's written in the config (`"bios_dirs"`, `"saves_dir"`), so installing RetroArch later doesn't move
-  them, and a config that's already there isn't changed. A Flatpak RetroArch counts as none for now
-  ([#10](https://github.com/TitaniteScale/romi/issues/10)), and on a first run the launcher covers the line saying where BIOS files go
+  them, and a config that's already there isn't changed. A Flatpak RetroArch counts, with its own
+  folders, unless there's also one on the machine itself. On a first run the launcher covers the line saying where BIOS files go
   ([#5](https://github.com/TitaniteScale/romi/issues/5)).
 - ✓ **Never overwrite your config.** Generated systems go in `init.jsonc`, which the config includes
   (`"include"` is a general option now). Rerunning init replaces only that file. `--print` writes to

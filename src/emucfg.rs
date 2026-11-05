@@ -5,6 +5,7 @@
 
 use crate::config::{Config, expand_path};
 use crate::emu::remap::Remap;
+use crate::launch::find_program;
 use crate::library::Library;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -226,18 +227,33 @@ fn controller(emu: Emulator, dir: &Path, systems: &[&str]) -> Option<Note> {
     }
 }
 
+/// Whether a Flatpak of RetroArch is installed, or has been: its folder may hold saves and BIOS files.
+pub fn retroarch_flatpak_here() -> bool {
+    let id = Emulator::RetroArch.flatpak_id();
+    let installed = dirs::data_dir().map(|d| d.join("flatpak")).into_iter().chain([PathBuf::from("/var/lib/flatpak")]);
+    Emulator::RetroArch.config_dir(true).is_dir() || installed.into_iter().any(|d| d.join("app").join(id).is_dir())
+}
+
+/// Where RetroArch keeps its settings: the Flatpak's folder when that's the only RetroArch here, so
+/// one on the machine itself always wins.
+fn retroarch_dir() -> PathBuf {
+    let own = Emulator::RetroArch.config_dir(false);
+    let only_flatpak = !own.is_dir() && find_program("retroarch").is_none() && retroarch_flatpak_here();
+    if only_flatpak { Emulator::RetroArch.config_dir(true) } else { own }
+}
+
 /// The folder RetroArch gives the core called `core` (its name without the version) for what it
 /// writes while playing `rom`, so a game played in romi shares those files with RetroArch. None
 /// when RetroArch keeps them next to the game, which is also where cores go without a folder.
 pub fn retroarch_save_dir(core: &str, rom: &Path) -> Option<PathBuf> {
-    let dir = Emulator::RetroArch.config_dir(false);
+    let dir = retroarch_dir();
     save_dir(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
 }
 
-/// The folder RetroArch gives cores for BIOS files, from its settings: `~/.config/retroarch/system`
+/// The folder RetroArch gives cores for BIOS files, from its settings: `system` in its own folder
 /// unless they name another.
 pub fn retroarch_system_dir() -> PathBuf {
-    let dir = Emulator::RetroArch.config_dir(false);
+    let dir = retroarch_dir();
     system_dir(&Ini::read(&dir.join("retroarch.cfg")), &dir)
 }
 
@@ -372,7 +388,7 @@ fn known_options(core: &str, rom: &Path) -> BTreeMap<String, String> {
 /// key: what the game is known to need, then the core's, then the ones for `rom`'s folder, then
 /// for `rom` itself, each over the last, as RetroArch takes them. With global core options on, there's one file for every core instead.
 pub fn retroarch_core_options(core: &str, rom: &Path) -> BTreeMap<String, String> {
-    let dir = Emulator::RetroArch.config_dir(false);
+    let dir = retroarch_dir();
     core_options(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
 }
 
@@ -405,7 +421,7 @@ fn core_options(ini: &Ini, config_dir: &Path, core: &str, rom: &Path) -> BTreeMa
 /// The remap RetroArch would play `rom` with in `core`, or none, so games play with the same
 /// controls in romi.
 pub fn retroarch_remap(core: &str, rom: &Path) -> Remap {
-    let dir = Emulator::RetroArch.config_dir(false);
+    let dir = retroarch_dir();
     remap(&Ini::read(&dir.join("retroarch.cfg")), &dir, core, rom)
 }
 
@@ -438,6 +454,8 @@ fn save_dir(ini: &Ini, config_dir: &Path, core: &str, rom: &Path) -> Option<Path
         // RetroArch writes this line with its default when it first runs.
         None => config_dir.join("saves"),
         Some("" | "default") => return None,
+        // A folder relative to RetroArch itself, as in `system_dir`.
+        Some(dir) if dir.starts_with(':') => config_dir.join("saves"),
         Some(dir) => expand_path(dir),
     };
     // Both default to on and off as RetroArch's do.

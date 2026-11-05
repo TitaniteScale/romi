@@ -315,6 +315,53 @@ def test_a_new_config_without_retroarch_keeps_everything_in_romis_folder(machine
     assert "bios      ~/.local/share/romi/system" in check(machine)
 
 
+FLATPAK_RETROARCH = ".var/app/org.libretro.RetroArch/config/retroarch"
+
+
+@pytest.mark.parametrize("found_by", ["its folder", "being installed"])
+def test_a_new_config_with_only_a_flatpak_retroarch_uses_its_folders(machine, found_by):
+    fresh(machine)
+    no_retroarch(machine)
+    if found_by == "its folder":
+        (machine.home / FLATPAK_RETROARCH).mkdir(parents=True)
+    else:
+        (machine.home / ".local/share/flatpak/app/org.libretro.RetroArch").mkdir(parents=True)
+    out = romi(machine, "init", "--no-esde", "--yes")
+    assert out.returncode == 0, out.stderr
+    assert f"BIOS files go in ~/{FLATPAK_RETROARCH}/system." in out.stdout
+    config = jsonc(machine.config_path.read_text())
+    assert config["bios_dirs"] == [f"~/{FLATPAK_RETROARCH}/system"]
+    assert "saves_dir" not in config
+    assert not (machine.home / ".local/share/romi").exists()
+    shown = check(machine)
+    assert f"bios      ~/{FLATPAK_RETROARCH}/system" in shown
+    assert f"saves     ~/{FLATPAK_RETROARCH}/saves" in shown
+
+
+def test_a_flatpak_retroarchs_save_folder_comes_from_its_own_settings(machine):
+    fresh(machine)
+    no_retroarch(machine)
+    (machine.home / FLATPAK_RETROARCH).mkdir(parents=True)
+    (machine.home / FLATPAK_RETROARCH / "retroarch.cfg").write_text('savefile_directory = "~/flatpak-saves"\n')
+    assert romi(machine, "init", "--no-esde", "--yes").returncode == 0
+    assert "saves     ~/flatpak-saves" in check(machine)
+
+
+@pytest.mark.parametrize("also", ["binary", "folder"])
+def test_a_retroarch_on_the_machine_itself_wins_over_a_flatpak(machine, also):
+    fresh(machine)
+    no_retroarch(machine)
+    (machine.home / FLATPAK_RETROARCH).mkdir(parents=True)
+    if also == "binary":
+        executable(machine.root / "bin/retroarch")
+    else:
+        (machine.home / ".config/retroarch").mkdir(parents=True)
+    out = romi(machine, "init", "--no-esde", "--yes")
+    assert out.returncode == 0, out.stderr
+    assert "BIOS files go in ~/.config/retroarch/system." in out.stdout
+    assert "saves     ~/.config/retroarch/saves" in check(machine)
+
+
 @pytest.mark.parametrize("left_behind", ["binary", "folder"])
 def test_a_new_config_with_retroarch_keeps_using_its_folders(machine, left_behind):
     fresh(machine)

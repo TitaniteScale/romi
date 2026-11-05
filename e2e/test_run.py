@@ -601,6 +601,21 @@ def test_games_played_in_romi_save_where_retroarch_does_and_carry_on_from_it(sta
         assert data[0] == count, "the game found what it saved last time"
 
 
+def test_a_flatpak_retroarch_shares_its_saves_when_its_the_only_one(start, sandbox):
+    set_up_a_game_boy_game(sandbox, launch_animation={"enabled": False})
+    flatpak = sandbox.home / ".var/app/org.libretro.RetroArch/config/retroarch"
+    flatpak.mkdir(parents=True)
+    # Only now, as building the game's core needs the real PATH.
+    sandbox.extra_env = {"PATH": str(sandbox.root)}
+    romi = start()
+    seen = len(romi.output)
+    play_in_romi(romi)
+    romi.keys("\x1b")
+    romi.wait_for(lambda: b"a=d,d=I," + GAME_IMAGE[:-1] in romi.output[seen:])
+    assert (flatpak / "saves/Blank/Pocket Lantern (USA).srm").read_bytes()[0] == 1
+    assert not (sandbox.home / SAVE).exists()
+
+
 def test_a_save_that_cant_be_read_stops_the_game_and_is_left_alone(start, sandbox):
     set_up_a_game_boy_game(sandbox, launch_animation={"enabled": False})
     save = sandbox.home / SAVE

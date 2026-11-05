@@ -918,7 +918,9 @@ fn runs(command: &str) -> String {
 
 /// Whether RetroArch is on this machine, or has been: its folder may hold saves and BIOS files.
 pub fn retroarch_here() -> bool {
-    expand_path("~/.config/retroarch").is_dir() || find_program("retroarch").is_some()
+    expand_path("~/.config/retroarch").is_dir()
+        || find_program("retroarch").is_some()
+        || crate::emucfg::retroarch_flatpak_here()
 }
 
 /// The folders in romi's own folder that a machine without RetroArch uses: BIOS files and what cores

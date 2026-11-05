@@ -49,13 +49,15 @@ romi needs somewhere for BIOS files, in-game saves and downloaded cores. When in
 it decides once, and writes the answer in the config, so installing RetroArch later doesn't move them.
 A first run in a terminal asks, when RetroArch is here. `romi init --yes` goes by this:
 
-| | RetroArch installed, or `~/.config/retroarch` there | Neither |
+| | RetroArch installed, or its folder there | Neither |
 |---|---|---|
 | BIOS files, and what cores keep there | `~/.config/retroarch/system`, or the one in its settings | `~/.local/share/romi/system` |
 | In-game saves | RetroArch's save folder, shared with it | `~/.local/share/romi/saves/<core>` |
 | Downloaded cores | `~/.config/retroarch/cores` | `~/.local/share/romi/cores` |
 
-Save states always go in `~/.local/share/romi/states`, so romi never writes over RetroArch's. Cores
+A Flatpak RetroArch counts, and has the same folders under
+`~/.var/app/org.libretro.RetroArch/config/retroarch`, unless there's also a RetroArch on the machine
+itself, which wins. Save states always go in `~/.local/share/romi/states`, so romi never writes over RetroArch's. Cores
 installed by your distro are found wherever they are, and `~/.local/share/romi/cores` is always looked
 in first. A config that's already there is never changed: to move yours, set `"bios_dirs"` and
 `"saves_dir"` and move the files. A core gets one system folder, the first of `"bios_dirs"` that
