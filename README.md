@@ -2,6 +2,10 @@
   <img src="Images/romi_logo.png" alt="romi" width="498" />
 </h1>
 
+<p align="center">
+  <img src="Images/romi_mascot_readme.png" alt="The romi mascot: a round, green pixel-art slime with a blue cap" width="162" />
+</p>
+
 Play your games in your terminal. romi is a libretro frontend and game library: it runs emulator
 cores itself and draws the game right inside its own interface, with sound, saves and
 RetroAchievements, from the Game Boy to the PS2. Everything else you play (standalone emulators,
@@ -205,5 +209,5 @@ sorting, filters, tags, hiding games and picking another emulator.
 - [Roadmap](ROADMAP.md): what's done and what's next
 - [Issues](https://github.com/TitaniteScale/romi/issues): known bugs and smaller things to do
 - [Working on romi](CONTRIBUTING.md): tests, releasing, and a map of the code
-- [Credits](CREDITS.md): other people's work in this repository: the logo, by Andrea Reyes, and the
-  3D models the launch animation is made from
+- [Credits](CREDITS.md): other people's work in this repository: the logo and mascot, by Andrea Reyes,
+  and the 3D models the launch animation is made from
