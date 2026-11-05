@@ -587,6 +587,14 @@ impl Default for LaunchAnimation {
     }
 }
 
+impl SystemConfig {
+    /// Whether its ROMs are MAME sets. Neo Geo's are, though ES-DE doesn't count it as arcade, so
+    /// `romi init` doesn't mark it.
+    pub fn is_arcade(&self) -> bool {
+        self.arcade || self.id == "neogeo"
+    }
+}
+
 /// RetroAchievements: which games have achievements, and your progress in them.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]

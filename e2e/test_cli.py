@@ -242,3 +242,26 @@ def test_steam_games_get_the_info_romi_scrape_kept_from_the_store(sandbox):
     assert meta["description"] == "Push the rules around."
     out = run_cli(sandbox, "list", "--genre", "Puzzle", "--players", "2", "--json")
     assert [g["key"] for g in json.loads(out.stdout)] == ["steam:4242"]
+
+
+def test_neo_geo_sets_get_their_titles(sandbox):
+    # `romi init` doesn't mark Neo Geo as arcade, as ES-DE doesn't, but its ROMs are MAME sets.
+    db = sandbox.home / "mame"
+    db.mkdir()
+    (db / "mamenames.xml").write_text(
+        "<mamename>aof</mamename><realname>Art of Fighting / Ryuuko no Ken (NGM-044 ~ NGH-044)</realname>")
+    (db / "mamebioses.xml").write_text("<bios>neogeo</bios>")
+    (db / "mamedevices.xml").write_text("")
+    roms = sandbox.home / "ROMs/neogeo"
+    roms.mkdir(parents=True)
+    (roms / "aof.zip").touch()
+    (roms / "neogeo.zip").touch()
+    config = json.loads(json.dumps(CONFIG))
+    config["arcade_db"] = str(db)
+    config["systems"] = [{"id": "neogeo", "name": "SNK Neo Geo", "extensions": ["zip"], "command": "true {rom}"}]
+    sandbox.write_config(config)
+    out = subprocess.run([binary(), "list", "--json"], env=sandbox.env, capture_output=True, text=True, timeout=10)
+    games = json.loads(out.stdout)
+    assert [g["name"] for g in (games if isinstance(games, list) else games["games"]) if g["system"] == "neogeo"] == [
+        "Art of Fighting"
+    ]

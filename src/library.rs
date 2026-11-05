@@ -182,7 +182,7 @@ impl Library {
         let gamelists = cfg.gamelists_dir.as_deref().map(expand_path);
 
         let arcade = match &cfg.arcade_db {
-            Some(dir) if cfg.systems.iter().any(|s| s.arcade) => Some(ArcadeDb::load(&expand_path(dir))),
+            Some(dir) if cfg.systems.iter().any(SystemConfig::is_arcade) => Some(ArcadeDb::load(&expand_path(dir))),
             _ => None,
         };
 
@@ -266,7 +266,7 @@ impl Library {
         gamelists: Option<&Path>,
         arcade: Option<&ArcadeDb>,
     ) {
-        let arcade = arcade.filter(|_| sys.arcade);
+        let arcade = arcade.filter(|_| sys.is_arcade());
         let dir_str = sys.dir.as_deref().unwrap_or(&sys.id);
         let dir = if dir_str.starts_with('/') || dir_str.starts_with('~') {
             expand_path(dir_str)
@@ -296,7 +296,7 @@ impl Library {
             }),
             libretro: sys.libretro.clone().unwrap_or_else(|| crate::art::default_libretro(&sys.id)),
             esde: sys.id.clone(),
-            arcade: sys.arcade,
+            arcade: sys.is_arcade(),
             skyscraper: sys.skyscraper.clone().unwrap_or_else(|| crate::art::default_skyscraper(&sys.id)),
         });
 
