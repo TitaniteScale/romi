@@ -263,6 +263,9 @@ pub enum LaunchMode {
     Terminal,
     /// Fire and forget; romi stays usable. Needed for launchers that return immediately (Steam).
     Detach,
+    /// Play it in the TUI's middle panel: run it in gamescope with no window, and show what it
+    /// draws. Needs gamescope. An experiment; anywhere it can't show, it's `wait`.
+    Gamescope,
 }
 
 #[derive(Debug, Clone, Deserialize)]

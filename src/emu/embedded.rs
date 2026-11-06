@@ -126,8 +126,18 @@ pub struct Start {
     pub state_button: crate::config::StateButton,
 }
 
+/// What plays: a libretro core, or a program run in gamescope, whose frames are captured.
+pub enum Source {
+    Core(Box<Core>),
+    /// The game's command, and the file its output goes to.
+    #[cfg(target_os = "linux")]
+    Captured(crate::launch::Prepared, std::path::PathBuf),
+}
+
 pub struct Embedded {
     pub game: usize,
+    /// It's a program captured from gamescope, not a core, so there are no save states.
+    captured: bool,
     shared: Arc<Shared>,
     thread: Option<JoinHandle<()>>,
     /// Number of the last frame taken from the core.
@@ -175,12 +185,26 @@ pub struct Embedded {
 
 impl Embedded {
     /// Starts the game, after the launch animation if there's one.
-    pub fn start(core: Core, start: Start) -> Result<Embedded> {
+    pub fn start(source: Source, start: Start) -> Result<Embedded> {
         let Start { game, volume, launch, look, cheevos, pixel_mouse, states, slot, state_button } = start;
-        let about = format!("{} in the TUI, filter {}, corners {}", core.name, look.filter.name(), look.corners);
-        // With the animation, the game's cells are placed before it draws, in the shape it says.
-        let shape = if launch.is_some() { core.display_size() } else { (0.0, 0.0) };
-        let (shared, thread) = Shared::start(core, volume, launch.is_some(), cheevos, Some(states.clone()))?;
+        let paused = launch.is_some();
+        let (name, captured, shape, (shared, thread)) = match source {
+            Source::Core(core) => {
+                // With the animation, the game's cells are placed before it draws, in the shape it says.
+                let shape = if paused { core.display_size() } else { (0.0, 0.0) };
+                (core.name.clone(), false, shape, Shared::start(*core, volume, paused, cheevos, Some(states.clone()))?)
+            }
+            #[cfg(target_os = "linux")]
+            Source::Captured(program, log) => {
+                use crate::emu::capture;
+                let shared = Shared::new(volume, paused);
+                let thread = capture::start(&program, &log, shared.clone())?;
+                let (w, h) = capture::SIZE;
+                let shape = if paused { (f64::from(w), f64::from(h)) } else { (0.0, 0.0) };
+                ("gamescope".to_string(), true, shape, (shared, thread))
+            }
+        };
+        let about = format!("{name} in the TUI, filter {}, corners {}", look.filter.name(), look.corners);
         // Key releases are needed to know when a button is let go.
         let flags = KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
         execute!(std::io::stdout(), PushKeyboardEnhancementFlags(flags))?;
@@ -198,6 +222,7 @@ impl Embedded {
         kitty::sweep_stale_shm();
         Ok(Embedded {
             game,
+            captured,
             shared,
             thread: Some(thread),
             seen: 0,
@@ -250,6 +275,9 @@ impl Embedded {
 
     /// Does what a button pressed with Select, or a function key, is for.
     fn chord(&mut self, chord: Chord) {
+        if self.captured {
+            return self.shared.say_about_states(Err("No save states for games played through gamescope".into()));
+        }
         let ask = match chord {
             Chord::SaveState => StateAsk::Save(self.slot),
             Chord::LoadState => StateAsk::Load(self.slot),
@@ -334,6 +362,16 @@ impl Embedded {
             }
         }
         true
+    }
+
+    /// Why the game ended by itself, once, if it has: a program captured from gamescope can.
+    pub fn ended(&self) -> Option<String> {
+        self.shared.take_ended()
+    }
+
+    /// Whether it's a program captured from gamescope rather than a core.
+    pub fn captured(&self) -> bool {
+        self.captured
     }
 
     /// Why the game has no sound, once, if it has none.

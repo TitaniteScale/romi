@@ -30,6 +30,10 @@ impl App {
     /// Plays a game as A does: inside romi when it can, or else in its emulator.
     pub(super) fn play(&mut self, g: usize) {
         if self.cfg.play_in_romi {
+            #[cfg(target_os = "linux")]
+            if self.lib.games[g].launch.mode == LaunchMode::Gamescope && self.a_plays_here() {
+                return self.play_captured(g);
+            }
             // A game that runs in another emulator may play in romi through one of its others.
             self.emulators.find(&self.cfg, &self.lib, g);
             if self.embeddable(g).is_some() {
@@ -102,7 +106,44 @@ impl App {
         };
         let started =
             crate::emu::runner::load(&self.cfg, &core, &rom, runs_with, &controls, &core_options, self.shown_height())
-                .and_then(|core| crate::emu::embedded::Embedded::start(core, start));
+                .and_then(|core| {
+                    crate::emu::embedded::Embedded::start(crate::emu::embedded::Source::Core(Box::new(core)), start)
+                });
+        self.started_here(g, started);
+    }
+
+    /// Plays a game whose command runs in gamescope in the middle panel, showing what it draws.
+    #[cfg(target_os = "linux")]
+    fn play_captured(&mut self, g: usize) {
+        use crate::emu::embedded::{Appearance, Embedded, Source, Start};
+        let game = &self.lib.games[g];
+        let prepared = match game.launch.prepare().and_then(|p| p.check_program().map(|()| p)) {
+            Ok(p) => p,
+            Err(e) => return self.set_status(Level::Error, format!("{}: {e:#}", game.name)),
+        };
+        let rom = game.path.clone().unwrap_or_else(|| PathBuf::from(&game.key));
+        let start = Start {
+            game: g,
+            volume: self.cfg.volume_gain(),
+            launch: self.launch_animation(g, &rom),
+            look: Appearance {
+                corners: self.cfg.corners(),
+                filter: self.cfg.screen_filter,
+                crop: false,
+                badges: self.cfg.retroachievements.badges,
+            },
+            cheevos: None,
+            pixel_mouse: self.pixel_mouse,
+            states: crate::emu::savestate::Files::new(Path::new("gamescope"), &rom),
+            slot: 0,
+            state_button: self.cfg.state_button,
+        };
+        let started = Embedded::start(Source::Captured(prepared, log_path()), start);
+        self.started_here(g, started);
+    }
+
+    /// Keeps a game that's started in the middle panel, and records it, or says why it didn't.
+    fn started_here(&mut self, g: usize, started: anyhow::Result<crate::emu::embedded::Embedded>) {
         match started {
             Ok(e) => {
                 self.embedded = Some(e);
@@ -187,7 +228,7 @@ impl App {
     /// don't also do something in the list.
     pub fn stop_embedded(&mut self) {
         if let Some(mut embedded) = self.embedded.take() {
-            let g = embedded.game;
+            let (g, embedded_captured) = (embedded.game, embedded.captured());
             if let Some(session) = self.embedded_session.take() {
                 let (_, state, _hooks) = session.end(None);
                 self.state = state;
@@ -206,9 +247,11 @@ impl App {
             if let Some(e) = embedded.stop() {
                 self.set_status(Level::Error, format!("Not saved: {e}"));
             }
-            // For the controls screen, which can't ask the core.
-            let names = crate::emu::libretro::button_names();
-            crate::tui::controls::remember(&self.lib.games[g].key, &self.lib.system_of(g).id, names);
+            // For the controls screen, which can't ask the core. A captured game has none.
+            if !embedded_captured {
+                let names = crate::emu::libretro::button_names();
+                crate::tui::controls::remember(&self.lib.games[g].key, &self.lib.system_of(g).id, names);
+            }
             self.rebuild_keeping_selection();
         }
         self.cooldown_until = Some(Instant::now() + INPUT_COOLDOWN);
@@ -217,6 +260,10 @@ impl App {
     /// Feeds the game in the middle panel: controller input in, the newest frame out.
     pub fn pump_embedded(&mut self) {
         let Some(embedded) = &mut self.embedded else { return };
+        if let Some(why) = embedded.ended() {
+            self.stop_embedded();
+            return self.set_status(Level::Warn, why);
+        }
         if !embedded.read_pads() {
             return self.stop_embedded();
         }
@@ -264,7 +311,8 @@ impl App {
             }
         };
         let result = match game.launch.mode {
-            LaunchMode::Wait => {
+            // In gamescope it plays in the panel, when it can; when it can't, it gets a window.
+            LaunchMode::Wait | LaunchMode::Gamescope => {
                 let hooks = Hooks::for_game(&self.cfg, &self.lib, g);
                 let problem = hooks.launch();
                 let started = prepared.spawn_logged(&log_path(), true).map(|child| {

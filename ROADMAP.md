@@ -34,8 +34,10 @@ pinball tables, native PC ports and Steam.
 4. **Play anything in the panel.** The last big one: games with no libretro core, like native ports,
    recompilations, Steam, and emulators for the Switch, PS3 and Wii U. The idea is to run a game in a compositor with no
    screen and draw its frames in the panel. Valve's `gamescope` has a headless backend and can stream over PipeWire,
-   so romi may only need to read that stream. It starts as an experiment to see whether this works here at all,
-   and whether the lag is bearable. If there's a general way to do it, it should be a library of its own.
+   so romi may only need to read that stream. A first version works: `"mode": "gamescope"` plays Xbox 360 games
+   in Xenia Canary in the panel at 60 frames a second, with the game reading the controller itself. Still to
+   find out: the lag, how it does under load, other games (Steam, native ports), and sizes other than 720p. If
+   there's a general way to do it, it should be a library of its own.
 
 Along the way, in no fixed order:
 

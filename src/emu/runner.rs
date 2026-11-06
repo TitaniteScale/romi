@@ -168,6 +168,8 @@ pub struct Shared {
     state_news: Mutex<Vec<Result<String, String>>>,
     /// The thread writing the last state saved, which outlives its frame and may be yet to finish.
     state_writer: Mutex<Option<JoinHandle<()>>>,
+    /// Why the game ended by itself, for one that can (a program captured from gamescope).
+    ended: Mutex<Option<String>>,
 }
 
 /// Something asked of a game's save states.
@@ -218,7 +220,17 @@ impl Shared {
         cheevos: Option<cheevos::Setup>,
         states: Option<Files>,
     ) -> Result<(Arc<Shared>, JoinHandle<()>)> {
-        let shared = Arc::new(Shared {
+        let shared = Shared::new(volume, paused);
+        let thread = {
+            let shared = shared.clone();
+            std::thread::Builder::new().name("core".into()).spawn(move || run_core(core, cheevos, states, &shared))?
+        };
+        Ok((shared, thread))
+    }
+
+    /// What a game's thread and the screen showing it share, with no frame yet.
+    pub fn new(volume: f32, paused: bool) -> Arc<Shared> {
+        Arc::new(Shared {
             latest: Mutex::new((0, Frame::default())),
             ready: Condvar::new(),
             input: Mutex::new(Players::default()),
@@ -234,12 +246,44 @@ impl Shared {
             state_ask: Mutex::new(None),
             state_news: Mutex::new(Vec::new()),
             state_writer: Mutex::new(None),
-        });
-        let thread = {
-            let shared = shared.clone();
-            std::thread::Builder::new().name("core".into()).spawn(move || run_core(core, cheevos, states, &shared))?
-        };
-        Ok((shared, thread))
+            ended: Mutex::new(None),
+        })
+    }
+
+    /// Makes `frame` the newest, for the screen to show.
+    pub fn put_frame(&self, frame: Frame) {
+        {
+            let mut latest = lock(&self.latest);
+            latest.0 += 1;
+            latest.1 = frame;
+        }
+        self.ready.notify_one();
+    }
+
+    /// Makes `frame`, just taken from somewhere other than a core, the newest, and notes when for
+    /// the frame log.
+    pub fn put_taken_frame(&self, frame: Frame) {
+        self.put_frame(frame);
+        if let Some(made) = &self.made {
+            let now = Instant::now();
+            let ran = Duration::ZERO;
+            lock(made).push(timing::Made { started: now, ran, done: now, sound_ahead: None, sound_dry: None });
+        }
+    }
+
+    /// Whether the game's been asked to stop.
+    pub fn stopping(&self) -> bool {
+        self.quit.load(Ordering::Relaxed)
+    }
+
+    /// Says the game has ended by itself, and why, for the screen to stop showing it.
+    pub fn end(&self, why: String) {
+        *lock(&self.ended) = Some(why);
+    }
+
+    /// Why the game ended by itself, once, if it has.
+    pub fn take_ended(&self) -> Option<String> {
+        lock(&self.ended).take()
     }
 
     pub fn stop(&self) {
@@ -465,12 +509,7 @@ fn run_core(mut core: Core, cheevos: Option<cheevos::Setup>, states: Option<File
         if let Some(early) = slot.checked_duration_since(Instant::now()) {
             std::thread::sleep(early);
         }
-        {
-            let mut latest = lock(&shared.latest);
-            latest.0 += 1;
-            latest.1 = frame;
-        }
-        shared.ready.notify_one();
+        shared.put_frame(frame);
         if let Some(made) = &shared.made {
             let (sound_ahead, sound_dry) = (sound.as_ref().map(|s| s.ahead()), sound.as_ref().map(|s| s.dry()));
             lock(made).push(timing::Made { started, ran, done: Instant::now(), sound_ahead, sound_dry });

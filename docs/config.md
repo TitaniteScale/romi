@@ -62,6 +62,12 @@ argument, so paths with spaces need no extra quoting. Need pipes or `&&`? Use `s
   `~/.local/state/romi/last.log`.
 - `terminal` hands the terminal to the command, for scripts and TUI games.
 - `detach` starts it and moves on. Used for Steam, whose launcher returns immediately.
+- `gamescope` (experimental, Linux) plays it in the middle panel, for games with no libretro core:
+  the command runs in [gamescope](https://github.com/ValveSoftware/gamescope) with no window, at
+  1280×720, and romi shows the frames gamescope streams over PipeWire. The game reads the
+  controller and plays its sound itself, so there are no save states or achievements. Where games
+  can't show in romi (with `play_in_romi` off, or in another terminal), it gets a window as with
+  `wait`.
 
 ## Other emulators
 

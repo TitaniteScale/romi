@@ -69,7 +69,7 @@ impl Launch {
 }
 
 impl Prepared {
-    fn command(&self) -> Command {
+    pub fn command(&self) -> Command {
         let mut cmd = Command::new(&self.argv[0]);
         cmd.args(&self.argv[1..]).envs(self.env.iter().map(|(k, v)| (k, v)));
         if let Some(cwd) = &self.cwd {
