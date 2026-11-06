@@ -80,13 +80,16 @@ impl Prepared {
 
     /// Starts a game with output going to `log`. With `own_group`, it gets its own process group,
     /// so closing the terminal (or ^C) doesn't take the game down with it; the TUI wants that.
-    /// `romi play` doesn't: there, ^C or a script's `timeout` should stop the game too.
+    /// `romi play` doesn't: there, ^C or a script's `timeout` should stop the game too. A Steam game
+    /// starts Steam first, if it isn't running, with no window (see `steam::start_client_quietly`),
+    /// as does one `spawn_attached` starts.
     pub fn spawn_logged(&self, log: &Path, own_group: bool) -> Result<Child> {
         if let Some(dir) = log.parent() {
             std::fs::create_dir_all(dir)?;
         }
         let out = std::fs::File::create(log)?;
         let err = out.try_clone()?;
+        crate::steam::start_client_quietly(&self.argv);
         let mut cmd = self.command();
         cmd.stdin(Stdio::null()).stdout(out).stderr(err);
         if own_group {
@@ -112,6 +115,7 @@ impl Prepared {
 
     /// Starts a game with the terminal attached. The caller must have released the terminal.
     pub fn spawn_attached(&self) -> Result<Child> {
+        crate::steam::start_client_quietly(&self.argv);
         self.command().spawn().map_err(|e| spawn_error(&self.argv[0], e))
     }
 }

@@ -274,6 +274,8 @@
   //   { "name": "My Game", "command": "./run.sh", "cwd": "~/Games/my-game", "system": "PC" }
   "games": [],
 
+  // "mode": "gamescope" plays Steam games in the middle panel, with the controller (experimental,
+  // Linux). romi sets up their launch options in Steam for it; see docs/config.md.
   "steam": {
     "enabled": true,
     "exclude": []

@@ -129,9 +129,9 @@ pub struct Start {
 /// What plays: a libretro core, or a program run in gamescope, whose frames are captured.
 pub enum Source {
     Core(Box<Core>),
-    /// The game's command, and the file its output goes to.
+    /// What plays in gamescope, and the file gamescope's output goes to.
     #[cfg(all(target_os = "linux", feature = "gamescope"))]
-    Captured(crate::launch::Prepared, std::path::PathBuf),
+    Captured(crate::emu::capture::Program, std::path::PathBuf),
 }
 
 pub struct Embedded {
@@ -198,7 +198,7 @@ impl Embedded {
             Source::Captured(program, log) => {
                 use crate::emu::capture;
                 let shared = Shared::new(volume, paused);
-                let thread = capture::start(&program, &log, shared.clone())?;
+                let thread = capture::start(program, &log, shared.clone())?;
                 let (w, h) = capture::SIZE;
                 let shape = if paused { (f64::from(w), f64::from(h)) } else { (0.0, 0.0) };
                 ("gamescope".to_string(), true, shape, (shared, thread))

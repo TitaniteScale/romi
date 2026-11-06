@@ -264,8 +264,21 @@ pub enum LaunchMode {
     /// Fire and forget; romi stays usable. Needed for launchers that return immediately (Steam).
     Detach,
     /// Play it in the TUI's middle panel: run it in gamescope with no window, and show what it
-    /// draws. Needs gamescope. An experiment; anywhere it can't show, it's `wait`.
+    /// draws. Needs gamescope. An experiment; anywhere it can't show, it's `wait` (`detach` for a
+    /// Steam game).
     Gamescope,
+}
+
+impl LaunchMode {
+    /// How game `key` starts in this mode where it can't play in romi's panel: in a window, as
+    /// `wait`, or for a Steam game, whose command returns at once, as `detach`.
+    pub fn outside_panel(self, key: &str) -> LaunchMode {
+        match self {
+            LaunchMode::Gamescope if crate::steam::appid_of(key).is_some() => LaunchMode::Detach,
+            LaunchMode::Gamescope => LaunchMode::Wait,
+            mode => mode,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

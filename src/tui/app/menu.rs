@@ -274,6 +274,8 @@ impl App {
                         items.push(PlayOutside);
                     }
                     items.push(Controls);
+                } else if self.plays_in_gamescope(g) && self.can_launch(g) {
+                    items.push(PlayOutside);
                 }
                 items.extend([Favorite, Hide, Tags]);
                 if self.emulator_options(g).len() > 1 {
@@ -336,6 +338,7 @@ impl App {
             MenuItem::Reload => "Reload config".into(),
             MenuItem::PlayHere => "Play in romi".into(),
             MenuItem::PlayOutside => match self.menu.as_ref().and_then(|m| m.game) {
+                Some(g) if self.plays_in_gamescope(g) => "Play in a window".into(),
                 Some(g) => format!("Play with {}", self.runs_with_name(g)),
                 None => "Play".into(),
             },

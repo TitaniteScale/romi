@@ -27,11 +27,19 @@ impl App {
         self.cfg.play_in_romi && crate::emu::kitty::terminal().shows_games
     }
 
+    /// Whether A plays game `g` in the panel through gamescope (its mode is `gamescope`, and this
+    /// romi and terminal can show it).
+    pub(super) fn plays_in_gamescope(&self, g: usize) -> bool {
+        cfg!(all(target_os = "linux", feature = "gamescope"))
+            && self.lib.games[g].launch.mode == LaunchMode::Gamescope
+            && self.a_plays_here()
+    }
+
     /// Plays a game as A does: inside romi when it can, or else in its emulator.
     pub(super) fn play(&mut self, g: usize) {
         if self.cfg.play_in_romi {
             #[cfg(all(target_os = "linux", feature = "gamescope"))]
-            if self.lib.games[g].launch.mode == LaunchMode::Gamescope && self.a_plays_here() {
+            if self.plays_in_gamescope(g) {
                 return self.play_captured(g);
             }
             // A game that runs in another emulator may play in romi through one of its others.
@@ -115,6 +123,7 @@ impl App {
     /// Plays a game whose command runs in gamescope in the middle panel, showing what it draws.
     #[cfg(all(target_os = "linux", feature = "gamescope"))]
     fn play_captured(&mut self, g: usize) {
+        use crate::emu::capture::Program;
         use crate::emu::embedded::{Appearance, Embedded, Source, Start};
         let game = &self.lib.games[g];
         let prepared = match game.launch.prepare().and_then(|p| p.check_program().map(|()| p)) {
@@ -122,6 +131,16 @@ impl App {
             Err(e) => return self.set_status(Level::Error, format!("{}: {e:#}", game.name)),
         };
         let rom = game.path.clone().unwrap_or_else(|| PathBuf::from(&game.key));
+        // Steam starts its games, so a Steam game's gamescope comes from its launch options.
+        let program = match crate::steam::appid_of(&game.key) {
+            Some(appid) => Program::Steam {
+                appid: appid.to_string(),
+                name: game.name.clone(),
+                launch: prepared,
+                steam_dir: crate::steam::find_steam_dir(self.cfg.steam.dir.as_deref()),
+            },
+            None => Program::Command(prepared),
+        };
         let start = Start {
             game: g,
             volume: self.cfg.volume_gain(),
@@ -138,7 +157,7 @@ impl App {
             slot: 0,
             state_button: self.cfg.state_button,
         };
-        let started = Embedded::start(Source::Captured(prepared, log_path()), start);
+        let started = Embedded::start(Source::Captured(program, log_path()), start);
         self.started_here(g, started);
     }
 
@@ -310,8 +329,8 @@ impl App {
                 return;
             }
         };
-        let result = match game.launch.mode {
-            // In gamescope it plays in the panel, when it can; when it can't, it gets a window.
+        // In gamescope it plays in the panel, when it can, and it can't here.
+        let result = match game.launch.mode.outside_panel(&game.key) {
             LaunchMode::Wait | LaunchMode::Gamescope => {
                 let hooks = Hooks::for_game(&self.cfg, &self.lib, g);
                 let problem = hooks.launch();

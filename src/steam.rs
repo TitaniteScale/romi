@@ -5,7 +5,10 @@ use crate::meta::Meta;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::HashMap;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct SteamApp {
@@ -94,9 +97,342 @@ fn kv_pairs(text: &str) -> impl Iterator<Item = (String, String)> + '_ {
     })
 }
 
+/// Steam game `key`'s app id: `steam:<appid>`.
+pub fn appid_of(key: &str) -> Option<&str> {
+    key.strip_prefix("steam:")
+}
+
+// ---- the client ----
+
+/// How long the Steam client gets to start taking commands.
+const CLIENT_WAIT: Duration = Duration::from_secs(15);
+
+/// Whether the Steam client is running, from the pid file it keeps in `~/.steam`.
+pub fn client_running() -> bool {
+    let Ok(pid) = std::fs::read_to_string(home().join(".steam/steam.pid")) else { return false };
+    let Ok(pid) = pid.trim().parse::<u32>() else { return false };
+    std::fs::read_to_string(format!("/proc/{pid}/comm")).is_ok_and(|comm| comm.trim() == "steam")
+}
+
+/// A command like `steam steam://rungameid/…` hands the game to the Steam client, and starts the
+/// client first if it isn't running, with its window open. So when it isn't, this starts it with
+/// no window (`steam -silent`), and waits for it to take commands, before the command runs: given
+/// the game then, the client starts it and opens nothing but its "Launching..." box. Commands that
+/// aren't `steam` with a `steam://` address are left alone, and so is Steam where it doesn't keep
+/// its pid file in `~/.steam`.
+pub fn start_client_quietly(argv: &[String]) {
+    let is_steam = argv.first().is_some_and(|p| Path::new(p).file_name().is_some_and(|f| f == "steam"));
+    if !is_steam || !argv.iter().any(|a| a.starts_with("steam://")) {
+        return;
+    }
+    if !home().join(".steam").is_dir() || client_running() {
+        return;
+    }
+    let mut cmd = std::process::Command::new(&argv[0]);
+    cmd.arg("-silent").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    // Its own process group, so closing romi's terminal doesn't close Steam.
+    cmd.process_group(0);
+    let Ok(mut client) = cmd.spawn() else { return };
+    // It runs for as long as Steam does; reaped when it ends.
+    std::thread::spawn(move || client.wait());
+    let deadline = Instant::now() + CLIENT_WAIT;
+    while !client_running() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// Whether a Steam game is running: something Steam started through its `reaper`, which every
+/// game starts under.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+pub fn game_running() -> bool {
+    let Ok(procs) = std::fs::read_dir("/proc") else { return false };
+    procs.flatten().any(|p| {
+        std::fs::read(p.path().join("cmdline")).is_ok_and(|cmd| cmd.split(|&b| b == 0).any(|arg| arg == b"SteamLaunch"))
+    })
+}
+
+/// Asks the Steam client to quit (`steam -shutdown`), and waits up to `CLIENT_WAIT` for it to.
+/// False if it's still running.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+pub fn shut_down_client() -> bool {
+    let asked = std::process::Command::new("steam")
+        .arg("-shutdown")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .process_group(0)
+        .spawn();
+    if let Ok(mut asked) = asked {
+        std::thread::spawn(move || asked.wait());
+    }
+    let deadline = Instant::now() + CLIENT_WAIT * 2;
+    while client_running() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    !client_running()
+}
+
+// ---- launch options ----
+
+/// Each Steam account's `localconfig.vdf`, which keeps its games' launch options.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+fn local_configs(steam_dir: &Path) -> Vec<PathBuf> {
+    let Ok(users) = std::fs::read_dir(steam_dir.join("userdata")) else { return Vec::new() };
+    users.flatten().map(|u| u.path().join("config/localconfig.vdf")).filter(|p| p.is_file()).collect()
+}
+
+/// The launch options set for game `appid` in Steam (its Properties), for each Steam account on
+/// this computer that has some. Read to play a game in romi's panel (see `emu::capture`).
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+pub fn launch_options(steam_dir: &Path, appid: &str) -> Vec<String> {
+    local_configs(steam_dir)
+        .iter()
+        .filter_map(|path| std::fs::read_to_string(path).ok())
+        .filter_map(|vdf| apps_in(&vdf)?.games.remove(appid)?.launch.map(|(_, options)| options))
+        .collect()
+}
+
+/// Has every account's launch options for each game in `appids` run `script` before the game, as
+/// `wrapped` says, keeping any options already there. Steam rewrites the file as it quits, so it
+/// mustn't be running. The first time it changes an account's file, it keeps a copy of how it was
+/// beside it (`localconfig.vdf.romi-backup`). Says how many games it changed, over all accounts.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+pub fn wrap_launch_options(steam_dir: &Path, appids: &[String], script: &Path) -> anyhow::Result<usize> {
+    use anyhow::Context;
+    if client_running() {
+        anyhow::bail!("Steam is running, and would undo the change");
+    }
+    let mut changed = 0;
+    for path in local_configs(steam_dir) {
+        let vdf = std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+        let Some((edited, n)) = with_launch_options(&vdf, appids, |old| wrapped(old, script)) else { continue };
+        let backup = path.with_extension("vdf.romi-backup");
+        if !backup.exists() {
+            std::fs::copy(&path, &backup).with_context(|| format!("backing up {}", path.display()))?;
+        }
+        let new = path.with_extension("vdf.romi-new");
+        std::fs::write(&new, edited).with_context(|| format!("writing {}", new.display()))?;
+        std::fs::rename(&new, &path).with_context(|| format!("writing {}", path.display()))?;
+        changed += n;
+    }
+    Ok(changed)
+}
+
+/// Launch options `old` with `script` run before the game, or None if they already run it: in
+/// front of `%command%` where they have it (after any variables they set), and otherwise before
+/// the game's command, with `old` as its arguments, which is what options without it are.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+fn wrapped(old: &str, script: &Path) -> Option<String> {
+    let name = script.file_name()?.to_str()?;
+    if old.contains(name) {
+        return None;
+    }
+    let run = format!("\"{}\" %command%", script.display());
+    Some(match old.trim() {
+        "" => run,
+        old if old.contains("%command%") => old.replacen("%command%", &run, 1),
+        old => format!("{run} {old}"),
+    })
+}
+
+/// `vdf` with each game in `appids` given the launch options `wrap` makes of its old ones (""
+/// for none), and how many it changed. None if it changed none, or there's no `apps` to put them
+/// in, which an account has once it's played something.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+fn with_launch_options(vdf: &str, appids: &[String], wrap: impl Fn(&str) -> Option<String>) -> Option<(String, usize)> {
+    let apps = apps_in(vdf)?;
+    let tabs = |n: usize| "\t".repeat(n);
+    // What to put where, as (start, end, text): end is past the text it replaces.
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    for appid in appids {
+        let game = apps.games.get(appid.as_str());
+        let old = game.and_then(|g| g.launch.as_ref()).map_or("", |(_, old)| old.as_str());
+        let Some(new) = wrap(old) else { continue };
+        let value = vdf_quote(&new);
+        edits.push(match game {
+            Some(Game { launch: Some((at, _)), .. }) => (at.start, at.end, value),
+            Some(game) => (game.open, game.open, format!("\n{}\"LaunchOptions\"\t\t{value}", tabs(apps.depth + 1))),
+            None => {
+                let (t, inner) = (tabs(apps.depth), tabs(apps.depth + 1));
+                let block = format!("\n{t}{}\n{t}{{\n{inner}\"LaunchOptions\"\t\t{value}\n{t}}}", vdf_quote(appid));
+                (apps.open, apps.open, block)
+            }
+        });
+    }
+    if edits.is_empty() {
+        return None;
+    }
+    let changed = edits.len();
+    // From the end, so each edit's place is still where it was found.
+    edits.sort_by_key(|&(start, _, _)| std::cmp::Reverse(start));
+    let mut out = vdf.to_string();
+    for (start, end, text) in edits {
+        out.replace_range(start..end, &text);
+    }
+    Some((out, changed))
+}
+
+/// `s` as a quoted KeyValues string.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+fn vdf_quote(s: &str) -> String {
+    format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+/// Where an account's `localconfig.vdf` keeps its games' settings:
+/// `UserLocalConfigStore/Software/Valve/Steam/apps`.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+struct Apps {
+    /// Just past the `{` that opens it.
+    open: usize,
+    /// How many blocks deep its games are, which is how many tabs they're indented by.
+    depth: usize,
+    games: HashMap<String, Game>,
+}
+
+/// A game's block in `Apps`.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+struct Game {
+    /// Just past the `{` that opens it.
+    open: usize,
+    /// Its launch options, if it has some: where they are, quotes and all, and what they say.
+    launch: Option<(std::ops::Range<usize>, String)>,
+}
+
+/// The `apps` in an account's `localconfig.vdf`, if it has them.
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
+fn apps_in(vdf: &str) -> Option<Apps> {
+    const APPS: [&str; 4] = ["Software", "Valve", "Steam", "apps"];
+    let is_apps = |path: &[String]| {
+        path.len() >= APPS.len()
+            && path[path.len() - APPS.len()..].iter().zip(APPS).all(|(a, b)| a.eq_ignore_ascii_case(b))
+    };
+    let mut apps: Option<Apps> = None;
+    let mut path: Vec<String> = Vec::new();
+    let mut key: Option<String> = None;
+    let mut chars = vdf.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match c {
+            '"' => {
+                let mut s = String::new();
+                let mut end = vdf.len();
+                while let Some((i, c)) = chars.next() {
+                    match c {
+                        '"' => {
+                            end = i + 1;
+                            break;
+                        }
+                        '\\' => match chars.next() {
+                            Some((_, 'n')) => s.push('\n'),
+                            Some((_, 't')) => s.push('\t'),
+                            Some((_, other)) => s.push(other),
+                            None => {}
+                        },
+                        _ => s.push(c),
+                    }
+                }
+                match key.take() {
+                    None => key = Some(s),
+                    Some(k) => {
+                        let in_game = path.len() > APPS.len() && is_apps(&path[..path.len() - 1]);
+                        if in_game && k.eq_ignore_ascii_case("LaunchOptions") {
+                            let game = path.last().and_then(|appid| apps.as_mut()?.games.get_mut(appid));
+                            if let Some(game) = game {
+                                game.launch = Some((at..end, s));
+                            }
+                        }
+                    }
+                }
+            }
+            '{' => {
+                path.push(key.take().unwrap_or_default());
+                if apps.is_none() && is_apps(&path) {
+                    apps = Some(Apps { open: at + 1, depth: path.len(), games: HashMap::new() });
+                } else if path.len() > APPS.len()
+                    && is_apps(&path[..path.len() - 1])
+                    && let Some(apps) = apps.as_mut()
+                {
+                    apps.games.insert(path[path.len() - 1].clone(), Game { open: at + 1, launch: None });
+                }
+            }
+            '}' => {
+                path.pop();
+                key = None;
+            }
+            _ => {}
+        }
+    }
+    apps
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// An account's `localconfig.vdf`, cut down, with Steam's tabs.
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
+    const LOCALCONFIG: &str = "\"UserLocalConfigStore\"\n{\n\t\"Software\"\n\t{\n\t\t\"Valve\"\n\t\t{\n\t\t\t\"Steam\"\n\t\t\t{\n\
+        \t\t\t\t\"apps\"\n\t\t\t\t{\n\
+        \t\t\t\t\t\"10\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"LaunchOptions\"\t\t\"-novid\"\n\t\t\t\t\t}\n\
+        \t\t\t\t\t\"2379780\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"LastPlayed\"\t\t\"1\"\n\
+        \t\t\t\t\t\t\"cloud\"\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\"LaunchOptions\"\t\t\"no\"\n\t\t\t\t\t\t}\n\
+        \t\t\t\t\t\t\"LaunchOptions\"\t\t\"\\\"/a b/steam-gamescope\\\" %command%\"\n\
+        \t\t\t\t\t}\n\
+        \t\t\t\t\t\"30\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"LaunchOptions\"\t\t\"PROTON_LOG=1 %command% -windowed\"\n\t\t\t\t\t}\n\
+        \t\t\t\t\t\"40\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"LastPlayed\"\t\t\"2\"\n\t\t\t\t\t}\n\
+        \t\t\t\t}\n\t\t\t}\n\t\t}\n\t}\n\t\"2379780\"\t\t\"x\"\n}\n";
+
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
+    fn options(vdf: &str, appid: &str) -> Option<String> {
+        apps_in(vdf)?.games.remove(appid)?.launch.map(|(_, o)| o)
+    }
+
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
+    #[test]
+    fn launch_options_are_found_under_the_game_in_apps() {
+        let vdf = LOCALCONFIG;
+        assert_eq!(options(vdf, "2379780").as_deref(), Some("\"/a b/steam-gamescope\" %command%"));
+        assert_eq!(options(vdf, "10").as_deref(), Some("-novid"));
+        assert_eq!(options(vdf, "40"), None);
+        assert_eq!(options(vdf, "20"), None);
+    }
+
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
+    #[test]
+    fn the_script_goes_before_the_game_keeping_other_options() {
+        let script = Path::new("/a b/steam-gamescope");
+        let run = "\"/a b/steam-gamescope\" %command%";
+        assert_eq!(wrapped("", script).as_deref(), Some(run));
+        assert_eq!(wrapped("-novid -windowed", script), Some(format!("{run} -novid -windowed")));
+        assert_eq!(wrapped("A=1 %command% -x", script), Some(format!("A=1 {run} -x")));
+        assert_eq!(wrapped("gamemoderun %command%", script), Some(format!("gamemoderun {run}")));
+        assert_eq!(wrapped(run, script), None);
+    }
+
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
+    #[test]
+    fn launch_options_are_set_in_place_and_nothing_else_moves() {
+        let script = Path::new("/a b/steam-gamescope");
+        let ids = ["10", "2379780", "30", "40", "50"].map(String::from);
+        let (vdf, changed) = with_launch_options(LOCALCONFIG, &ids, |old| wrapped(old, script)).unwrap();
+        // 2379780 already had it.
+        assert_eq!(changed, 4);
+        let run = "\"/a b/steam-gamescope\" %command%";
+        assert_eq!(options(&vdf, "10"), Some(format!("{run} -novid")));
+        assert_eq!(options(&vdf, "2379780").as_deref(), Some(run));
+        assert_eq!(options(&vdf, "30"), Some(format!("PROTON_LOG=1 {run} -windowed")));
+        assert_eq!(options(&vdf, "40").as_deref(), Some(run));
+        assert_eq!(options(&vdf, "50").as_deref(), Some(run));
+        // As Steam lays them out.
+        assert!(vdf.contains("\t\t\t\t\t\"40\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"LaunchOptions\"\t\t\"\\\"/a b/steam-gamescope\\\" %command%\"\n\t\t\t\t\t\t\"LastPlayed\""));
+        assert!(vdf.contains("\t\t\t\t{\n\t\t\t\t\t\"50\"\n\t\t\t\t\t{\n\t\t\t\t\t\t\"LaunchOptions\"\t\t\"\\\"/a b/steam-gamescope\\\" %command%\"\n\t\t\t\t\t}\n\t\t\t\t\t\"10\""));
+        // The rest is as it was.
+        let without = |v: &str| v.lines().filter(|l| !l.contains("LaunchOptions") && !l.contains("\"50\"")).count();
+        assert_eq!(without(&vdf), without(LOCALCONFIG) + 2);
+        assert!(
+            with_launch_options(&vdf, &ids, |old| wrapped(old, script)).is_none(),
+            "the second time changes nothing"
+        );
+    }
 
     #[test]
     fn manifest() {

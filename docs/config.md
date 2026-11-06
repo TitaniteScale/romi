@@ -61,14 +61,32 @@ argument, so paths with spaces need no extra quoting. Need pipes or `&&`? Use `s
 - `wait` (default) shows a "now playing" screen until the game exits. Output goes to
   `~/.local/state/romi/last.log`.
 - `terminal` hands the terminal to the command, for scripts and TUI games.
-- `detach` starts it and moves on. Used for Steam, whose launcher returns immediately.
+- `detach` starts it and moves on. Used for Steam, whose launcher returns immediately. If Steam
+  isn't running, romi starts it with no window first (`steam -silent`), so only its "Launching..."
+  box shows.
 - `gamescope` (experimental, Linux) plays it in the middle panel, for games with no libretro core:
   the command runs in [gamescope](https://github.com/ValveSoftware/gamescope) with no window, at
   1280×720, and romi shows the frames gamescope streams over PipeWire. The game reads the
   controller and plays its sound itself, so there are no save states or achievements. Where games
   can't show in romi (with `play_in_romi` off, or in another terminal), it gets a window as with
-  `wait`. So does every such game in the Edge and Release downloads, which are built without it
-  (their Ubuntu 22.04's PipeWire is too old for it); the Arch package and `cargo install` have it.
+  `wait` (a Steam game, as with `detach`). So does every such game in the Edge and Release
+  downloads, which are built without it (their Ubuntu 22.04's PipeWire is too old for it); the Arch
+  package and `cargo install` have it.
+
+  Steam starts its games itself, so for a Steam game the gamescope comes from the game's launch
+  options in Steam: they run a script of romi's, `~/.local/share/romi/steam-gamescope`, which only
+  puts the game in gamescope when romi has just asked for it. Started from Steam, the game opens in
+  its window as usual. romi sets this up by itself the first time a Steam game plays in the panel,
+  for every installed game at once, keeping any launch options they had (the script goes in front
+  of `%command%`). Steam has to be closed for that, so if it's running, romi restarts it, with no
+  window, unless a Steam game is running. It keeps a copy of each account's launch options from
+  before, as `localconfig.vdf.romi-backup` in Steam's `userdata/<account>/config`. Games installed
+  later are set up the first time they play.
+
+  To play every Steam game this way, set `"steam": { "mode": "gamescope" }`, and give the ones that
+  need a keyboard or mouse `"mode": "detach"` in an override, like `"steam:286160": { "mode":
+  "detach" }`. In the panel, a game reads only the controller. A game's menu has **Play in a
+  window**, for once.
 
 ## Other emulators
 

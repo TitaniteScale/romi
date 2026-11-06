@@ -17,7 +17,8 @@ pub(super) fn play(
     let g = resolve(&lib, query, system)?;
     let game = &lib.games[g];
     let asked_to_detach = mode == Some(LaunchMode::Detach);
-    let mut mode = mode.unwrap_or(game.launch.mode);
+    // gamescope's mode plays in the TUI's panel, so not here.
+    let mut mode = mode.unwrap_or(game.launch.mode).outside_panel(&game.key);
     let mut prepared = match game.launch.prepare() {
         Ok(p) => p,
         Err(e) => return fail(exit::CONFIG, format!("{}: {e:#}", game.name)),
