@@ -7,8 +7,8 @@ pkgdesc="Play your games in your terminal: a libretro frontend and game library,
 arch=('x86_64' 'aarch64')
 url="https://github.com/TitaniteScale/romi"
 license=('MIT')
-depends=('alsa-lib' 'glibc' 'libgcc' 'systemd-libs')
-makedepends=('cargo')
+depends=('alsa-lib' 'glibc' 'libgcc' 'libpipewire' 'systemd-libs')
+makedepends=('cargo' 'clang')
 # With makepkg's LTO flags, ring's C code comes out as GCC bitcode that Rust's linker can't read.
 options=('!lto')
 optdepends=(

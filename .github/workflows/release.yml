@@ -32,7 +32,7 @@ jobs:
             exit 1
           fi
       - name: Install system libraries
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev libpipewire-0.3-dev
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - run: cargo build --release --locked
@@ -78,7 +78,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Install system libraries
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev libpipewire-0.3-dev
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - uses: rust-lang/crates-io-auth-action@v1
