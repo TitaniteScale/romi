@@ -265,3 +265,25 @@ def test_neo_geo_sets_get_their_titles(sandbox):
     assert [g["name"] for g in (games if isinstance(games, list) else games["games"]) if g["system"] == "neogeo"] == [
         "Art of Fighting"
     ]
+
+
+def test_bios_files_next_to_games_arent_games(sandbox):
+    for system, files in {
+        "psx": ["Ape Escape (USA).cue", "scph1001.bin"],
+        "dreamcast": ["Crazy Taxi (USA).chd", "naomi.zip", "dc_boot.bin"],
+        "lynx": ["Chips Challenge (USA).lnx", "mybios.lnx"],
+    }.items():
+        (sandbox.home / "ROMs" / system).mkdir(parents=True)
+        for f in files:
+            (sandbox.home / "ROMs" / system / f).touch()
+    config = json.loads(json.dumps(CONFIG))
+    config["systems"] = [
+        {"id": "psx", "name": "PlayStation", "extensions": ["bin", "cue"], "command": "true {rom}"},
+        {"id": "dreamcast", "name": "Dreamcast", "extensions": ["bin", "chd", "zip"], "command": "true {rom}"},
+        {"id": "lynx", "name": "Lynx", "extensions": ["lnx"], "bios": ["mybios.lnx"], "command": "true {rom}"},
+    ]
+    config["games"] = []
+    sandbox.write_config(config)
+    out = run_cli(sandbox, "list", "--json")
+    assert sorted(g["key"] for g in json.loads(out.stdout)) == [
+        "dreamcast:Crazy Taxi (USA).chd", "lynx:Chips Challenge (USA).lnx", "psx:Ape Escape (USA).cue"]

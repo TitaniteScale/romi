@@ -130,6 +130,78 @@ impl ArcadeDb {
     }
 }
 
+/// BIOS files people keep next to their games, which are never games themselves, though their
+/// extensions are (`.bin` for PlayStation discs, `.zip` for Dreamcast's). Matched as `glob_match`
+/// does, so without case. The exact names in the systems' "bios" lists count too.
+const BIOS_FILES: &[&str] = &[
+    // PlayStation and PlayStation 2 ("SCPH-70012.bin" too), and the PSP's PlayStation.
+    "scph*.bin",
+    "psxonpsp660.bin",
+    "ps1_rom.bin",
+    "openbios.bin",
+    // Saturn, Sega CD, and Genesis Plus GX's boot ROMs.
+    "sega_101.bin",
+    "mpr-17933.bin",
+    "mpr-18811-mx.ic1",
+    "mpr-19367-mx.ic1",
+    "saturn_bios.bin",
+    "bios_cd_?.bin",
+    "bios_md.bin",
+    "bios_?.sms",
+    "bios.gg",
+    // Dreamcast, NAOMI and Atomiswave.
+    "dc_boot.bin",
+    "dc_flash.bin",
+    "dc_nvmem.bin",
+    "naomi.zip",
+    "naomi2.zip",
+    "awbios.zip",
+    "hod2bios.zip",
+    "f355bios.zip",
+    "f355dlx.zip",
+    "airlbios.zip",
+    // Neo Geo and Neo Geo CD.
+    "neogeo.zip",
+    "neocd*.bin",
+    "neocd*.rom",
+    "uni-bios*.rom",
+    // PC Engine CD.
+    "syscard*.pce",
+    "gexpress.pce",
+    // Nintendo handhelds, the Famicom Disk System and the 64DD.
+    "gba_bios.bin",
+    "gb_bios.bin",
+    "gbc_bios.bin",
+    "sgb*_bios.bin",
+    "bios7.bin",
+    "bios9.bin",
+    "firmware.bin",
+    "dsi_bios7.bin",
+    "dsi_bios9.bin",
+    "dsi_firmware.bin",
+    "dsi_nand.bin",
+    "disksys.rom",
+    "64dd_ipl.bin",
+    // Others.
+    "lynxboot.img",
+    "7800 bios (?).rom",
+    "5200.rom",
+    "colecovision.rom",
+    "panafz*.bin",
+    "goldstar.bin",
+    "sanyotry.bin",
+];
+
+/// Whether `file_name` is a BIOS, not a game: one of `BIOS_FILES`, or named in a system's "bios"
+/// list. A list's patterns don't count ("pcsx2/bios/*.bin" would be every `.bin`).
+fn is_bios(cfg: &Config, file_name: &str) -> bool {
+    BIOS_FILES.iter().any(|p| glob_match(p, file_name))
+        || cfg.systems.iter().flat_map(|s| &s.bios).flat_map(|b| b.options()).any(|f| {
+            let name = f.rsplit('/').next().unwrap_or(f);
+            !name.contains(['*', '?']) && name.eq_ignore_ascii_case(file_name)
+        })
+}
+
 /// Text of every `<tag>...</tag>` in order. These files are flat lists, so no XML parser needed.
 fn tag_values(xml: &str, tag: &str) -> Vec<String> {
     let open = format!("<{tag}>");
@@ -313,7 +385,7 @@ impl Library {
                 continue;
             }
             let stem = rel.file_stem().unwrap_or_default().to_string_lossy();
-            if arcade.is_some_and(|db| db.not_games.contains(&*stem)) {
+            if arcade.is_some_and(|db| db.not_games.contains(&*stem)) || is_bios(cfg, &file_name) {
                 continue;
             }
             kept.push(rel);
@@ -732,6 +804,22 @@ mod tests {
         assert_eq!(clean_name("Mr. Bones (USA) (Disc 1)"), "Mr. Bones (Disc 1)");
         assert_eq!(clean_name("Apotris"), "Apotris");
         assert_eq!(clean_name("(weird)"), "(weird)");
+    }
+
+    #[test]
+    fn bios_files_arent_games() {
+        let mut cfg = Config::default();
+        let bios = r#"[["mine.rom", "MORE.ROM"], "pcsx2/bios/*.bin", "dc/extra.zip"]"#;
+        let sys = format!(r#"{{"id": "x", "extensions": ["rom"], "command": "true", "bios": {bios}}}"#);
+        cfg.systems.push(serde_json::from_str(&sys).unwrap());
+        for bios in
+            ["scph1001.bin", "SCPH-70012.bin", "naomi.zip", "neogeo.zip", "bios_CD_U.bin", "more.rom", "extra.zip"]
+        {
+            assert!(is_bios(&cfg, bios), "{bios}");
+        }
+        for game in ["Crazy Taxi (USA).chd", "Ape Escape (USA) (Track 1).bin", "aof.zip", "other.bin", "mine.rom.zip"] {
+            assert!(!is_bios(&cfg, game), "{game}");
+        }
     }
 
     #[test]
