@@ -69,9 +69,10 @@ argument, so paths with spaces need no extra quoting. Need pipes or `&&`? Use `s
   1280×720, and romi shows the frames gamescope streams over PipeWire. The game reads the
   controller and plays its sound itself, so there are no save states or achievements. Where games
   can't show in romi (with `play_in_romi` off, or in another terminal), it gets a window as with
-  `wait` (a Steam game, as with `detach`). So does every such game in the Edge and Release
-  downloads, which are built without it (their Ubuntu 22.04's PipeWire is too old for it); the Arch
-  package and `cargo install` have it.
+  `wait` (a Steam game, as with `detach`). So it does without gamescope installed, and in the Edge
+  and Release downloads, which are built without the mode (their Ubuntu 22.04's PipeWire is too old
+  for it); the Arch package and `cargo install` have it. romi says why the first time, and
+  `romi check` says whether the games set to it can play in romi.
 
   Steam starts its games itself, so for a Steam game the gamescope comes from the game's launch
   options in Steam: they run a script of romi's, `~/.local/share/romi/steam-gamescope`, which only

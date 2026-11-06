@@ -875,3 +875,33 @@ def test_check_warns_about_ghosttys_blur(sandbox):
     assert warning in check(sandbox)
     (sandbox.home / ".config/ghostty/config").write_text("background-blur = false\n")
     assert warning not in check(sandbox)
+
+
+def test_check_says_steam_games_can_play_in_romi_through_gamescope(sandbox):
+    steam = sandbox.root / "steam"
+    (steam / "steamapps").mkdir(parents=True)
+    (steam / "steamapps/appmanifest_4242.acf").write_text(
+        '"AppState"\n{\n\t"appid"\t\t"4242"\n\t"name"\t\t"Rule Blocks"\n\t"StateFlags"\t\t"4"\n}\n')
+    config = json.loads(json.dumps(CONFIG))
+    config["steam"] = {"enabled": True, "dir": str(steam), "command": "true {appid}"}
+    sandbox.write_config(config)
+    bin = sandbox.root / "bin"
+    bin.mkdir()
+    sandbox.extra_env["PATH"] = str(bin)
+    mode = 'set "steam": { "mode": "gamescope" } in your config.'
+    hint = "gamescope Your 1 Steam game can play inside romi too, with a controller (experimental): "
+    assert hint + "install gamescope, and " + mode in check(sandbox)
+    (bin / "gamescope").write_text("#!/bin/sh\n")
+    (bin / "gamescope").chmod(0o755)
+    assert hint + mode in check(sandbox)
+    config["steam"]["mode"] = "gamescope"
+    sandbox.write_config(config)
+    assert "gamescope 1 game set to its mode plays inside romi through it" in check(sandbox)
+    (bin / "gamescope").unlink()
+    out = check(sandbox)
+    assert "gamescope ! gamescope isn't installed, so the 1 game set to its mode opens in a window" in out
+    assert "Your 1 Steam game" not in out
+
+
+def test_check_says_nothing_about_gamescope_without_steam_games(sandbox):
+    assert "gamescope" not in check(sandbox)

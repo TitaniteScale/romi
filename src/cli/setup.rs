@@ -302,6 +302,9 @@ pub(super) fn init(
     if let Some(folders) = folders {
         println!("{folders}");
     }
+    if let Some(hint) = steam_in_romi_hint(&cfg, &lib) {
+        println!("\n{hint}");
+    }
     Ok(())
 }
 
@@ -369,6 +372,36 @@ fn where_saves_are(cfg: &Config) -> String {
     }
 }
 
+/// What `romi check` says about the gamescope mode, if anything: whether the games set to it can
+/// play in romi, or else that the Steam games could.
+fn gamescope_report(cfg: &Config, lib: &Library) -> Option<String> {
+    let set = lib.games.iter().filter(|g| g.launch.mode == config::LaunchMode::Gamescope).count();
+    let games = format!("{set} {}", text::plural(set, "game"));
+    let (opens, plays) = if set == 1 { ("opens", "plays") } else { ("open", "play") };
+    match crate::emu::gamescope_missing() {
+        _ if set == 0 => steam_in_romi_hint(cfg, lib),
+        Some(why) => Some(format!("! {why}, so the {games} set to its mode {opens} in a window")),
+        None => Some(format!("{games} set to its mode {plays} inside romi through it")),
+    }
+}
+
+/// That the Steam games could play inside romi, if they could and don't: their mode isn't
+/// `gamescope`, and this romi has the mode.
+fn steam_in_romi_hint(cfg: &Config, lib: &Library) -> Option<String> {
+    let steam = lib.games.iter().filter(|g| steam::appid_of(&g.key).is_some()).count();
+    let can_have_it = cfg!(all(target_os = "linux", feature = "gamescope"));
+    if steam == 0 || !can_have_it || cfg.steam.mode == config::LaunchMode::Gamescope {
+        return None;
+    }
+    let mode = r#"set "steam": { "mode": "gamescope" } in your config"#;
+    let todo = match crate::emu::gamescope_missing() {
+        Some(_) => format!("install gamescope, and {mode}"),
+        None => mode.to_string(),
+    };
+    let games = format!("{steam} Steam {}", text::plural(steam, "game"));
+    Some(format!("Your {games} can play inside romi too, with a controller (experimental): {todo}."))
+}
+
 pub(super) fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
     let lib = Library::load_complete(cfg);
     println!("config    {}", config::tilde(cfg_path));
@@ -383,6 +416,9 @@ pub(super) fn check(cfg: &Config, cfg_path: &std::path::Path) -> Result<()> {
     }
     if terminal.name == "Ghostty" && crate::emucfg::ghostty_blur() {
         println!("          ! background-blur in Ghostty's config adds lag to games: about 45 ms measured at 4K");
+    }
+    if let Some(report) = gamescope_report(cfg, &lib) {
+        println!("gamescope {report}");
     }
     let core_folders = crate::init::Catalog::for_config(cfg).core_folders();
     println!("cores     {}", where_cores_are(&core_folders));

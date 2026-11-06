@@ -4,6 +4,7 @@ is checked with a made-up core that draws a blank Game Boy screen."""
 
 import json
 import os
+import shutil
 import signal
 import subprocess
 import zlib
@@ -419,6 +420,22 @@ def test_a_says_why_when_it_cant_show_a_game_or_start_its_emulator(start, sandbo
     romi = start(term="foot")
     romi.keys("\r")
     romi.wait_for("Games only show in Ghostty or kitty, and no-such-emulator: not found")
+
+
+def test_a_game_in_the_gamescope_mode_opens_in_a_window_without_gamescope(start, sandbox):
+    bin = sandbox.root / "bin"
+    bin.mkdir()
+    (bin / "true").symlink_to(shutil.which("true"))
+    game = {"name": "Boxed Game", "command": "true", "mode": "gamescope"}
+    sandbox.write_config(dict(CONFIG, play_in_romi=True, systems=[], games=[game]))
+    sandbox.extra_env = {"PATH": str(bin)}
+    romi = start(term="xterm-kitty")
+    romi.keys("\r")
+    romi.wait_for("gamescope isn't installed, so games in the gamescope mode open in a window instead")
+    # Once is enough.
+    romi.pump(1)
+    romi.keys("\r")
+    romi.wait_for("Played Boxed Game")
 
 
 def test_a_plays_in_romi_in_a_terminal_that_shows_games(start, sandbox):

@@ -50,6 +50,7 @@ opens.
 | Neo Geo Pocket Color                              | Beetle NeoPop    |                                       |
 | Atari Lynx                                        | Handy            |                                       |
 | Atari 7800                                        | ProSystem        |                                       |
+| Steam games, native and Proton                    | None: gamescope  | Experimental, controller only, [below](#games-without-a-core) |
 
 **You don't need RetroArch, only the core.** romi is the frontend: it loads the same `.so` files
 RetroArch does, from your distro's `libretro-*` packages (and on Arch, the AUR's), or
@@ -77,14 +78,18 @@ instead; Options → A plays turns that round. There's no rewind yet. More in
 PS2 games open in PCSX2, in its own window, as they do for anything LRPS2 can't run. romi doesn't play
 games with Play! (`libretro-play`).
 
-**Games without a core** can play in romi too, if you play them with a controller: Steam games
+### Games without a core
+
+Games with no libretro core can play in romi too, if you play them with a controller: Steam games
 (native or through Proton), and standalone emulators like Xenia Canary for the Xbox 360. romi runs
-them in [gamescope](https://github.com/ValveSoftware/gamescope) with no window and shows what they
-draw, at 1280×720, with the launch animation and screen filters. The game reads the controller and
-plays its sound itself, so there are no save states, and a game that needs a mouse or keyboard is
-best left in its own window. For Steam, set `"steam": { "mode": "gamescope" }` and romi sets up
-each game's launch options itself, and starts Steam with no window. It's experimental, Linux only,
-and not in the Edge and Release downloads. See [launch modes](docs/config.md#commands).
+them in [gamescope](https://github.com/ValveSoftware/gamescope), which you install, with no window
+and shows what they draw, at 1280×720, with the launch animation and screen filters. The game reads
+the controller and plays its sound itself, so there are no save states, and a game that needs a
+mouse or keyboard is best left in its own window. For Steam, set `"steam": { "mode": "gamescope" }`
+and romi sets up each game's launch options itself, and starts Steam with no window. Without
+gamescope, they open in their windows as before, and `romi check` says what's missing. It's
+experimental, Linux only, and not in the Edge and Release downloads. See [launch
+modes](docs/config.md#commands).
 
 ## Everything else
 

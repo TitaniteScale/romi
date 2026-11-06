@@ -27,20 +27,41 @@ impl App {
         self.cfg.play_in_romi && crate::emu::kitty::terminal().shows_games
     }
 
-    /// Whether A plays game `g` in the panel through gamescope (its mode is `gamescope`, and this
-    /// romi and terminal can show it).
+    /// Whether game `g` would play in the panel through gamescope, if this romi has gamescope: its
+    /// mode is `gamescope`, and the terminal can show it.
+    fn wants_gamescope(&self, g: usize) -> bool {
+        self.lib.games[g].launch.mode == LaunchMode::Gamescope && self.a_plays_here()
+    }
+
+    /// Whether A plays game `g` in the panel through gamescope (it wants to, and this romi has
+    /// gamescope).
     pub(super) fn plays_in_gamescope(&self, g: usize) -> bool {
-        cfg!(all(target_os = "linux", feature = "gamescope"))
-            && self.lib.games[g].launch.mode == LaunchMode::Gamescope
-            && self.a_plays_here()
+        self.wants_gamescope(g) && crate::emu::gamescope_missing().is_none()
     }
 
     /// Plays a game as A does: inside romi when it can, or else in its emulator.
     pub(super) fn play(&mut self, g: usize) {
         if self.cfg.play_in_romi {
-            #[cfg(all(target_os = "linux", feature = "gamescope"))]
-            if self.plays_in_gamescope(g) {
-                return self.play_captured(g);
+            if self.wants_gamescope(g) {
+                #[cfg(all(target_os = "linux", feature = "gamescope"))]
+                if self.plays_in_gamescope(g) {
+                    return self.play_captured(g);
+                }
+                // In a window, as without the mode, saying why the first time, unless it can't
+                // start at all, which `launch` says.
+                let starts = self.can_launch(g);
+                self.launch(g);
+                if let Some(why) = crate::emu::gamescope_missing()
+                    && starts
+                    && !std::mem::replace(&mut self.told_about_gamescope, true)
+                {
+                    let why = format!("{why}, so games in the gamescope mode open in a window instead");
+                    match self.running {
+                        Some(_) => self.after_game = Some(why),
+                        None => self.set_status(Level::Warn, why),
+                    }
+                }
+                return;
             }
             // A game that runs in another emulator may play in romi through one of its others.
             self.emulators.find(&self.cfg, &self.lib, g);

@@ -226,6 +226,8 @@ pub struct App {
     term_focused: bool,
     /// Whether it's been said why A starts emulators in this terminal.
     told_about_terminal: bool,
+    /// Whether it's been said why games in the gamescope mode open in a window.
+    told_about_gamescope: bool,
     /// What to say when the game that's running exits, since it won't be seen until then.
     after_game: Option<String>,
     cooldown_until: Option<Instant>,
@@ -300,6 +302,7 @@ impl App {
             achievements_rx: None,
             term_focused: true,
             told_about_terminal: false,
+            told_about_gamescope: false,
             after_game: None,
             cooldown_until: None,
             positions: HashMap::new(),
