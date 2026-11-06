@@ -1,16 +1,16 @@
 # PS2 in romi
 
-PS2 games can run three ways, and the choice has more consequences here than on other systems. Use
-LRPS2: Play! isn't recommended. What's below was tested on one laptop, a Ryzen AI 9 HX 370 with a
-Radeon 890M and an RTX 4060, in November 2026.
+PS2 games play in romi through LRPS2, PCSX2's libretro core, and otherwise open in PCSX2. romi
+used to fall back to Play!'s core, but no longer plays games with it (see below). What's below was
+tested on one laptop, a Ryzen AI 9 HX 370 with a Radeon 890M and an RTX 4060, in November 2026.
 
 | | What it is | Plays in romi | Notes |
 |---|---|---|---|
-| **LRPS2** | PCSX2's libretro core | Yes, first choice | In the AUR, or a nightly download; it needs your BIOS |
-| **Play!** | Another emulator's libretro core (`libretro-play`) | Yes, if LRPS2 isn't there | Not recommended: runs far fewer games, and slower |
+| **LRPS2** | PCSX2's libretro core | Yes | In the AUR, or a nightly download; it needs your BIOS |
 | **PCSX2** | The standalone emulator | No, it opens its own window | Runs the most games; nothing here changes it |
+| **Play!** | Another emulator's libretro core (`libretro-play`) | No, and romi doesn't list it | See [Play!](#play) |
 
-A plays a game in romi using the first core it finds installed, LRPS2 before Play!. Your usual
+A plays a game in romi through LRPS2 when it's installed, and starts PCSX2 when it isn't. Your usual
 emulator stays in the game's menu as **Play with**. [Play in romi](tui.md#play-in-romi) explains how
 to turn that round, so that A starts the emulator.
 
@@ -44,7 +44,7 @@ fixed release, and LRPS2's graphics code changes often, so a new one can behave 
 
 ## How it draws
 
-LRPS2 and Play! draw with OpenGL, on the GPU your screen is plugged into. On a laptop with two GPUs,
+LRPS2 draws with OpenGL, on the GPU your screen is plugged into. On a laptop with two GPUs,
 that's usually the integrated one. romi can't give a core Vulkan, so leave `pcsx2_renderer` on Auto or
 OpenGL: its Vulkan and paraLLEl-GS renderers won't start here. Both Software renderers crashed as a
 Burnout 3 race loaded.
@@ -60,8 +60,7 @@ romi times each frame by its sound, so a frame that takes longer than 16.7 ms ea
 sound queued ahead. If that keeps happening, the queue runs dry, and you hear stutter.
 
 On Sly Cooper's opening, with the same scripted buttons at 2× and no terminal, LRPS2 ran at about 2.3
-to 2.4 times full speed and Play! at 1.1 to 1.2. A stronger graphics card didn't help Play!: the RTX
-4060 ran at about 1.0× where the 890M reached 1.4×, because reading frames back cost it more.
+to 2.4 times full speed.
 
 To see what a game is doing, record its frame timings:
 
@@ -108,7 +107,8 @@ right with it off from a cold boot into a race, but that's only a few minutes of
 | Ratchet & Clank: Up Your Arsenal | Script reached the memory card prompt | Stops at boot |
 
 "Script" means romi pressed buttons by itself for about a minute: the game boots and draws, but nobody
-has played it this way. Play!'s three stops at boot happen in RetroArch too, and
+has played it this way. The Play! column is from when romi still played games with it, kept for
+comparison. Play!'s three stops at boot happen in RetroArch too, and
 [its tracker](https://github.com/jpd002/Play-Compatibility/issues) rates Final Fantasy X as playable,
 so they may not happen on every setup.
 
@@ -129,8 +129,8 @@ Each emulator keeps its own memory cards, so a save made in one doesn't show up 
 | | Memory cards |
 |---|---|
 | LRPS2 | `pcsx2/memcards` in your BIOS folder |
-| Play! | `~/.local/share/Play Data Files/vfs` |
 | PCSX2 | `~/.config/PCSX2/memcards` |
+| Play! | `~/.local/share/Play Data Files/vfs` |
 
 LRPS2 starts with blank cards, so a game may ask to format one the first time. Say yes, or it can't
 save. LRPS2's cards and PCSX2's look like the same format, but moving saves between them hasn't been
@@ -141,8 +141,7 @@ tried, so back up first if you try it.
 Games played in LRPS2 earn RetroAchievements in romi (see [Earning them in
 romi](achievements.md#earning-them-in-romi)); Sly Cooper's was tried. LRPS2 gives no memory map,
 but its system RAM is the 32 MB of the console's main memory plus the 16 KB scratchpad, which is
-what RetroAchievements numbers addresses by. Play! hasn't been tried. PCSX2's own achievements
-aren't affected.
+what RetroAchievements numbers addresses by. PCSX2's own achievements aren't affected.
 
 A game is found by the hash of its disc's main program, read by rcheevos, so it has to be a dump
 RetroAchievements has registered. `.iso` and `.cue` work; `.chd` doesn't yet. When a dump isn't
@@ -152,13 +151,19 @@ Supported Game Hashes. Final Fantasy X, for one, only has its International (Jap
 ## When a game stops responding
 
 A game that hangs inside its core can't be stopped from outside. romi waits 3 seconds after you leave,
-then lets go of it and says so. It can't play another game inside it until you restart romi. This is
-what NeoGeo Battle Coliseum does in Play! after Start.
+then lets go of it and says so. It can't play another game inside it until you restart romi. NeoGeo
+Battle Coliseum did this in Play! after Start.
 
-## Play! outside romi
+## Play!
+
+romi doesn't play games with Play!'s core, and doesn't offer it in a game's menu. It runs far fewer
+games than LRPS2, and slower; it hung for good in NeoGeo Battle Coliseum after Start; and its
+libretro side loses sound when two blocks come between frames, which made games run fast in romi
+([jpd002/Play- #1626](https://github.com/jpd002/Play-/pull/1626) fixes that).
+`romi run --core /usr/lib/libretro/play_libretro.so` still loads it, to try it.
 
 Play! crashes in RetroArch on Wayland with `Killed by a signal`, before it draws anything. Under X11
-it starts, so if you want it outside romi, make that the game's command in `overrides.jsonc`:
+it starts, so if you want it anyway, make that the game's command in `overrides.jsonc`:
 
 ```jsonc
 "ps2:Sly Cooper and the Thievius Raccoonus (USA).iso": {
@@ -167,4 +172,4 @@ it starts, so if you want it outside romi, make that the game's command in `over
 }
 ```
 
-Inside romi it doesn't crash, as romi handles what Play! trips over. LRPS2 runs on Wayland as it is.
+LRPS2 runs on Wayland as it is.

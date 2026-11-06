@@ -297,9 +297,10 @@ unsafe fn function<F: Copy>(name: &CStr) -> Result<F> {
 /// GLEW's `glewInit`, which romi has in place of GLEW's for the cores it loads: a core's call to it
 /// finds romi's first, as the program's own. GLEW's loads GL's functions, then GLX's, and fails if
 /// there's no GLX display, which there isn't with romi's EGL context, though GL's functions work
-/// with it (glvnd's GLX and EGL share them). Play! (PS2) gave up setting up what it draws with when
-/// it failed, and crashed on its first frame. This loads GL's functions only, with the core's own
-/// GLEW, which it loaded as its own and romi finds among what's loaded.
+/// with it (glvnd's GLX and EGL share them). Play! (PS2), which romi only loads when `romi run
+/// --core` is given it, gave up setting up what it draws with when it failed, and crashed on its
+/// first frame. This loads GL's functions only, with the core's own GLEW, which it loaded as its
+/// own and romi finds among what's loaded.
 #[unsafe(no_mangle)]
 pub extern "C" fn glewInit() -> u32 {
     /// GLEW's `GLEW_ERROR_NO_GL_VERSION`, for when there's no GLEW to load them with.

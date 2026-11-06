@@ -332,17 +332,19 @@ and as more systems play in romi, this is where their controls end up.
      Ball 2's sky and ground, Melee's and Kirby's menus) went where it was never shown. romi now
      puts back the bindings and pack settings it changes. RetroArch gives such a core a context
      of its own.
-3. **PS2**, through LRPS2 (PCSX2's core, which Arch doesn't package) or else RetroArch's Play!
-   core (`libretro-play`). NeoGeo Battle Coliseum and Guilty Gear XX Accent Core play headless, to
+3. **PS2**, through LRPS2 (PCSX2's core, which Arch doesn't package); RetroArch's Play! core
+   (`libretro-play`) too, until 2026-11-06 (see "Play! dropped" below). NeoGeo Battle Coliseum and Guilty Gear XX Accent Core play headless, to
    their intro and menus, at 3–5× full speed, with sound.
    - **GLEW without GLX**: Play! loads GL's functions with GLEW, whose `glewInit` loads them, then
      GLX's, and fails with no GLX display, as there isn't with romi's EGL context. Play! gave up
      setting up its drawing and crashed on the first frame, calling a function it never loaded.
      romi exports a `glewInit` of its own, which cores find before GLEW's: it calls the core's
      GLEW's `glewContextInit`, GL's part only. (glvnd's GL functions work with EGL as with GLX.)
-     RetroArch on X11 makes GLX contexts, so it never meets this; on Wayland it may.
-   - **Found as an emulator**: ES-DE doesn't list Play!'s core for PS2, so romi adds it after
-     the system's own (`init::MORE_CORES`), and PS2 games that run in PCSX2 play in romi with it.
+     RetroArch on X11 makes GLX contexts, so it never meets this; on Wayland it may. Kept after
+     Play! was dropped, for `romi run --core` and any other core that uses GLEW.
+   - **Found as an emulator**: ES-DE doesn't list Play!'s core for PS2, so romi added it after
+     the system's own (`init::MORE_CORES`), and PS2 games that run in PCSX2 played in romi with it.
+     No longer, since it was dropped.
    - **Sharp 3D**: `play_res_multi` is fitted like the others, at 448 lines a step: 2× is
      1280×896, 4.5× full speed headless.
    - **A game that stops responding**: NeoGeo Battle Coliseum hangs in Play! after Start at the
@@ -355,7 +357,8 @@ and as more systems play in romi, this is where their controls end up.
      frames: Guilty Gear XX Accent Core lost a fifth (49.8 s of sound in 60 s of frames), and in
      romi, which times frames by their sound, played fast with its sound cut. romi exports
      replacements for `Write` and `ProcessBuffer`, as for `glewInit`, that queue every block:
-     60.1 s. Once Arch's `libretro-play` has a fix, the replacements can go.
+     60.1 s. The replacements went when Play! was dropped; upstream's fix is
+     [jpd002/Play- #1626](https://github.com/jpd002/Play-/pull/1626).
    - **Frames timed by the average sound**: even with every block kept, Play!'s sound comes in
      lumps, 0 to 3 blocks (22 ms each) a frame. Each frame took as long as its own sound, and one
      with none took no time and wasn't shown: Guilty Gear showed 30 frames a second, ±13.7 ms, the
@@ -407,6 +410,13 @@ and as more systems play in romi, this is where their controls end up.
      bytes, the size of rcheevos' PS2 table, so the flat fallback lines up; Sly Cooper unlocked live.
      PS2 discs are hashed by rcheevos (`rc_hash_generate`; `.iso`/`.cue`), and an unknown dump's
      notice gives its hash.
+   - **Play! dropped (2026-11-06)**: romi no longer plays games with `play_libretro.so`
+     (`emulators::NOT_IN_ROMI`), or lists it in `MORE_CORES`; without LRPS2, A starts PCSX2.
+     `romi run --core` still loads it. Its sound replacements went with it. Building Play! at
+     505dac731 with #1626 applied and running it without them: Guilty Gear XX Accent Core gave
+     60.1 s of sound in 60 s of frames on three runs, against 50.6–50.9 s with Arch's core and
+     51.9–53.5 s with the same commit built without the PR. NeoGeo Battle Coliseum hung in all
+     three runs tried with Arch's core, a few seconds into the 2400 frames (Start every second).
    - GameCube and Wii achievements: games are hashed from `.rvz` and the rest with the `nod` crate
      (rcheevos reads only plain ISOs), and RetroAchievements knows them.
    - Memory when games are played one after another in one romi (measured by loading and dropping a

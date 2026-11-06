@@ -236,9 +236,16 @@ pub(super) fn run_core(cfg: &Config, query: &str, system: Option<&str>, core: Op
             };
             // Its own core even when it isn't there, if there's no other, to say so.
             let own = crate::emu::libretro::core_in(&argv);
-            match own.clone().filter(|c| c.is_file()).or(other_core).or(own) {
+            let plays = |c: &PathBuf| crate::emulators::plays_in_romi(c);
+            match own.clone().filter(|c| c.is_file() && plays(c)).or(other_core).or(own.clone().filter(plays)) {
                 Some(c) => c,
-                None => return fail(exit::USAGE, format!("{name} doesn't run through a libretro core; pass --core")),
+                None => {
+                    let why = match own {
+                        Some(own) => format!("its core, {}, doesn't play games in romi", config::tilde(&own)),
+                        None => "it doesn't run through a libretro core".to_string(),
+                    };
+                    return fail(exit::USAGE, format!("{name}: {why}; pass --core to use one anyway"));
+                }
             }
         }
     };

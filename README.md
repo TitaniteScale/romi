@@ -72,9 +72,9 @@ While you play:
 instead; Options → A plays turns that round. There's no rewind yet. More in
 [Play in romi](docs/tui.md#play-in-romi) and [achievements](docs/achievements.md).
 
-**PS2** runs on LRPS2, PCSX2's libretro core, which [takes a little setup](docs/ps2.md). romi falls back
-to Play! (`libretro-play`) if that's all you have, but Play! runs far fewer games and isn't
-recommended. PCSX2 is still there for anything else, in its own window.
+**PS2** runs on LRPS2, PCSX2's libretro core, which [takes a little setup](docs/ps2.md). Without it,
+PS2 games open in PCSX2, in its own window, as they do for anything LRPS2 can't run. romi doesn't play
+games with Play! (`libretro-play`).
 
 ## Everything else
 
@@ -202,7 +202,7 @@ sorting, filters, tags, hiding games and picking another emulator.
 - [Config](docs/config.md): systems, commands, launch modes, overrides, hooks, BIOS checks,
   multi-disc games. [`default-config.jsonc`](default-config.jsonc) lists every option.
 - [Achievements](docs/achievements.md): RetroAchievements and Steam
-- [PS2 in romi](docs/ps2.md): LRPS2, Play! and PCSX2, setting it up, speed, saves, and which games work
+- [PS2 in romi](docs/ps2.md): LRPS2 and PCSX2, setting it up, speed, saves, and which games work
 - [Game info and box art](docs/game-info.md): where descriptions, genres and covers come from
 - [Couch mode](docs/couch.md): for a PC plugged into a TV, open romi full screen from the
   controller's Guide button

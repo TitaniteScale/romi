@@ -88,9 +88,8 @@ A (or Enter) plays a game in romi when it runs through a libretro core, or could
 runs in another emulator, like a DS game in standalone melonDS, plays in romi through
 the first of its other emulators that has a core installed. RetroArch itself doesn't need to be
 there: romi loads the core on its own. For PS2 games, which
-usually run in PCSX2, that's the LRPS2 core where it's installed ([PS2 in romi](ps2.md) says how), or
-else its Play! core (`libretro-play`), which romi adds to the emulators ES-DE knows, as ES-DE
-doesn't list it. Its emulator, if that's installed, is still in its menu (`o`), as
+usually run in PCSX2, that's the LRPS2 core where it's installed ([PS2 in romi](ps2.md) says how);
+without it, A starts PCSX2. Its emulator, if that's installed, is still in its menu (`o`), as
 **Play with** and the emulator's name. `"play_in_romi": false` (or Options → A plays) turns that
 round: A starts the emulator, and **Play in romi** is in the menu. It plays the game
 in the middle panel, with the systems and details still around it, drawn behind Kitty Unicode
@@ -118,7 +117,7 @@ PulseAudio (or PipeWire's stand-in for it), or ALSA without either; `"volume"` i
 how loud, from 0 to 100.
 
 Cores that draw with the GPU work too: Flycast (Dreamcast, Naomi), Mupen64Plus-Next (N64), Beetle
-PSX HW, Dolphin (GameCube), and LRPS2 and Play! (PS2) draw with OpenGL, through EGL with no window, on the GPU your screen is plugged into
+PSX HW, Dolphin (GameCube), and LRPS2 (PS2) draw with OpenGL, through EGL with no window, on the GPU your screen is plugged into
 (on a laptop with two, the other one stays asleep), and romi reads each frame back. Vulkan isn't
 there yet, so a core set to draw only with Vulkan won't start. Dolphin's core needs Dolphin's
 `Sys` folder in RetroArch's system folder, as `dolphin-emu/Sys`; with standalone Dolphin installed,
@@ -208,7 +207,7 @@ shows the whole picture, edges and all.
 Games that draw with the GPU (N64, Dreamcast, PlayStation, GameCube, PS2) draw about as big as
 they're shown, rather than at the console's 640×480 scaled up, so 3D looks sharp: romi picks the
 core's resolution option (Flycast's internal resolution, Mupen64Plus's screen size, Beetle PSX HW's
-and Dolphin's internal resolution, LRPS2's upscale multiplier, Play!'s resolution multiplier) closest to the panel's height, at least as tall, up to 1056 lines
+and Dolphin's internal resolution, LRPS2's upscale multiplier) closest to the panel's height, at least as tall, up to 1056 lines
 (bigger costs more time than a frame has, as each is read back from the GPU). RetroArch's own setting for
 it is left as it is. `"sharp_3d": false` (or Options → Sharp 3D) draws at RetroArch's setting.
 

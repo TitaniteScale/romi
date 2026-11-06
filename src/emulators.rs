@@ -6,7 +6,7 @@ use crate::init::Catalog;
 use crate::launch::Launch;
 use crate::library::{Game, Library};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The other emulators for each system, looked up once per system since finding the installed
 /// ones means reading ES-DE's definitions and looking for programs.
@@ -61,13 +61,25 @@ impl Emulators {
     }
 }
 
+/// libretro cores romi doesn't play games with, by file name: their games open in their emulator
+/// instead. Play! (PS2) lost sound between frames (its libretro side kept only the last block its
+/// emulator made; jpd002/Play- PR #1626 fixes that), and hung for good in a frame after Start in
+/// NeoGeo Battle Coliseum; LRPS2 plays PS2 games in romi.
+const NOT_IN_ROMI: &[&str] = &["play_libretro.so"];
+
+/// Whether romi plays games with this core, when it's chosen for them. `romi run --core` uses
+/// whichever core it's given.
+pub fn plays_in_romi(core: &Path) -> bool {
+    core.file_name().is_none_or(|name| !NOT_IN_ROMI.iter().any(|n| name == *n))
+}
+
 /// The libretro core a game plays in romi with: the one its own command runs, or else the first
 /// installed one among the other ways it can run (`options`), so a DS game that runs in
 /// standalone melonDS still plays in romi through RetroArch's melonDS core.
 pub fn core(game: &Game, options: &[Emulator]) -> Option<PathBuf> {
     let core = |command: &str| {
         let argv = Launch { command: command.to_string(), ..game.launch.clone() }.prepare().ok()?.argv;
-        crate::emu::libretro::core_in(&argv).filter(|core| core.is_file())
+        crate::emu::libretro::core_in(&argv).filter(|core| core.is_file() && plays_in_romi(core))
     };
     core(&game.launch.command).or_else(|| options.iter().find_map(|e| core(&e.command)))
 }
@@ -93,5 +105,18 @@ pub fn runs_label(command: &str) -> String {
     match words.find_map(|w| w.rsplit('/').next()?.strip_suffix("_libretro.so")) {
         Some(core) => format!("{program} · {core}"),
         None => program.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn play_doesnt_play_in_romi() {
+        assert!(!plays_in_romi(Path::new("/usr/lib/libretro/play_libretro.so")));
+        assert!(plays_in_romi(Path::new("/usr/lib/libretro/pcsx2_libretro.so")));
+        // By name only: a core whose name ends the same is another core.
+        assert!(plays_in_romi(Path::new("/usr/lib/libretro/replay_libretro.so")));
     }
 }

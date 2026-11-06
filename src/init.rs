@@ -108,14 +108,14 @@ pub struct Catalog {
 }
 
 /// libretro cores that play a system's games in romi but that its list may not have, as (system,
-/// label, core): for PS2, LRPS2, which runs more games and faster, where it's installed (Arch doesn't
-/// package it; ES-DE lists it, the built-in list doesn't), then Play!, which Arch packages and ES-DE
-/// doesn't list; and the cores of the systems the built-in list starts in a standalone emulator.
+/// label, core): for PS2, LRPS2 (Arch doesn't package it; ES-DE lists it, the built-in list
+/// doesn't), and not Play!, which doesn't play in romi (see `emulators::plays_in_romi`) and crashes
+/// in RetroArch on Wayland; and the cores of the systems the built-in list starts in a standalone
+/// emulator.
 /// Listed after the system's own, so they're offered in a game's menu, and used to play it in romi
 /// when its own emulator isn't RetroArch, without coming first.
 const MORE_CORES: &[(&str, &str, &str)] = &[
     ("ps2", "LRPS2", "pcsx2_libretro.so"),
-    ("ps2", "Play!", "play_libretro.so"),
     ("nds", "melonDS", "melonds_libretro.so"),
     ("gc", "Dolphin", "dolphin_libretro.so"),
     ("wii", "Dolphin", "dolphin_libretro.so"),
@@ -1265,20 +1265,18 @@ mod tests {
         c.add_more_cores();
         let lrps2 =
             ("LRPS2".to_string(), "%EMULATOR_RETROARCH% -L %CORE_RETROARCH%/pcsx2_libretro.so %ROM%".to_string());
-        let play = ("Play!".to_string(), "%EMULATOR_RETROARCH% -L %CORE_RETROARCH%/play_libretro.so %ROM%".to_string());
-        assert_eq!(c.systems[0].commands, [pcsx2.clone(), lrps2.clone(), play.clone()], "once each, LRPS2 first");
-        // Already listed (LRPS2 is, by ES-DE), it isn't again, and keeps its place before Play!.
+        // Once, however often it's done; Play! isn't added (it doesn't play in romi).
+        assert_eq!(c.systems[0].commands, [pcsx2.clone(), lrps2.clone()]);
+        // Already listed (LRPS2 is, by ES-DE), it isn't again.
         let mut listed =
             Catalog { systems: vec![ps2(vec![lrps2.clone(), pcsx2.clone()])], rules: FindRules::default(), esde: true };
         listed.add_more_cores();
-        assert_eq!(listed.systems[0].commands, [lrps2, pcsx2, play]);
+        assert_eq!(listed.systems[0].commands, [lrps2, pcsx2]);
         let builtin = Catalog::builtin();
         let ps2 = builtin.systems.iter().find(|s| s.id == "ps2").unwrap();
         let commands: Vec<_> = ps2.commands.iter().map(|(_, c)| c.as_str()).collect();
-        assert_eq!(
-            commands[commands.len() - 2..],
-            ["retroarch -L {cores}/pcsx2_libretro.so {rom}", "retroarch -L {cores}/play_libretro.so {rom}"]
-        );
+        assert_eq!(commands.last(), Some(&"retroarch -L {cores}/pcsx2_libretro.so {rom}"));
+        assert!(!commands.iter().any(|c| c.contains("play_libretro")), "{commands:?}");
     }
 
     fn touch(root: &Path, files: &[&str]) {
