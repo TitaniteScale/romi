@@ -262,6 +262,7 @@ impl Shared {
 
     /// Makes `frame`, just taken from somewhere other than a core, the newest, and notes when for
     /// the frame log.
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
     pub fn put_taken_frame(&self, frame: Frame) {
         self.put_frame(frame);
         if let Some(made) = &self.made {
@@ -272,11 +273,13 @@ impl Shared {
     }
 
     /// Whether the game's been asked to stop.
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
     pub fn stopping(&self) -> bool {
         self.quit.load(Ordering::Relaxed)
     }
 
     /// Says the game has ended by itself, and why, for the screen to stop showing it.
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
     pub fn end(&self, why: String) {
         *lock(&self.ended) = Some(why);
     }

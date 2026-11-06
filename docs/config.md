@@ -67,7 +67,8 @@ argument, so paths with spaces need no extra quoting. Need pipes or `&&`? Use `s
   1280×720, and romi shows the frames gamescope streams over PipeWire. The game reads the
   controller and plays its sound itself, so there are no save states or achievements. Where games
   can't show in romi (with `play_in_romi` off, or in another terminal), it gets a window as with
-  `wait`.
+  `wait`. So does every such game in the Edge and Release downloads, which are built without it
+  (their Ubuntu 22.04's PipeWire is too old for it); the Arch package and `cargo install` have it.
 
 ## Other emulators
 

@@ -19,6 +19,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
+      # As the Edge and Release downloads are built.
+      - run: cargo clippy --all-targets --no-default-features -- -D warnings
       - run: cargo test
       - uses: actions/setup-python@v7
         with:

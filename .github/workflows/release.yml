@@ -32,10 +32,12 @@ jobs:
             exit 1
           fi
       - name: Install system libraries
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev libpipewire-0.3-dev
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libasound2-dev
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal && rustup default stable
-      - run: cargo build --release --locked
+      # Without the gamescope mode: 22.04's PipeWire is too old for the pipewire crate, and the
+      # binary then doesn't need libpipewire to start (see Cargo.toml).
+      - run: cargo build --release --locked --no-default-features
       - name: Package
         run: |
           name="romi-$GITHUB_REF_NAME-${{ matrix.arch }}-linux"

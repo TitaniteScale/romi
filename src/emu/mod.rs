@@ -3,7 +3,7 @@
 //! TUI's middle panel, both over the Kitty graphics protocol.
 
 pub mod audio;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "gamescope"))]
 pub mod capture;
 pub mod cheevos;
 pub mod controls;

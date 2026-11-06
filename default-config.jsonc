@@ -12,7 +12,8 @@
 //   "detach"   start it and carry on (anything that returns immediately, like Steam)
 //   "gamescope" (experimental) play it in romi's middle panel: it runs in gamescope with no
 //              window, and romi shows what it draws. It reads the controller and plays its sound
-//              itself. Needs gamescope; where games can't show in romi, it's "wait".
+//              itself. Needs gamescope; where games can't show in romi, it's "wait", as it
+//              is in the Edge and Release downloads, built without it.
 {
   "roms_dir": "~/ROMs",
 

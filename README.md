@@ -130,15 +130,18 @@ cd romi/packaging/arch
 makepkg -si
 ```
 
-**With Cargo,** with Rust 1.90 or newer, and a C compiler and the headers for udev and ALSA. Distros'
-Rust can be too old, as Ubuntu 24.04's is, which fails with `feature edition2024 is required`:
-[rustup](https://rustup.rs) gets a current one.
+**With Cargo,** with Rust 1.90 or newer, a C compiler and clang, and the headers for udev, ALSA and
+PipeWire. Distros' Rust can be too old, as Ubuntu 24.04's is, which fails with `feature edition2024
+is required`: [rustup](https://rustup.rs) gets a current one.
 
 ```
-sudo apt install build-essential pkg-config libudev-dev libasound2-dev        # Debian, Ubuntu
-sudo dnf install gcc pkgconf-pkg-config systemd-devel alsa-lib-devel          # Fedora
+sudo apt install build-essential clang pkg-config libudev-dev libasound2-dev libpipewire-0.3-dev   # Debian, Ubuntu
+sudo dnf install gcc clang pkgconf-pkg-config systemd-devel alsa-lib-devel pipewire-devel          # Fedora
 cargo install --locked romi
 ```
+
+PipeWire is only for the `gamescope` launch mode. Where its headers are too old (Ubuntu 22.04's) or
+missing, `cargo install --locked --no-default-features romi` builds without that mode.
 
 For the newest code on `main`: `cargo install --locked --git https://github.com/TitaniteScale/romi`.
 

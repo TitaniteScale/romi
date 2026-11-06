@@ -130,7 +130,7 @@ pub struct Start {
 pub enum Source {
     Core(Box<Core>),
     /// The game's command, and the file its output goes to.
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
     Captured(crate::launch::Prepared, std::path::PathBuf),
 }
 
@@ -194,7 +194,7 @@ impl Embedded {
                 let shape = if paused { core.display_size() } else { (0.0, 0.0) };
                 (core.name.clone(), false, shape, Shared::start(*core, volume, paused, cheevos, Some(states.clone()))?)
             }
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "gamescope"))]
             Source::Captured(program, log) => {
                 use crate::emu::capture;
                 let shared = Shared::new(volume, paused);

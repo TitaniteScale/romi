@@ -30,7 +30,7 @@ impl App {
     /// Plays a game as A does: inside romi when it can, or else in its emulator.
     pub(super) fn play(&mut self, g: usize) {
         if self.cfg.play_in_romi {
-            #[cfg(target_os = "linux")]
+            #[cfg(all(target_os = "linux", feature = "gamescope"))]
             if self.lib.games[g].launch.mode == LaunchMode::Gamescope && self.a_plays_here() {
                 return self.play_captured(g);
             }
@@ -113,7 +113,7 @@ impl App {
     }
 
     /// Plays a game whose command runs in gamescope in the middle panel, showing what it draws.
-    #[cfg(target_os = "linux")]
+    #[cfg(all(target_os = "linux", feature = "gamescope"))]
     fn play_captured(&mut self, g: usize) {
         use crate::emu::embedded::{Appearance, Embedded, Source, Start};
         let game = &self.lib.games[g];

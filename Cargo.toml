@@ -39,7 +39,15 @@ ureq = "3.5.0"
 
 # Reading the frames of games that play in gamescope (see `emu::capture`).
 [target.'cfg(target_os = "linux")'.dependencies]
-pipewire = "0.10"
+pipewire = { version = "0.10", optional = true }
+
+[features]
+default = ["gamescope"]
+# Shows games whose mode is "gamescope" in the panel (Linux only). It needs PipeWire's headers to
+# build, newer than Ubuntu 22.04's 0.3.48 (1.0 works), and libpipewire to run. The Edge and Release
+# downloads go without it: they build on Ubuntu 22.04, for an older glibc. Without it, those games
+# start in a window, as "wait" does.
+gamescope = ["dep:pipewire"]
 
 # Run the importer's tests with the rest.
 [[example]]
