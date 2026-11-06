@@ -9,7 +9,8 @@
 Play your games in your terminal. romi is a libretro frontend and game library: it runs emulator
 cores itself and draws the game right inside its own interface, with sound, saves and
 RetroAchievements, from the Game Boy to the PS2. Everything else you play (standalone emulators,
-native ports, scripts, Steam) starts from the same list, with a keyboard or a controller.
+native ports, scripts, Steam) starts from the same list, with a keyboard or a controller, and the
+ones you play with a controller, Steam games included, can play inside romi too.
 
 <img width="720" height="450" alt="Picking Crazy Taxi from the Dreamcast covers in romi: a wireframe arcade cabinet builds itself, and the game plays in the middle of the launcher" src="https://github.com/user-attachments/assets/226ba686-b2f8-4c54-805b-b708a5a86dc3" />
 
@@ -75,6 +76,15 @@ instead; Options → A plays turns that round. There's no rewind yet. More in
 **PS2** runs on LRPS2, PCSX2's libretro core, which [takes a little setup](docs/ps2.md). Without it,
 PS2 games open in PCSX2, in its own window, as they do for anything LRPS2 can't run. romi doesn't play
 games with Play! (`libretro-play`).
+
+**Games without a core** can play in romi too, if you play them with a controller: Steam games
+(native or through Proton), and standalone emulators like Xenia Canary for the Xbox 360. romi runs
+them in [gamescope](https://github.com/ValveSoftware/gamescope) with no window and shows what they
+draw, at 1280×720, with the launch animation and screen filters. The game reads the controller and
+plays its sound itself, so there are no save states, and a game that needs a mouse or keyboard is
+best left in its own window. For Steam, set `"steam": { "mode": "gamescope" }` and romi sets up
+each game's launch options itself, and starts Steam with no window. It's experimental, Linux only,
+and not in the Edge and Release downloads. See [launch modes](docs/config.md#commands).
 
 ## Everything else
 
